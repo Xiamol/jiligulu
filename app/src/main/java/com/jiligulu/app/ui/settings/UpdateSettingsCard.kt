@@ -26,6 +26,7 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.jiligulu.app.JiliguluApp
+import com.jiligulu.app.data.prefs.UserPrefs
 import com.jiligulu.app.ui.components.LedgerCard
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
@@ -44,7 +45,7 @@ fun UpdateSettingsCard() {
     var saving by remember { mutableStateOf(false) }
     LedgerCard {
         Text("应用更新", style = MaterialTheme.typography.titleMedium)
-        Text(if (repository.isBlank()) "还没设置更新源。以后填入专用发布仓库，就能检查新版本。"
+        Text(if (repository.isBlank()) "更新检查已停用。填入发布仓库就能重新检查新版本。"
             else "更新源：$repository", style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -83,10 +84,12 @@ fun UpdateSettingsCard() {
         title = { Text("GitHub 发布仓库") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("填写专用的公开发布仓库即可，无需登录密码或访问令牌。", style = MaterialTheme.typography.bodyMedium)
+                Text("应用已内置默认更新源，通常无需修改。填写自己的公开发布仓库即可，无需密码或访问令牌。",
+                    style = MaterialTheme.typography.bodyMedium)
                 OutlinedTextField(value = input, onValueChange = { input = it }, enabled = !saving,
-                    singleLine = true, label = { Text("账号/仓库") }, placeholder = { Text("owner/jiligulu-releases") })
-                Text("清空可以停用此更新源。", style = MaterialTheme.typography.labelMedium)
+                    singleLine = true, label = { Text("账号/仓库") },
+                    placeholder = { Text(UserPrefs.DEFAULT_UPDATE_REPOSITORY) })
+                Text("清空可停用更新检查。", style = MaterialTheme.typography.labelMedium)
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             }
         },
