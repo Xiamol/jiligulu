@@ -1,9 +1,28 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
+}
+
+// 内置 API Key 从 local.properties 读取（该文件已被 .gitignore 排除，不会进仓库）。
+// 也可用环境变量 DEEPSEEK_API_KEY 覆盖，方便 CI。两者都缺省时注入空串。
+val deepSeekApiKey: String = run {
+    val fromEnv = System.getenv("DEEPSEEK_API_KEY").orEmpty()
+    val raw = if (fromEnv.isNotBlank()) fromEnv else {
+        val propsFile = rootProject.file("local.properties")
+        if (propsFile.exists()) {
+            Properties().apply { propsFile.inputStream().use { load(it) } }
+                .getProperty("DEEPSEEK_API_KEY").orEmpty()
+        } else ""
+    }
+    raw.trim()
+        .replace("\\", "\\\\")
+        .replace("\"", "\\\"")
+        .replace("\n", "").replace("\r", "")
 }
 
 android {
@@ -16,6 +35,9 @@ android {
         targetSdk = 35
         versionCode = 4
         versionName = "0.5.1"
+
+        // 注入到 BuildConfig.DEEPSEEK_API_KEY，由 AiConfig.DEFAULT_API_KEY 读取
+        buildConfigField("String", "DEEPSEEK_API_KEY", "\"$deepSeekApiKey\"")
     }
 
     buildTypes {

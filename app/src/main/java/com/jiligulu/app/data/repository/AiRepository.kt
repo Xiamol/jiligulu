@@ -46,8 +46,16 @@ class AiRepository(
         context.assets.open(AiConfig.PROMPT_ASSET_PATH).bufferedReader().use { it.readText() }
     }
 
-    suspend fun effectiveApiKey(): String =
-        userPrefs.apiKeyOverride.first().ifBlank { AiConfig.DEFAULT_API_KEY }
+    /**
+     * 设置页自定义的 Key 优先；没填则回落到构建期注入的内置 Key。
+     * 两者都为空说明这个包没有内置 Key（比如源码自行构建时未在 local.properties 配置），
+     * 此时抛出明确提示而不是拿空 Bearer 去撞 401。
+     */
+    suspend fun effectiveApiKey(): String {
+        val key = userPrefs.apiKeyOverride.first().ifBlank { AiConfig.DEFAULT_API_KEY }
+        require(key.isNotBlank()) { "还没有配置 API Key，请到「我的 → AI 服务」里填写" }
+        return key
+    }
 
     suspend fun nicknameWithSuffix(): String {
         val nick = userPrefs.nickname.first()
