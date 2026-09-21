@@ -36,6 +36,14 @@ class AppContainer(app: Application) {
         BudgetRepository(database.budgetDao(), database.billDao())
     }
 
+    /**
+     * 本进程是否已完成过一次完整启动（数据预载 + 入场动画）。
+     * Activity 重建（旋转/切窗口/内存回收）不重置，进程死亡才重置。
+     * 避免「切窗口再返回」时重复播放启动动画。
+     */
+    @Volatile
+    var startupCompleted: Boolean = false
+
     suspend fun preloadLedger() = coroutineScope {
         awaitAll(
             async { billRepository.observeCurrentMonth().first() },

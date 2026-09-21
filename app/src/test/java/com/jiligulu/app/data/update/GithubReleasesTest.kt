@@ -34,5 +34,16 @@ class GithubReleasesTest {
         ).forEach { raw -> assertTrue(runCatching { GithubReleases.parseRelease("owner/ledger", raw) }.isFailure) }
     }
 
+    @Test fun `markdown release notes are rendered as clean plain text`() {
+        val body = "# 0.5.2\n\n- **内置默认更新源**：装好即可检查更新。\n- 修复 [切窗口动画](#) 问题\n\n## 安装说明\n\n1. 覆盖安装\n2. 数据保留\n"
+        val payload = """{"tag_name":"v0.5.2","draft":false,"prerelease":false,"body":"${body.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")}","assets":[{"name":"app.apk","browser_download_url":"https://github.com/owner/ledger/releases/download/v0.5.2/app.apk"}]}"""
+        val info = GithubReleases.parseRelease("owner/ledger", payload)
+        assertFalse(info.notes.contains("**"))
+        assertFalse(info.notes.contains("#"))
+        assertFalse(info.notes.contains("- "))
+        assertTrue(info.notes.contains("内置默认更新源"))
+        assertTrue(info.notes.contains("· "))
+    }
+
     private fun payload(url: String) = """{"tag_name":"v0.5.2","draft":false,"prerelease":false,"body":"<script>plain release notes</script>","assets":[{"name":"app.apk","browser_download_url":"$url"}]}"""
 }

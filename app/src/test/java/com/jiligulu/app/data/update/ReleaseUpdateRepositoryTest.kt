@@ -31,11 +31,30 @@ class ReleaseUpdateRepositoryTest {
         repo.configure("owner/ledger")
         repo.check(automatic = true)
         assertEquals(latest, repo.state.value.available?.version)
+        // 发现新版本时不写检查时间，后续自动检查不会被节流，
+        // 保证「下载失败退出后重开仍能收到提示」。
         repo.check(automatic = true)
-        assertEquals(1, calls)
-        repo.check()
         assertEquals(2, calls)
+        assertEquals(0, prefs.updateCheckedAt.first())
+    }
+
+    @Test fun `up-to-date check records timestamp and throttles subsequent automatic checks`() = runBlocking {
+        val prefs = UserPrefs(RuntimeEnvironment.getApplication())
+        prefs.setAutoCheckUpdates(true)
+        var calls = 0
+        val current = requireNotNull(ReleaseVersion.parse(BuildConfig.VERSION_NAME))
+        val repo = ReleaseUpdateRepository(prefs) {
+            calls++
+            """{"tag_name":"v$current","assets":[{"name":"jiligulu.apk","browser_download_url":"https://github.com/owner/ledger/releases/download/v$current/jiligulu.apk"}]}"""
+        }
+        repo.configure("owner/ledger")
+        repo.check(automatic = true)
+        assertEquals(null, repo.state.value.available)
         assertTrue(prefs.updateCheckedAt.first() > 0)
+        repo.check(automatic = true)
+        assertEquals(1, calls) // 已是最新时写时间，6 小时内自动检查被节流
+        repo.check()
+        assertEquals(2, calls) // 手动检查不受节流影响
     }
 
     @Test fun `failed check is shown as failure rather than latest and disabling auto keeps manual check usable`() = runBlocking {
