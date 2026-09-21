@@ -70,8 +70,43 @@ object GithubReleases {
                 uri.path.startsWith("/$repository/releases/download/", ignoreCase = true) }
         }.firstOrNull() ?: throw IllegalArgumentException("该版本还没有可下载的 APK")
         return ReleaseInfo(tag.removePrefix("v").removePrefix("V"),
-            root["body"]?.jsonPrimitive?.contentOrNull.orEmpty().take(2500), download,
+            stripMarkdown(root["body"]?.jsonPrimitive?.contentOrNull.orEmpty()).take(2500), download,
             "https://github.com/$repository/releases/latest")
+    }
+
+    /**
+     * GitHub Release 正文是 Markdown，直接显示会满屏 ** 和 #。
+     * 转成干净的纯文本：去加粗/斜体/标题标记、把列表折成行、压掉多余空行。
+     */
+    private fun stripMarkdown(source: String): String {
+        val cleaned = source
+            .replace(Regex("\\r\\n?"), "\n")
+            // 链接 [文字](url) → 文字
+            .replace(Regex("\\[([^\\]]+)]\\([^)]*\\)"), "$1")
+            // 图片 ![alt](url) → alt
+            .replace(Regex("!\\[([^\\]]*)]\\([^)]*\\)"), "$1")
+            // 标题 # ## ### → 去掉井号
+            .replace(Regex("(?m)^\\s{0,3}#{1,6}\\s+"), "")
+            // 加粗 **x** / __x__ → x
+            .replace(Regex("\\*\\*(.+?)\\*\\*"), "$1")
+            .replace(Regex("__(.+?)__"), "$1")
+            // 斜体 *x* / _x_ → x
+            .replace(Regex("(?<!\\*)\\*([^*\\n]+)\\*(?!\\*)"), "$1")
+            .replace(Regex("(?<!_)_([^_\\n]+)_(?!_)"), "$1")
+            // 删除线 ~~x~~ → x
+            .replace(Regex("~~(.+?)~~"), "$1")
+            // 行内代码 `x` → x
+            .replace(Regex("`([^`]+)`"), "$1")
+        return cleaned.lineSequence()
+            .map { line ->
+                val t = line.trimEnd()
+                // 列表 - / * / + / 1. 统一换成「· 」
+                t.replace(Regex("^\\s*(?:[-*+]|\\d+[.)])\\s+"), "· ").trim()
+            }
+            .filter { it.isNotEmpty() }
+            .joinToString("\n")
+            .replace(Regex("\\n{3,}"), "\n\n")
+            .trim()
     }
 }
 
@@ -108,8 +143,11 @@ class ReleaseUpdateRepository(
                 val release = GithubReleases.parseRelease(repository, fetch(repository))
                 val current = requireNotNull(ReleaseVersion.parse(BuildConfig.VERSION_NAME))
                 val remote = requireNotNull(ReleaseVersion.parse(release.version))
-                _state.value = UpdateState(checked = true, available = release.takeIf { remote > current })
-                prefs.setUpdateCheckedAt(now)
+                val available = release.takeIf { remote > current }
+                _state.value = UpdateState(checked = true, available = available)
+                // 只有「已是最新」才记检查时间。发现新版本则不记，让用户重启后还能再收到提示，
+                // 避免「点下载 → 下载失败退出 → 6 小时内重开不再提示」的情况。
+                if (available == null) prefs.setUpdateCheckedAt(now)
             } catch (cancelled: CancellationException) {
                 _state.value = _state.value.copy(checking = false)
                 throw cancelled

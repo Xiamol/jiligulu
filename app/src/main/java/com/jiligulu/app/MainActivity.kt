@@ -98,14 +98,21 @@ private fun JiliguluRoot(waterRequest: Int) {
     })
     val state by startup.state.collectAsStateWithLifecycle()
     val lifecycleOwner = LocalLifecycleOwner.current
-    var mainReady by remember { mutableStateOf(false) }
+    val startupCompleted = app.container.startupCompleted
+    var mainReady by remember { mutableStateOf(startupCompleted) }
     LaunchedEffect(lifecycleOwner, startup) {
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            // 进程内已完成过一次完整启动就直接进主界面，不再播放入场动画
+            // （切窗口/旋转/内存回收导致的 Activity 重建不应触发预载动画）。
+            if (app.container.startupCompleted) {
+                mainReady = true
+                return@repeatOnLifecycle
+            }
             val entry = startup.enter()
             try { awaitCancellation() } finally { startup.pause(entry) }
         }
     }
-    val showSplash = !state.ready || (state.nickname?.isNotBlank() == true && !mainReady)
+    val showSplash = !startupCompleted && (!state.ready || (state.nickname?.isNotBlank() == true && !mainReady))
     LaunchedEffect(state.ready) {
         if (state.ready && state.nickname?.isNotBlank() == true) app.container.updates.check(automatic = true)
     }

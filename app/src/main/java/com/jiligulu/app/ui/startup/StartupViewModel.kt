@@ -17,14 +17,18 @@ data class StartupState(val nickname: String? = null, val prepared: Boolean = fa
 
 class StartupViewModel(
     private val loadData: suspend () -> String,
-    private val elapsedTime: () -> Long = SystemClock::elapsedRealtime
+    private val elapsedTime: () -> Long = SystemClock::elapsedRealtime,
+    private val onStartupFinished: () -> Unit = {}
 ) : ViewModel() {
-    constructor(container: AppContainer) : this(loadData = {
-        val nickname = container.userPrefs.nickname.first()
-        container.preloadLedger()
-        container.userPrefs.pendingWater.first()
-        nickname
-    })
+    constructor(container: AppContainer) : this(
+        loadData = {
+            val nickname = container.userPrefs.nickname.first()
+            container.preloadLedger()
+            container.userPrefs.pendingWater.first()
+            nickname
+        },
+        onStartupFinished = { container.startupCompleted = true }
+    )
     private val _state = MutableStateFlow(StartupState())
     val state = _state.asStateFlow()
     private var load: Job? = null
@@ -46,6 +50,7 @@ class StartupViewModel(
                 _state.value = StartupState(nickname = nickname, prepared = true)
                 delay((650L - (elapsedTime() - started)).coerceAtLeast(0L))
                 _state.value = StartupState(nickname = nickname, prepared = true, ready = true)
+                onStartupFinished()
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
