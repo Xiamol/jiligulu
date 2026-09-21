@@ -9,7 +9,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -26,7 +25,6 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.jiligulu.app.JiliguluApp
-import com.jiligulu.app.data.prefs.UserPrefs
 import com.jiligulu.app.ui.components.LedgerCard
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
@@ -34,23 +32,16 @@ import kotlinx.coroutines.launch
 @Composable
 fun UpdateSettingsCard() {
     val app = LocalContext.current.applicationContext as JiliguluApp
-    val repository by app.container.userPrefs.updateRepository.collectAsStateWithLifecycle("")
     val automatic by app.container.userPrefs.autoCheckUpdates.collectAsStateWithLifecycle(true)
     val state by app.container.updates.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val uri = LocalUriHandler.current
-    var editing by rememberSaveable { mutableStateOf(false) }
-    var input by rememberSaveable { mutableStateOf("") }
-    var error by rememberSaveable { mutableStateOf<String?>(null) }
-    var saving by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
     LedgerCard {
         Text("应用更新", style = MaterialTheme.typography.titleMedium)
-        Text(if (repository.isBlank()) "更新检查已停用。填入发布仓库就能重新检查新版本。"
-            else "更新源：$repository", style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text("启动时自动检查", modifier = Modifier.padding(top = 14.dp))
-            Switch(checked = automatic, enabled = repository.isNotBlank(), onCheckedChange = { value ->
+            Switch(checked = automatic, onCheckedChange = { value ->
                 scope.launch {
                     try { app.container.userPrefs.setAutoCheckUpdates(value) }
                     catch (cancelled: CancellationException) { throw cancelled }
@@ -62,15 +53,14 @@ fun UpdateSettingsCard() {
             state.checking -> "正在看看有没有新版本…"
             state.error != null -> state.error.orEmpty()
             state.available != null -> "发现新版本 ${state.available!!.version}"
-            state.checked -> "当前版本无需更新"
+            state.checked -> "当前已是最新版本"
             else -> "自动检查最多每 6 小时一次，下载和安装由你确认。"
         }
         Text(status, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
         Row {
-            TextButton(onClick = { input = repository; error = null; editing = true }) { Text("设置更新源") }
             TextButton(onClick = { scope.launch { app.container.updates.check() } },
-                enabled = repository.isNotBlank() && !state.checking) { Text("检查更新") }
+                enabled = !state.checking) { Text("检查更新") }
         }
         state.available?.let { release ->
             TextButton(onClick = {
@@ -79,33 +69,6 @@ fun UpdateSettingsCard() {
             }) { Text("下载 ${release.version}") }
         }
     }
-    if (editing) AlertDialog(
-        onDismissRequest = { if (!saving) editing = false },
-        title = { Text("GitHub 发布仓库") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("应用已内置默认更新源，通常无需修改。填写自己的公开发布仓库即可，无需密码或访问令牌。",
-                    style = MaterialTheme.typography.bodyMedium)
-                OutlinedTextField(value = input, onValueChange = { input = it }, enabled = !saving,
-                    singleLine = true, label = { Text("账号/仓库") },
-                    placeholder = { Text(UserPrefs.DEFAULT_UPDATE_REPOSITORY) })
-                Text("清空可停用更新检查。", style = MaterialTheme.typography.labelMedium)
-                error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-            }
-        },
-        confirmButton = {
-            TextButton(enabled = !saving, onClick = {
-                saving = true
-                scope.launch {
-                    try { app.container.updates.configure(input); editing = false; error = null }
-                    catch (cancelled: CancellationException) { throw cancelled }
-                    catch (failure: Exception) { error = failure.message ?: "更新源未能保存。" }
-                    finally { saving = false }
-                }
-            }) { Text("保存") }
-        },
-        dismissButton = { TextButton(onClick = { editing = false }, enabled = !saving) { Text("取消") } }
-    )
 }
 
 @Composable

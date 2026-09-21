@@ -22,7 +22,7 @@ class KeyboardSound(context: Context) : AutoCloseable {
     }
     fun tap() {
         if (loaded.isEmpty() || audio?.ringerMode != AudioManager.RINGER_MODE_NORMAL) return
-        pool.play(loaded[index++ % loaded.size], 0.32f, 0.32f, 1, 0, 1f)
+        pool.play(loaded[index++ % loaded.size], 0.5f, 0.5f, 1, 0, 1f)
     }
     override fun close() { pool.release(); loaded.clear() }
 }

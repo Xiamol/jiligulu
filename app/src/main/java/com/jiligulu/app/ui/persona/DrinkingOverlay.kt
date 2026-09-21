@@ -29,8 +29,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
+import android.media.MediaPlayer
+import com.jiligulu.app.R
 import kotlinx.coroutines.delay
 
 /** Waiting → raise cup → sip → happy. Cancellation keeps the pending cup for next time. */
@@ -39,17 +42,31 @@ fun DrinkingOverlay(visible: Boolean, onFinished: () -> Unit, onCancel: () -> Un
     val finished by rememberUpdatedState(onFinished)
     var phase by remember { mutableStateOf(MascotMode.WAITING) }
     val tilt = remember { Animatable(0f) }
+    val context = LocalContext.current
     LaunchedEffect(visible) {
         if (!visible) return@LaunchedEffect
         phase = MascotMode.WAITING
         tilt.snapTo(0f)
         delay(350)
         phase = MascotMode.DRINKING
-        repeat(3) {
-            tilt.animateTo(-5f, tween(240))
-            tilt.animateTo(1f, tween(240))
+        // 喝水音效：进入举杯阶段时播放「咕噜咕噜」
+        val player = try {
+            MediaPlayer.create(context, R.raw.water_glug)?.apply {
+                setVolume(0.55f, 0.55f)
+                start()
+            }
+        } catch (_: Exception) { null }
+        try {
+            repeat(3) {
+                tilt.animateTo(-5f, tween(240))
+                tilt.animateTo(1f, tween(240))
+            }
+            tilt.animateTo(0f, tween(160))
+        } finally {
+            player?.let { p ->
+                try { if (p.isPlaying) p.stop(); p.release() } catch (_: Exception) {}
+            }
         }
-        tilt.animateTo(0f, tween(160))
         phase = MascotMode.IDLE
         delay(650)
         finished()
