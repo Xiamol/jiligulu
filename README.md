@@ -1,0 +1,57 @@
+# 叽里咕噜
+
+Android 本地记账应用，Kotlin + Jetpack Compose + Room。当前版本：`0.5.1`，奶油手账与糯云团桌宠。
+
+[下载安装包](https://github.com/Xiamol/jiligulu/releases/latest) · [本版变更、升级与验收路径](docs/RELEASE_0_5_1.md) · [远程更新配置](docs/UPDATES.md)
+
+## 构建
+
+使用 Android SDK 35、JDK 17 或 21。`local.properties` 中配置本机 `sdk.dir`，命令行的 `JAVA_HOME` 指向 JDK。Gradle Wrapper 已随项目提供并固定为 8.11.1，无需单独安装 Gradle。
+
+如需内置 AI 服务的默认 API Key，在 `local.properties` 中增加 `DEEPSEEK_API_KEY=你的Key`（该文件不入版本库）。未配置也能构建，只是 AI 功能需在应用设置页手动填写 Key。
+
+在项目根目录执行：
+
+```powershell
+.\gradlew.bat :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
+```
+
+调试 APK：`app/build/outputs/apk/debug/app-debug.apk`。
+测试报告：`app/build/reports/tests/testDebugUnitTest/index.html`。
+Lint 报告：`app/build/reports/lint-results-debug.html`。
+
+## 代码入口
+
+- `JiliguluApp.kt` / `AppContainer`：应用级依赖和数据库、仓库的创建。
+- `ui/main/MainScreen.kt`：主导航、独立的顶部桌宠区域、各页可保存状态。
+- `ui/persona/GuluCompanionHeader.kt`：常驻桌宠及台词展示；包含浅色、深色 Compose Preview。
+- `ui/persona/PersonaViewModel.kt`：始终有值的文案状态、可见时的刷新计时、点击互动。
+- `ui/startup`：入场动画与数据准备协调，旧 Activity 的暂停不能取消新 Activity 的加载。
+- `data/update`：公开 GitHub Releases 版本检查，未配置源时不联网。
+- `domain/persona/PersonaEngine.kt`：台词选择、展示间隔与提醒优先级；纯逻辑测试在 `app/src/test`。
+- `ui/components/LedgerCard.kt` / `ui/theme`：共享卡片、颜色与排版。
+- `ui/settings/SettingsViewModel.kt`：设置草稿、加载、保存和提醒调度；界面仅发用户事件。
+- `data/repository` / `data/local`：持久化操作、Room DAO、实体与 schema。
+
+## 界面验收
+
+1. 进入账本：标题、桌宠和台词同时显示；滚动账单时顶部保持位置。
+2. 普通状态停留约 10 秒：只更换台词；待喝水时保留拿杯姿态，直到点击并完成喝水动作。
+3. 连续点桌宠：每次立即换句；有其他候选台词时不连续重复。
+4. 账本与统计切换后返回：保持各自滚动位置；打开设置再返回也保持状态。
+5. 设置已有免打扰时间后重新打开：显示已保存值；分别检查浅色与深色主题。
+6. 手动记账打开键盘：表单可滚动，保存操作始终可达；保存中禁止重复提交。
+7. 检查小屏、大字体、长金额及长分类名。统计页在窄屏或大字体下将图表与图例上下排列。
+
+## 0.5.0 的数据行为
+
+- 账本和统计使用同一个账单详情面板，可改金额、名称和日期时间。手动新增也支持补记。
+- 对话未明确时间时默认确认入账的此刻；明确“昨天中午”等时间则按发送时的设备时区解析并显示在草稿中。模糊或无效时间需确认，不静默改成今天。
+- 聊天消息、编辑中的草稿、已确认/取消状态保存在 Room，退出后可以继续查看。旧版本未落盘的对话无法从新版本恢复。
+- 批量确认和草稿状态同事务，失败回滚，重复确认不重复入账。
+- v1/v2/v3 到 v4 迁移保留旧账、分类与预算，详见 [升级说明](docs/DATABASE_UPGRADES.md)。
+- 正文和品牌字体内置，许可证包含在 assets/licenses 中；角色资源位于 res/drawable-nodpi。
+
+月份查询已支持恢复订阅和跨月更新；预算周期的独立时间刷新、跨设备备份及 API Key 存储加固仍可单独完善。
+
+当前为本地开发版本；打包结果与真机交互、视觉验收分别记录，不用构建成功代替设备验证。

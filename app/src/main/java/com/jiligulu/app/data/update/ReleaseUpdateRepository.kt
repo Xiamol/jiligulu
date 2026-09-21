@@ -1,0 +1,228 @@
+package com.jiligulu.app.data.update
+
+import com.jiligulu.app.BuildConfig
+import com.jiligulu.app.data.prefs.UserPrefs
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import okhttp3.Call
+import okhttp3.Callback
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.Response
+import java.io.IOException
+import java.net.URI
+import java.util.concurrent.TimeUnit
+import kotlin.coroutines.resumeWithException
+
+data class ReleaseVersion(val major: Int, val minor: Int, val patch: Int) : Comparable<ReleaseVersion> {
+    override fun compareTo(other: ReleaseVersion): Int = compareValuesBy(this, other,
+        ReleaseVersion::major, ReleaseVersion::minor, ReleaseVersion::patch)
+    companion object {
+        fun parse(value: String): ReleaseVersion? {
+            val match = Regex("^[vV]?(\\d+)\\.(\\d+)\\.(\\d+)$").matchEntire(value.trim()) ?: return null
+            val numbers = match.groupValues.drop(1).map { it.toIntOrNull() ?: return null }
+            return ReleaseVersion(numbers[0], numbers[1], numbers[2])
+        }
+    }
+}
+
+data class ReleaseInfo(val version: String, val notes: String, val downloadUrl: String, val pageUrl: String)
+data class UpdateState(val checking: Boolean = false, val checked: Boolean = false,
+    val available: ReleaseInfo? = null, val error: String? = null)
+
+object GithubReleases {
+    fun normalizeRepository(input: String): String? {
+        val raw = input.trim().removeSuffix("/").removePrefix("https://github.com/").removeSuffix(".git")
+        return raw.takeIf {
+            it.matches(Regex("[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9_.-]{1,100}")) &&
+                it.substringAfter('/') !in listOf(".", "..")
+        }
+    }
+
+    fun parseRelease(repository: String, payload: String): ReleaseInfo {
+        require(normalizeRepository(repository) == repository)
+        val root = Json.parseToJsonElement(payload).jsonObject
+        require(root["draft"]?.jsonPrimitive?.booleanOrNull != true &&
+            root["prerelease"]?.jsonPrimitive?.booleanOrNull != true) { "还没有正式发布的版本" }
+        val tag = root["tag_name"]?.jsonPrimitive?.contentOrNull.orEmpty()
+        require(ReleaseVersion.parse(tag) != null) { "版本标签需使用 v0.5.2 这样的格式" }
+        val assets = root["assets"]?.jsonArray.orEmpty()
+        val download = assets.mapNotNull { asset ->
+            val entry = asset.jsonObject
+            val name = entry["name"]?.jsonPrimitive?.contentOrNull.orEmpty()
+            val url = entry["browser_download_url"]?.jsonPrimitive?.contentOrNull.orEmpty()
+            val uri = runCatching { URI(url) }.getOrNull()
+            url.takeIf { name.endsWith(".apk", true) && uri?.scheme == "https" &&
+                uri.host == "github.com" && uri.rawUserInfo == null &&
+                uri.path.startsWith("/$repository/releases/download/", ignoreCase = true) }
+        }.firstOrNull() ?: throw IllegalArgumentException("该版本还没有可下载的 APK")
+        return ReleaseInfo(tag.removePrefix("v").removePrefix("V"),
+            stripMarkdown(root["body"]?.jsonPrimitive?.contentOrNull.orEmpty()).take(600), download,
+            "https://github.com/$repository/releases/latest")
+    }
+
+    /**
+     * GitHub Release 正文是 Markdown，直接显示会满屏 ** 和 #。
+     * 转成干净的纯文本：去加粗/斜体/标题标记、把列表折成行、压掉多余空行。
+     */
+    private fun stripMarkdown(source: String): String = cleanMarkdown(source)
+
+    /**
+     * 弹窗里只放得下几句话。把清洗后的正文压到 [maxLines] 行、[maxChars] 字，
+     * 超出的部分丢给「查看完整说明」，不然一屏全是版本日志。
+     */
+    fun condense(source: String, maxLines: Int = 6, maxChars: Int = 220): String {
+        val full = cleanMarkdown(source)
+        if (full.isEmpty()) return ""
+        val lines = full.lineSequence().toList()
+        val kept = ArrayList<String>(maxLines)
+        var used = 0
+        for (line in lines) {
+            if (kept.size >= maxLines) break
+            val cost = line.length.coerceAtMost(maxChars - used)
+            if (cost <= 0) break
+            kept.add(if (cost < line.length) line.take(cost - 1).trimEnd() + "…" else line)
+            used += cost
+        }
+        if (kept.isEmpty()) return ""
+        return if (kept.size < lines.size || full.length > used) {
+            kept.joinToString("\n") + "\n…（完整说明见下载页）"
+        } else kept.joinToString("\n")
+    }
+
+    private fun cleanMarkdown(source: String): String {
+        val cleaned = source
+            .replace(Regex("\\r\\n?"), "\n")
+            // 链接 [文字](url) → 文字
+            .replace(Regex("\\[([^\\]]+)]\\([^)]*\\)"), "$1")
+            // 图片 ![alt](url) → alt
+            .replace(Regex("!\\[([^\\]]*)]\\([^)]*\\)"), "$1")
+            // 标题 # ## ### → 去掉井号
+            .replace(Regex("(?m)^\\s{0,3}#{1,6}\\s+"), "")
+            // 加粗 **x** / __x__ → x
+            .replace(Regex("\\*\\*(.+?)\\*\\*"), "$1")
+            .replace(Regex("__(.+?)__"), "$1")
+            // 斜体 *x* / _x_ → x
+            .replace(Regex("(?<!\\*)\\*([^*\\n]+)\\*(?!\\*)"), "$1")
+            .replace(Regex("(?<!_)_([^_\\n]+)_(?!_)"), "$1")
+            // 删除线 ~~x~~ → x
+            .replace(Regex("~~(.+?)~~"), "$1")
+            // 行内代码 `x` → x
+            .replace(Regex("`([^`]+)`"), "$1")
+        return cleaned.lineSequence()
+            .map { line ->
+                val t = line.trimEnd()
+                // 列表 - / * / + / 1. 统一换成「· 」
+                t.replace(Regex("^\\s*(?:[-*+]|\\d+[.)])\\s+"), "· ").trim()
+            }
+            .filter { it.isNotEmpty() }
+            .joinToString("\n")
+            .replace(Regex("\\n{3,}"), "\n\n")
+            .trim()
+    }
+}
+
+/** Public release metadata only. No account password, token, or automatic APK installation. */
+class ReleaseUpdateRepository(
+    private val prefs: UserPrefs,
+    private val fetch: suspend (String) -> String = ::fetchGithubRelease
+) {
+    private val lock = Mutex()
+    private val _state = MutableStateFlow(UpdateState())
+    val state = _state.asStateFlow()
+
+    suspend fun configure(input: String) {
+        val repository = if (input.isBlank()) "" else requireNotNull(GithubReleases.normalizeRepository(input)) {
+            "请填写 owner/repository 或 GitHub 仓库链接"
+        }
+        lock.withLock {
+            prefs.setUpdateRepository(repository)
+            _state.value = UpdateState()
+        }
+    }
+
+    suspend fun check(automatic: Boolean = false) {
+        if (lock.isLocked) return
+        lock.withLock {
+            try {
+                val repository = prefs.updateRepository.first()
+                if (repository.isBlank()) return@withLock
+                require(GithubReleases.normalizeRepository(repository) == repository) { "更新源格式不正确，请重新设置。" }
+                val now = System.currentTimeMillis()
+                // 节流只在「同一版本、6 小时内、已得出过结论」时生效。
+                // 覆盖安装换了版本就必须重查，否则用户升完级反而看不到下一次更新。
+                val throttled = automatic && (
+                    !prefs.autoCheckUpdates.first() ||
+                        (prefs.updateCheckedVersion.first() == BuildConfig.VERSION_NAME &&
+                            now - prefs.updateCheckedAt.first() in 0 until TimeUnit.HOURS.toMillis(6))
+                    )
+                if (throttled) return@withLock
+                _state.value = UpdateState(checking = true)
+                val release = GithubReleases.parseRelease(repository, fetch(repository))
+                val current = requireNotNull(ReleaseVersion.parse(BuildConfig.VERSION_NAME))
+                val remote = requireNotNull(ReleaseVersion.parse(release.version))
+                val available = release.takeIf { remote > current }
+                _state.value = UpdateState(checked = true, available = available)
+                // 只有「已是最新」才记检查时间。发现新版本则不记，让用户重启后还能再收到提示，
+                // 避免「点下载 → 下载失败退出 → 6 小时内重开不再提示」的情况。
+                if (available == null) prefs.setUpdateCheckedAt(now, BuildConfig.VERSION_NAME)
+            } catch (cancelled: CancellationException) {
+                _state.value = _state.value.copy(checking = false)
+                throw cancelled
+            } catch (failure: Exception) {
+                _state.value = UpdateState(error = when (failure) {
+                    is ReleaseHttpException -> when (failure.status) {
+                        404 -> "还没有找到公开发布的版本，请检查仓库和 Releases。"
+                        403, 429 -> "GitHub 暂时限制了请求，晚点再试吧。"
+                        else -> "更新服务暂时不可用，请稍后再试。"
+                    }
+                    is IllegalArgumentException -> failure.message ?: "版本信息暂时无法识别。"
+                    else -> "暂时连不上更新服务，请稍后再试。"
+                })
+                // Back off failed automatic checks as well; a manual check always remains possible.
+                try { prefs.setUpdateCheckedAt(System.currentTimeMillis(), BuildConfig.VERSION_NAME) }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) { /* A failed preference write must not claim the check succeeded. */ }
+            }
+        }
+    }
+}
+
+private class ReleaseHttpException(val status: Int) : IOException()
+private val updateClient = OkHttpClient.Builder().connectTimeout(8, TimeUnit.SECONDS)
+    .readTimeout(10, TimeUnit.SECONDS).callTimeout(12, TimeUnit.SECONDS).build()
+
+private suspend fun fetchGithubRelease(repository: String): String = withContext(Dispatchers.IO) {
+    val request = Request.Builder().url("https://api.github.com/repos/$repository/releases/latest")
+        .header("Accept", "application/vnd.github+json")
+        .header("User-Agent", "Jiligulu/${BuildConfig.VERSION_NAME}").build()
+    val call = updateClient.newCall(request)
+    val response = suspendCancellableCoroutine<Response> { continuation ->
+        continuation.invokeOnCancellation { call.cancel() }
+        call.enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                if (continuation.isActive) continuation.resumeWithException(e)
+            }
+            override fun onResponse(call: Call, response: Response) {
+                continuation.resume(response) { _, value, _ -> value.close() }
+            }
+        })
+    }
+    response.use {
+        if (!it.isSuccessful) throw ReleaseHttpException(it.code)
+        it.body?.string().orEmpty()
+    }
+}

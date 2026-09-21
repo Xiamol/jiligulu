@@ -1,0 +1,21 @@
+*.iml
+.gradle
+/local.properties
+/.idea
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+/app/build
+.kotlin/
+*.apk
+*.aab
+*.jks
+*.keystore
+.workbuddy/
+
+# 音效素材（原始 mp3 体积大，脚本可再下载）
+tools/sounds_raw/
+tools/sounds_preview/

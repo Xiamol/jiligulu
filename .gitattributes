@@ -1,0 +1,23 @@
+# 统一换行符：仓库内一律 LF，检出时按平台自动转换
+* text=auto
+
+# Shell 脚本必须保持 LF，否则 Git Bash 下执行会报错
+*.sh text eol=lf
+gradlew text eol=lf
+
+# Windows 批处理保持 CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# 二进制资源，禁止做任何换行/编码转换
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.ttf binary
+*.otf binary
+*.wav binary
+*.mp3 binary
+*.jar binary
+*.apk binary
+*.aab binary
