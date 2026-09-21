@@ -109,7 +109,7 @@ class ChatViewModel(
                     append(pending!!.toUi())
                 }
                 val result = aiRepository.parse(input, requestMillis, zone)
-                val parsed = result.getOrNull() ?: localParse(input)
+                val parsed = result.getOrNull() ?: localParse(input, result.exceptionOrNull())
                 writes.withLock { finishRequest(pending!!, input, parsed, requestMillis, zone) }
             } catch (cancelled: CancellationException) {
                 // Durable PENDING rows become INTERRUPTED on the next visit.
@@ -134,14 +134,24 @@ class ChatViewModel(
         }
     }
 
-    private fun localParse(input: String): AiParseResult {
+    private fun localParse(input: String, cause: Throwable? = null): AiParseResult {
         val drafts = LocalBillParser.parse(input).map { draft ->
             draft.copy(category = CategoryEngine.suggest(draft.detail, categories.value)?.name ?: "未分类")
         }
+        // Key 缺失是本地可判定、且用户能自行修复的情况，不该被笼统说成「连不上网络」。
+        val noKey = cause?.message?.contains("API Key") == true
         return AiParseResult(
             bills = drafts,
-            reply = if (drafts.isEmpty()) "暂时连不上网络。请分开说每笔账，例如「昨天中午吃饭 9 元」，我会先用本地规则整理。"
-                else "先用本地规则整理好了，请核对金额、名称和时间，再确认入账，阿噜～"
+            reply = when {
+                noKey && drafts.isEmpty() ->
+                    "还没有配置 API Key，先到「我的 → AI 服务」里填一个，阿噜～"
+                noKey ->
+                    "先用本地规则整理好了，请核对后再确认入账（配置 API Key 后可让叽里咕噜帮你拆得更细）～"
+                drafts.isEmpty() ->
+                    "暂时连不上网络。请分开说每笔账，例如「昨天中午吃饭 9 元」，我会先用本地规则整理。"
+                else ->
+                    "先用本地规则整理好了，请核对金额、名称和时间，再确认入账，阿噜～"
+            }
         )
     }
 
