@@ -66,6 +66,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.jiligulu.app.data.prefs.UserPrefs
 import com.jiligulu.app.BuildConfig
 import com.jiligulu.app.ui.components.PaperNote
+import com.jiligulu.app.ui.components.TimePicker
 import com.jiligulu.app.ui.persona.GuluMascot
 import com.jiligulu.app.ui.theme.GuluBrandFont
 
@@ -225,46 +226,58 @@ fun SettingsScreen(
                         }
                         if (state.waterEnabled) {
                             Text("提醒间隔", style = MaterialTheme.typography.labelLarge)
-                            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                SettingsViewModel.WATER_INTERVALS.forEach { minutes ->
-                                    FilterChip(
-                                        selected = state.waterInterval == minutes,
-                                        onClick = { vm.setWaterInterval(minutes) },
-                                        enabled = editable,
-                                        label = { Text("$minutes 分钟") }
-                                    )
-                                }
-                            }
+                            // 小时 + 分钟组合选择：例如 6 小时 5 分钟 = 每 365 分钟提醒一次
+                            val intervalHours = state.waterInterval / 60
+                            val intervalMinutes = state.waterInterval % 60
+                            TimePicker(
+                                hour = intervalHours,
+                                minute = intervalMinutes,
+                                onTimeChange = { h, m ->
+                                    val total = h * 60 + m
+                                    if (total >= 15) vm.setWaterInterval(total)
+                                },
+                                hourRange = 0..12,
+                                minuteRange = 0..59
+                            )
+                            Text(
+                                "当前：每 ${if (intervalHours > 0) "${intervalHours} 小时" else ""}${intervalMinutes} 分钟提醒一次",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                             Text("免打扰时段", style = MaterialTheme.typography.labelLarge)
+                            // 开始/结束时间滚动选择
+                            val quietStartHour = (state.quietStartText.substringBefore(":").toIntOrNull() ?: 23)
+                            val quietStartMinute = (state.quietStartText.substringAfter(":").toIntOrNull() ?: 0)
+                            val quietEndHour = (state.quietEndText.substringBefore(":").toIntOrNull() ?: 8)
+                            val quietEndMinute = (state.quietEndText.substringAfter(":").toIntOrNull() ?: 0)
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                verticalAlignment = Alignment.Top
+                                horizontalArrangement = Arrangement.spacedBy(16.dp)
                             ) {
-                                OutlinedTextField(
-                                    value = state.quietStartText,
-                                    onValueChange = vm::setQuietStart,
-                                    modifier = Modifier.weight(1f),
-                                    label = { Text("开始时间") },
-                                    placeholder = { Text("23:00") },
-                                    supportingText = { Text(if (state.quietStartInvalid) "请输入有效时间" else "HH:mm") },
-                                    isError = state.quietStartInvalid,
-                                    singleLine = true,
-                                    enabled = editable,
-                                    shape = RoundedCornerShape(14.dp)
-                                )
-                                OutlinedTextField(
-                                    value = state.quietEndText,
-                                    onValueChange = vm::setQuietEnd,
-                                    modifier = Modifier.weight(1f),
-                                    label = { Text("结束时间") },
-                                    placeholder = { Text("08:00") },
-                                    supportingText = { Text(if (state.quietEndInvalid) "请输入有效时间" else "HH:mm") },
-                                    isError = state.quietEndInvalid,
-                                    singleLine = true,
-                                    enabled = editable,
-                                    shape = RoundedCornerShape(14.dp)
-                                )
+                                Column(Modifier.weight(1f)) {
+                                    Text("开始", style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(bottom = 4.dp))
+                                    TimePicker(
+                                        hour = quietStartHour,
+                                        minute = quietStartMinute,
+                                        onTimeChange = { h, m ->
+                                            vm.setQuietStart("%02d:%02d".format(h, m))
+                                        }
+                                    )
+                                }
+                                Column(Modifier.weight(1f)) {
+                                    Text("结束", style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(bottom = 4.dp))
+                                    TimePicker(
+                                        hour = quietEndHour,
+                                        minute = quietEndMinute,
+                                        onTimeChange = { h, m ->
+                                            vm.setQuietEnd("%02d:%02d".format(h, m))
+                                        }
+                                    )
+                                }
                             }
                             Text(
                                 "支持跨午夜。账本和统计页由桌宠提醒，其他页面及后台通过通知提醒。",
@@ -304,8 +317,13 @@ fun SettingsScreen(
                                     style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onPrimaryContainer)
                             }
                         }
-                        Text("账本与对话保存在本机，覆盖安装更新时保留记录。",
+                        Text("一个本地优先的 AI 记账小助手。账本与对话都保存在本机，覆盖安装更新时保留记录。",
                             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("制作人：路陌", style = MaterialTheme.typography.bodyMedium)
+                            Text("AI 助手：DeepSeek", style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
                         TextButton(onClick = { showFontLicense = true }) { Text("字体与开源许可") }
                     }
                     TypingSoundSettingsCard(onPreviewWelcome)

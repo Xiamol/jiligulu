@@ -7,7 +7,7 @@ import android.os.Handler
 import android.os.Looper
 import android.view.PixelCopy
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
@@ -218,7 +218,8 @@ class UiSmokeScreenshotTest {
                 runBlocking { app.container.userPrefs.nickname.first() })
             scrollSettingsTo("检查更新")
             compose.waitForIdle()
-            compose.onNodeWithText("检查更新").assertIsNotEnabled()
+            // 内置默认更新源后，检查更新按钮应始终可点击（不再依赖手动配置仓库）
+            compose.onNodeWithText("检查更新").assertIsEnabled()
             capture("update-settings")
 
             // Render the real entry component separately; coordinator timing and lifecycle leases
