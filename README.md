@@ -2,11 +2,13 @@
 
 Android 本地记账应用，Kotlin + Jetpack Compose + Room。当前版本：`0.5.1`，奶油手账与糯云团桌宠。
 
-[本版变更、升级与验收路径](docs/RELEASE_0_5_1.md) · [远程更新配置](docs/UPDATES.md)
+[下载安装包](https://github.com/Xiamol/jiligulu/releases/latest) · [本版变更、升级与验收路径](docs/RELEASE_0_5_1.md) · [远程更新配置](docs/UPDATES.md)
 
 ## 构建
 
 使用 Android SDK 35、JDK 17 或 21。`local.properties` 中配置本机 `sdk.dir`，命令行的 `JAVA_HOME` 指向 JDK。Gradle Wrapper 已随项目提供并固定为 8.11.1，无需单独安装 Gradle。
+
+如需内置 AI 服务的默认 API Key，在 `local.properties` 中增加 `DEEPSEEK_API_KEY=你的Key`（该文件不入版本库）。未配置也能构建，只是 AI 功能需在应用设置页手动填写 Key。
 
 在项目根目录执行：
 
