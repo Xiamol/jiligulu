@@ -51,6 +51,12 @@ class UserPrefs(private val context: Context) {
         const val DEFAULT_WATER_INTERVAL = 60
         const val DEFAULT_QUIET_START = 23 * 60
         const val DEFAULT_QUIET_END = 8 * 60
+
+        /**
+         * 内置更新源：未手动设置过时直接使用，无需用户填写。
+         * 用户可在「设置 → 应用更新」里改成自己的仓库，或清空以停用检查。
+         */
+        const val DEFAULT_UPDATE_REPOSITORY = "Xiamol/jiligulu"
     }
 
     /** null = 还没读过；"" = 未设置（需要 Onboarding） */
@@ -86,7 +92,14 @@ class UserPrefs(private val context: Context) {
         PendingWater(it[KEY_PENDING_WATER] ?: 0L, it[KEY_PENDING_WATER_TEXT].orEmpty())
     }.distinctUntilChanged()
     val typingSoundEnabled = context.dataStore.data.map { it[KEY_TYPING_SOUND] ?: true }.distinctUntilChanged()
-    val updateRepository = context.dataStore.data.map { it[KEY_UPDATE_REPO].orEmpty() }.distinctUntilChanged()
+    /**
+     * 生效的更新源。用户没手动设置过就用内置默认，开箱即可检查更新。
+     * 用户可在「设置 → 应用更新」里改成自己的仓库，或清空以停用检查。
+     */
+    val updateRepository = context.dataStore.data
+        .map { it[KEY_UPDATE_REPO] ?: DEFAULT_UPDATE_REPOSITORY }
+        .distinctUntilChanged()
+
     val autoCheckUpdates = context.dataStore.data.map { it[KEY_AUTO_UPDATES] ?: true }.distinctUntilChanged()
     val updateCheckedAt = context.dataStore.data.map { it[KEY_UPDATE_CHECKED_AT] ?: 0L }
 
