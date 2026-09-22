@@ -68,6 +68,26 @@ interface BillDao {
     @Query("SELECT * FROM bills WHERE deletedAt IS NULL ORDER BY timestamp DESC LIMIT :limit")
     suspend fun recent(limit: Int): List<BillEntity>
 
+    // ---------- 分类删除 / 恢复（v0.6） ----------
+
+    /** 某分类下的活账单数量（长按删分类的确认弹窗要显示「N 笔将移到其他」）。 */
+    @Query("SELECT COUNT(*) FROM bills WHERE categoryId = :categoryId AND deletedAt IS NULL")
+    suspend fun countLiveByCategory(categoryId: Long): Int
+
+    /**
+     * 运行期删分类：把源分类下的**活账单**改挂到目标分类，返回改挂条数。
+     *
+     * 刻意只转活账单（`deletedAt IS NULL`）：回收站里的账单保持原 `categoryId`，
+     * 等它被恢复时再由 `restoreToLive` 兜底到「其他」。这是**运行期**规则，
+     * 与**迁移期**（重复分类整体消失，回收站账单也一并换挂点）不同。
+     */
+    @Query("UPDATE bills SET categoryId = :toCategoryId WHERE categoryId = :fromCategoryId AND deletedAt IS NULL")
+    suspend fun reassignCategory(fromCategoryId: Long, toCategoryId: Long): Int
+
+    /** AI「恢复账单」的候选：回收站内按删除时间倒序，最近删的在前。 */
+    @Query("SELECT * FROM bills WHERE deletedAt IS NOT NULL ORDER BY deletedAt DESC LIMIT :limit")
+    suspend fun trashCandidates(limit: Int): List<BillEntity>
+
     // ---------- 回收站 ----------
 
     /** 移入回收站（软删除）。已在回收站里的不会被重复打时间戳。 */

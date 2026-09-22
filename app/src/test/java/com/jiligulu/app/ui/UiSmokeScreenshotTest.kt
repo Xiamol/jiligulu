@@ -80,8 +80,8 @@ class UiSmokeScreenshotTest {
             container.userPrefs.setThemeMode(UserPrefs.THEME_LIGHT)
             container.userPrefs.setWaterEnabled(false)
             container.userPrefs.setUpdateRepository("")
-            val food = container.categoryRepository.getAll().first { it.name == "eating" }.id
-            val drinks = container.categoryRepository.getAll().first { it.name == "drinking" }.id
+            val food = container.categoryRepository.getAll().first { it.name == "吃饭" }.id
+            val drinks = container.categoryRepository.getAll().first { it.name == "饮品" }.id
             val travel = container.categoryRepository.createCategory("交通", iconValue = "🚇")
             val salary = container.categoryRepository.createCategory("工资", iconValue = "💌")
             val now = System.currentTimeMillis()

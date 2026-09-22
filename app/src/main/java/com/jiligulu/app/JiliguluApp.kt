@@ -8,6 +8,7 @@ import com.jiligulu.app.data.reminder.WaterReminderWorker
 import com.jiligulu.app.data.repository.AiRepository
 import com.jiligulu.app.data.repository.BillRepository
 import com.jiligulu.app.data.repository.BudgetRepository
+import com.jiligulu.app.data.repository.CategoryAdminRepository
 import com.jiligulu.app.data.repository.CategoryRepository
 import com.jiligulu.app.data.repository.ChatHistoryRepository
 import com.jiligulu.app.data.update.ReleaseUpdateRepository
@@ -28,6 +29,7 @@ class AppContainer(private val app: Application) {
 
     val billRepository: BillRepository by lazy { BillRepository(database.billDao()) }
     val categoryRepository: CategoryRepository by lazy { CategoryRepository(database.categoryDao()) }
+    val categoryAdminRepository: CategoryAdminRepository by lazy { CategoryAdminRepository(database) }
     val chatHistoryRepository: ChatHistoryRepository by lazy { ChatHistoryRepository(database) }
     val aiRepository: AiRepository by lazy {
         AiRepository(app, categoryRepository, billRepository, userPrefs, chatHistoryRepository)

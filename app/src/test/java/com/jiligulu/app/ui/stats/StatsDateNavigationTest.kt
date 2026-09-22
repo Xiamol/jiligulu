@@ -117,6 +117,9 @@ class StatsDateNavigationTest {
                 error("Date navigation must not write bills")
             override suspend fun recentSince(startMillis: Long, limit: Int): List<BillEntity> = error("unused")
             override suspend fun recent(limit: Int): List<BillEntity> = error("unused")
+            override suspend fun countLiveByCategory(categoryId: Long): Int = error("unused")
+            override suspend fun reassignCategory(fromCategoryId: Long, toCategoryId: Long): Int = error("unused")
+            override suspend fun trashCandidates(limit: Int): List<BillEntity> = error("unused")
             override suspend fun moveToTrash(id: Long, deletedAt: Long): Int = error("unused")
             override suspend fun restore(id: Long): Int = error("unused")
             override fun observeTrash(): Flow<List<BillEntity>> = error("unused")
@@ -126,9 +129,11 @@ class StatsDateNavigationTest {
         }
         val categoryDao = object : CategoryDao {
             override fun observeAll(): Flow<List<CategoryEntity>> = flowOf(emptyList())
+            override suspend fun findAllOnce(): List<CategoryEntity> = emptyList()
             override suspend fun count(): Int = 0
             override suspend fun findByName(name: String): CategoryEntity? = null
             override suspend fun insert(category: CategoryEntity): Long = error("unused")
+            override suspend fun deleteById(id: Long): Int = error("unused")
         }
         val budgetDao = object : BudgetDao {
             override fun observe(): Flow<BudgetEntity?> = flowOf(null)

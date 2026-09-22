@@ -16,6 +16,17 @@ class ChatHistoryRepository(private val database: AppDatabase) {
     suspend fun updateDraft(id: Long, payload: String): Int = dao.updateDraft(id, payload)
     suspend fun dismissDraft(id: Long): Int = dao.dismissDraft(id)
 
+    // ---------- 草稿生命周期（v0.6 R3） ----------
+
+    /** 删除一张草稿（打 `DELETED` 标记），返回受影响行数。 */
+    suspend fun deleteDraft(id: Long): Int = dao.markDraftDeleted(id)
+
+    /** 清空草稿页，返回清掉的张数。 */
+    suspend fun deleteAllActiveDrafts(): Int = dao.markActiveDraftsDeleted()
+
+    /** 活跃草稿流（EDITING / DISMISSED，最新在前），供回收站草稿页展示。 */
+    fun observeActiveDrafts(): Flow<List<ChatMessageEntity>> = dao.observeActiveDrafts()
+
     /**
      * 写一张指令卡的载荷。
      *

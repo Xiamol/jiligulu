@@ -44,6 +44,25 @@ interface ChatMessageDao {
     @Query("UPDATE chat_messages SET status = 'CONFIRMED', savedCount = :count WHERE id = :id AND kind = 'DRAFT' AND status = 'EDITING'")
     suspend fun markConfirmed(id: Long, count: Int): Int
 
+    // ---------- 草稿生命周期（v0.6 R3） ----------
+
+    /**
+     * 删除一张草稿（打 `DELETED` 标记，不物理删，保留可追溯的历史行）。
+     *
+     * WHERE 必须同时覆盖 `EDITING` 与 `DISMISSED`：新流程不再产生 `DISMISSED`，
+     * 但历史遗留记录仍可能停在这个状态，只判 `EDITING` 会让它们无法删除。
+     */
+    @Query("UPDATE chat_messages SET status = 'DELETED' WHERE id = :id AND kind = 'DRAFT' AND status IN ('EDITING', 'DISMISSED')")
+    suspend fun markDraftDeleted(id: Long): Int
+
+    /** 清空草稿页：把当前所有活跃草稿一并打上 `DELETED`，返回清掉的张数。 */
+    @Query("UPDATE chat_messages SET status = 'DELETED' WHERE kind = 'DRAFT' AND status IN ('EDITING', 'DISMISSED')")
+    suspend fun markActiveDraftsDeleted(): Int
+
+    /** 草稿页数据源：活跃草稿（EDITING / DISMISSED），最新在前的。 */
+    @Query("SELECT * FROM chat_messages WHERE kind = 'DRAFT' AND status IN ('EDITING', 'DISMISSED') ORDER BY id DESC")
+    fun observeActiveDrafts(): Flow<List<ChatMessageEntity>>
+
     @Query("UPDATE chat_messages SET status = 'INTERRUPTED', content = :message WHERE kind = 'ASSISTANT' AND status = 'PENDING'")
     suspend fun markPendingInterrupted(message: String): Int
 

@@ -66,11 +66,15 @@ class DatabaseUpgradeTest {
         // These DAO calls force Room's real migration and schema validation.
         assertEquals(listOf(sampleBill), db.billDao().observeAll().first())
         val categories = db.categoryDao().observeAll().first()
-        assertEquals(1, categories.size)
-        assertEquals(sampleCategory.copy(iconSvg = if (version == 1) "" else SVG), categories.single())
+        // 迁移保留历史样本分类原样，并补齐内置收纳箱「其他」(v6)。
+        assertEquals(2, categories.size)
+        assertEquals(sampleCategory.copy(iconSvg = if (version == 1) "" else SVG),
+            categories.single { it.name == "自定义午餐" })
+        val vacuum = categories.single { it.name == "其他" }
+        assertFalse("收纳箱「其他」不可删", vacuum.deletable)
         assertEquals(if (version >= 3) sampleBudget else null, db.budgetDao().observe().first())
         assertEquals(if (version >= 4) 1 else 0, db.chatMessageDao().getAll().size)
-        assertEquals(5, db.openHelper.readableDatabase.version)
+        assertEquals(AppDatabase.SCHEMA_VERSION, db.openHelper.readableDatabase.version)
         // v5 之前没有软删除列，历史账单迁移后一律视为「活着的」，回收站是空的。
         assertTrue(db.billDao().getTrash().isEmpty())
         assertNull(db.billDao().getById(sampleBill.id)?.deletedAt)
@@ -83,7 +87,7 @@ class DatabaseUpgradeTest {
 
         val reopened = open(name)
         assertEquals(2, reopened.billDao().observeAll().first().size)
-        assertEquals(2, reopened.categoryDao().count())
+        assertEquals(3, reopened.categoryDao().count())
         assertEquals(sampleBill, reopened.billDao().observeAll().first().single { it.id == sampleBill.id })
         assertEquals(if (version >= 3) sampleBudget else null, reopened.budgetDao().observe().first())
     }
@@ -93,11 +97,11 @@ class DatabaseUpgradeTest {
         names += "fresh.db"
         val db = AppDatabase.build(context, "fresh.db")
         opened += db
-        assertEquals(listOf("eating", "drinking"), db.categoryDao().observeAll().first().map { it.name })
+        assertEquals(listOf("吃饭", "饮品", "其他"), db.categoryDao().observeAll().first().map { it.name })
         db.close()
         val reopened = AppDatabase.build(context, "fresh.db")
         opened += reopened
-        assertEquals(2, reopened.categoryDao().count())
+        assertEquals(3, reopened.categoryDao().count())
     }
 
     /**
@@ -259,7 +263,7 @@ class DatabaseUpgradeTest {
 
     @Test(timeout = 30_000)
     fun aiConfirmationSharesTransactionAndKeepsExplicitTime() = runBlocking {
-        // 走真实生产构建器：默认种子 eating / drinking 会在建库时写入。
+        // 走真实生产构建器：默认种子「吃饭 / 饮品 / 其他」会在建库时写入。
         names += "ai-confirm.db"
         val db = AppDatabase.build(context, "ai-confirm.db")
         opened += db
@@ -281,8 +285,8 @@ class DatabaseUpgradeTest {
         assertEquals(setOf(BillSource.AI_CHAT), bills.map { it.source }.toSet())
         val category = db.categoryDao().findByName("深夜食堂")!!
         assertEquals(setOf(category.id), bills.map { it.categoryId }.toSet())
-        // 默认种子 eating / drinking + AI 新建的「深夜食堂」。种子由真实生产构建器种下。
-        assertEquals(3, db.categoryDao().count())
+        // 默认种子「吃饭 / 饮品 / 其他」+ AI 新建的「深夜食堂」。种子由真实生产构建器种下。
+        assertEquals(4, db.categoryDao().count())
         assertEquals("CONFIRMED", history.getById(id)?.status)
     }
 
@@ -324,8 +328,9 @@ class DatabaseUpgradeTest {
         opened += db
         db.billDao().insert(sampleBill)
         db.close()
+        val future = AppDatabase.SCHEMA_VERSION + 1
         SQLiteDatabase.openDatabase(context.getDatabasePath(name).path, null, SQLiteDatabase.OPEN_READWRITE).use {
-            it.version = 6
+            it.version = future
         }
         try {
             openWithMigrations(name).billDao().observeAll().first()
@@ -337,7 +342,7 @@ class DatabaseUpgradeTest {
                 assertEquals(sampleBill.detail, cursor.getString(0))
                 assertEquals(sampleBill.amountFen, cursor.getLong(1))
             }
-            assertEquals(6, it.version)
+            assertEquals(future, it.version)
         }
     }
 

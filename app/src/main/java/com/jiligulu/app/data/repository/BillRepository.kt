@@ -92,6 +92,12 @@ class BillRepository(
     /** 上下文注入用：最近 [limit] 条活账单。 */
     suspend fun recent(limit: Int): List<BillEntity> = billDao.recent(limit)
 
+    /** 某分类下的活账单数量（长按删分类的确认弹窗用）。 */
+    suspend fun countLiveByCategory(id: Long): Int = billDao.countLiveByCategory(id)
+
+    /** AI「恢复账单」候选：回收站内最近删的 [limit] 条。 */
+    suspend fun trashCandidates(limit: Int): List<BillEntity> = billDao.trashCandidates(limit)
+
     /** 任意时间范围账单流（M3 统计页月导航用） */
     fun observeBetween(startMillis: Long, endMillis: Long): Flow<List<BillEntity>> =
         billDao.observeBetween(startMillis, endMillis)
