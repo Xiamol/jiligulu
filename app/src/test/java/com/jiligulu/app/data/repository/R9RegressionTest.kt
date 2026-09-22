@@ -185,8 +185,9 @@ class R9PromptAssetByteRegressionTest {
         val system = bytesOf("prompts/parse_bill_system.txt")
         val context = bytesOf("prompts/parse_bill_context.txt")
 
-        // 7628 = v0.6 T02b 加「情况六 恢复 + App 功能地图 + navigate/options」后的 LF 字节数。
-        assertEquals("system 资源字节数必须与仓库 LF 版一致（CRLF 检出会让每个 \\r 多占一字节）", 7628, system.size)
+        // 8090 = v0.6 T04 补「做不到的事」边界后的 LF 字节数
+        // （禁止幻觉声称「已清空回收站 / 已改好设置」——用户实际遇到的假承诺）。
+        assertEquals("system 资源字节数必须与仓库 LF 版一致（CRLF 检出会让每个 \\r 多占一字节）", 8090, system.size)
         assertEquals("context 资源字节数必须与仓库 LF 版一致（CRLF 版会多出 \\r 变成 324）", 314, context.size)
 
         assertEquals("system 不得含 CR", 0, system.count { it == '\r'.code.toByte() })

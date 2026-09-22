@@ -40,10 +40,39 @@ android {
         buildConfigField("String", "DEEPSEEK_API_KEY", "\"$deepSeekApiKey\"")
     }
 
+    /**
+     * 正式包签名。
+     *
+     * 签名信息放在**用户级** `~/.gradle/gradle.properties`（JILIGULU_* 四个属性），
+     * keystore 本身在项目根 `jiligulu-release.jks`——两者都已被 .gitignore 覆盖，
+     * 不会进仓库。
+     *
+     * 属性缺失时**回退到 debug 签名**：这样别人 clone 下来也能构建，
+     * 不至于因为拿不到密钥就整个项目跑不起来（产物不能用于正式分发是另一回事）。
+     */
+    signingConfigs {
+        create("release") {
+            val storePath = providers.gradleProperty("JILIGULU_STORE_FILE").orNull
+            if (storePath != null) {
+                storeFile = file(storePath)
+                storePassword = providers.gradleProperty("JILIGULU_STORE_PASSWORD").orNull
+                keyAlias = providers.gradleProperty("JILIGULU_KEY_ALIAS").orNull
+                keyPassword = providers.gradleProperty("JILIGULU_KEY_PASSWORD").orNull
+            }
+        }
+    }
+
     buildTypes {
         release {
+            // 关掉 R8 是为了保住 Compose 的反射路径，但 release 变体本身就比 debug 快得多：
+            // debug 包带着 Compose 的调试开销与无优化字节码，卡顿主要来自这里。
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            // 自用测试阶段刻意用 **debug 签名**：Android 不允许不同签名的包互相覆盖，
+            // 用正式签名会导致必须卸载旧包、账单数据全丢。改用 debug 签名后可以**直接覆盖安装**，
+            // 该有的性能收益（非 debuggable + 优化字节码）一点不少。
+            // 将来要对外正式发布时，把下面这行换成 signingConfigs.getByName("release")。
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 

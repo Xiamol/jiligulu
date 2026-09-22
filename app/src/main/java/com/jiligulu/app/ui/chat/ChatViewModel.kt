@@ -103,7 +103,14 @@ class ChatViewModel(
             try {
                 writes.withLock {
                     history.markPendingInterrupted()
-                    _items.value = history.getAll().map { it.toUi() }
+                    // 已删掉的草稿不再回到聊天流里——删了就该干净地消失。
+                    // （代码/数据仍在库里，status='DELETED'，只是不参与渲染。）
+                    // 这也顺手修掉一个真 bug：DELETED 曾被映射成 EDITING，
+                    // 于是已删草稿看起来还能点「记录」，一点就撞上
+                    // `check(status == "EDITING")` 抛红错。
+                    _items.value = history.getAll()
+                        .filterNot { it.kind == "DRAFT" && it.status == "DELETED" }
+                        .map { it.toUi() }
                     _pending.value = PromptRenderer.pendingOf(history.latestPending())
                     if (_items.value.isEmpty()) {
                         val name = aiRepository.nicknameWithSuffix()
@@ -484,6 +491,10 @@ class ChatViewModel(
             ChatItem.DraftCard(id, rawInput, DraftHistoryCodec.decode(draftPayload), when (status) {
                 "CONFIRMED" -> ChatItem.DraftCard.Status.CONFIRMED
                 "DISMISSED" -> ChatItem.DraftCard.Status.CANCELLED
+                // 兜底：已删草稿正常走不到这里（loadHistory 已过滤），
+                // 但万一漏过来也必须落成「不可交互」——绝不能当成活跃草稿，
+                // 否则用户点「记录」只会吃一个红色报错（这个 bug 真实发生过）。
+                "DELETED" -> ChatItem.DraftCard.Status.CANCELLED
                 else -> ChatItem.DraftCard.Status.EDITING
             }, savedCount)
         } catch (_: Exception) {
