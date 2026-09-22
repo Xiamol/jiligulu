@@ -207,7 +207,7 @@ class R9ContextStructureTest {
         val out = fullRenderer().renderContext("整理一下并恢复回收站里那笔")
         val order = listOf(
             "称呼说明", "现有分类列表", "【待补充的账】", "【最近三天的账本】",
-            "【候选账单】", "【回收站候选】", "【「其他」分类下的账单】",
+            "【候选账单】", "【回收站候选】", "【「待定」分类下的账单】",
             "当前时间：", "设备时区：", "用户这轮说："
         )
         val idx = order.map { out.indexOf(it) }

@@ -70,7 +70,7 @@ interface BillDao {
 
     // ---------- 分类删除 / 恢复（v0.6） ----------
 
-    /** 某分类下的活账单数量（长按删分类的确认弹窗要显示「N 笔将移到其他」）。 */
+    /** 某分类下的活账单数量（长按删分类的确认弹窗要显示「N 笔将移到待定」）。 */
     @Query("SELECT COUNT(*) FROM bills WHERE categoryId = :categoryId AND deletedAt IS NULL")
     suspend fun countLiveByCategory(categoryId: Long): Int
 
@@ -78,7 +78,7 @@ interface BillDao {
      * 运行期删分类：把源分类下的**活账单**改挂到目标分类，返回改挂条数。
      *
      * 刻意只转活账单（`deletedAt IS NULL`）：回收站里的账单保持原 `categoryId`，
-     * 等它被恢复时再由 `restoreToLive` 兜底到「其他」。这是**运行期**规则，
+     * 等它被恢复时再由 `restoreToLive` 兜底到「待定」。这是**运行期**规则，
      * 与**迁移期**（重复分类整体消失，回收站账单也一并换挂点）不同。
      */
     @Query("UPDATE bills SET categoryId = :toCategoryId WHERE categoryId = :fromCategoryId AND deletedAt IS NULL")

@@ -22,7 +22,7 @@ object AiConfig {
 
     /**
      * R9：动态上下文模板，占位符顺序固定
-     * （称呼 → 分类 → 待补充 → 账本 → 候选 → 回收站候选 → 其他账单 → 时间 → 时区 → 输入）。
+     * （称呼 → 分类 → 待补充 → 账本 → 候选 → 回收站候选 → 待定账单 → 时间 → 时区 → 输入）。
      */
     const val CONTEXT_PROMPT_ASSET_PATH = "prompts/parse_bill_context.txt"
 }

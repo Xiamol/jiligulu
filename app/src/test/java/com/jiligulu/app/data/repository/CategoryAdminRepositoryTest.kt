@@ -62,12 +62,12 @@ class CategoryAdminRepositoryTest {
         assertTrue(result is CategoryDeletionResult.Deleted)
         assertEquals(2, (result as CategoryDeletionResult.Deleted).reassigned)
 
-        // 活账单全部改挂「其他」，账单总数不变。
+        // 活账单全部改挂「待定」，账单总数不变。
         assertEquals(setOf(vacuumId), db.billDao().observeAll().first().map { it.categoryId }.toSet())
         assertEquals(3, db.billDao().observeAll().first().size + db.billDao().getTrash().size)
         // 分类已删除。
         assertNull(db.categoryDao().findByName("夜宵"))
-        // 运行期规则：回收站账单保持原 categoryId（恢复时再兜底到「其他」）。
+        // 运行期规则：回收站账单保持原 categoryId（恢复时再兜底到「待定」）。
         assertEquals(catId, db.billDao().getTrash().single().categoryId)
     }
 

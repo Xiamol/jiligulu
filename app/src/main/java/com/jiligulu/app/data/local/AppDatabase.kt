@@ -78,7 +78,7 @@ abstract class AppDatabase : RoomDatabase() {
         }
 
         /**
-         * v5 → v6（R1/R2）：分类中文化 + 合并重复 + 正式补齐内置「其他」收纳箱。
+         * v5 → v6（R1/R2）：分类中文化 + 合并重复 + 正式补齐内置「待定」收纳箱。
          *
          * 前置事实：分类表**没有唯一约束**（[CategoryDao.findByName] 是精确 `LIMIT 1` 查询）。
          * 因此全流程**不许依赖数据库报错兜底**，凡是「先改名再删重复」这类写法都会在
@@ -88,14 +88,14 @@ abstract class AppDatabase : RoomDatabase() {
         val MIGRATION_5_6 = object : Migration(5, 6) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 // Step 0：本次唯一 DDL。加列后所有既有分类 deletable=1（可删），
-                // 稍后 Step 2 再把收纳箱「其他」置回 0。
+                // 稍后 Step 2 再把收纳箱「待定」置回 0。
                 db.execSQL("ALTER TABLE categories ADD COLUMN deletable INTEGER NOT NULL DEFAULT 1")
 
                 // Step 1：把旧英文种子分类中文化，并合并 AI 已经建过的同名中文分类。
                 renameCategoryMergingDuplicates(db, legacyName = "eating", localizedName = "吃饭")
                 renameCategoryMergingDuplicates(db, legacyName = "drinking", localizedName = "饮品")
 
-                // Step 2：内置「其他」补齐 / 收敛为一条且不可删。
+                // Step 2：内置「待定」补齐 / 收敛为一条且不可删。
                 ensureVacuumCategory(db)
 
                 // Step 3：R8 图标兜底清理——旧的泡泡占位改为空串（渲染层走首字徽章）。
@@ -110,7 +110,7 @@ abstract class AppDatabase : RoomDatabase() {
         /** 当前 schema 版本，供迁移测试断言用（避免测试里散落魔法数字）。 */
         const val SCHEMA_VERSION = 6
 
-        /** v0.6 内置种子：吃饭 / 饮品（可删）+ 其他（收纳箱，不可删）。 */
+        /** v0.6 内置种子：吃饭 / 饮品（可删）+ 待定（收纳箱，不可删）。 */
         private val DEFAULT_CATEGORIES = listOf(
             CategorySeed(
                 name = "吃饭",
@@ -209,7 +209,7 @@ private fun renameCategoryMergingDuplicates(
 }
 
 /**
- * Step 2：保证内置「其他」**恰好存在一条**且不可删。
+ * Step 2：保证内置「待定」**恰好存在一条**且不可删。
  *
  * - 不存在 → 直接插入（createdBy=DEFAULT、deletable=0、黄金角取色、图标留空走徽章）；
  * - 已存在（AI 建过，可能多条）→ 取 MIN(id) 为主行，其余先并账单再删行，最后把主行归正。
@@ -246,7 +246,7 @@ private fun ensureVacuumCategory(db: SupportSQLiteDatabase) {
  * **故意不过滤 `deletedAt`**：迁移期删的是**分类行本身**，不是软删除账单。
  * 回收站里的账单若仍指向即将消失的分类，等它被恢复时就会挂到一个不存在的分类上（悬空）。
  * 注意这与**运行期**删分类的规则相反——运行期只转活账单，回收站账单保持原挂点，
- * 等恢复时再由 `restoreToLive` 兜底到「其他」。
+ * 等恢复时再由 `restoreToLive` 兜底到「待定」。
  */
 private fun reassignBillsThenDeleteCategories(
     db: SupportSQLiteDatabase,

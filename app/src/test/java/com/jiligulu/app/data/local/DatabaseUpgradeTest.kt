@@ -66,12 +66,12 @@ class DatabaseUpgradeTest {
         // These DAO calls force Room's real migration and schema validation.
         assertEquals(listOf(sampleBill), db.billDao().observeAll().first())
         val categories = db.categoryDao().observeAll().first()
-        // 迁移保留历史样本分类原样，并补齐内置收纳箱「其他」(v6)。
+        // 迁移保留历史样本分类原样，并补齐内置收纳箱「待定」(v6)。
         assertEquals(2, categories.size)
         assertEquals(sampleCategory.copy(iconSvg = if (version == 1) "" else SVG),
             categories.single { it.name == "自定义午餐" })
-        val vacuum = categories.single { it.name == "其他" }
-        assertFalse("收纳箱「其他」不可删", vacuum.deletable)
+        val vacuum = categories.single { it.name == "待定" }
+        assertFalse("收纳箱「待定」不可删", vacuum.deletable)
         assertEquals(if (version >= 3) sampleBudget else null, db.budgetDao().observe().first())
         assertEquals(if (version >= 4) 1 else 0, db.chatMessageDao().getAll().size)
         assertEquals(AppDatabase.SCHEMA_VERSION, db.openHelper.readableDatabase.version)
@@ -97,7 +97,7 @@ class DatabaseUpgradeTest {
         names += "fresh.db"
         val db = AppDatabase.build(context, "fresh.db")
         opened += db
-        assertEquals(listOf("吃饭", "饮品", "其他"), db.categoryDao().observeAll().first().map { it.name })
+        assertEquals(listOf("吃饭", "饮品", "待定"), db.categoryDao().observeAll().first().map { it.name })
         db.close()
         val reopened = AppDatabase.build(context, "fresh.db")
         opened += reopened
@@ -263,7 +263,7 @@ class DatabaseUpgradeTest {
 
     @Test(timeout = 30_000)
     fun aiConfirmationSharesTransactionAndKeepsExplicitTime() = runBlocking {
-        // 走真实生产构建器：默认种子「吃饭 / 饮品 / 其他」会在建库时写入。
+        // 走真实生产构建器：默认种子「吃饭 / 饮品 / 待定」会在建库时写入。
         names += "ai-confirm.db"
         val db = AppDatabase.build(context, "ai-confirm.db")
         opened += db
@@ -285,7 +285,7 @@ class DatabaseUpgradeTest {
         assertEquals(setOf(BillSource.AI_CHAT), bills.map { it.source }.toSet())
         val category = db.categoryDao().findByName("深夜食堂")!!
         assertEquals(setOf(category.id), bills.map { it.categoryId }.toSet())
-        // 默认种子「吃饭 / 饮品 / 其他」+ AI 新建的「深夜食堂」。种子由真实生产构建器种下。
+        // 默认种子「吃饭 / 饮品 / 待定」+ AI 新建的「深夜食堂」。种子由真实生产构建器种下。
         assertEquals(4, db.categoryDao().count())
         assertEquals("CONFIRMED", history.getById(id)?.status)
     }

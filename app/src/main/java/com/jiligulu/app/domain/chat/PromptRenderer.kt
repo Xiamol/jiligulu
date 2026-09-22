@@ -40,7 +40,7 @@ class PromptRenderer(
      * [com.jiligulu.app.data.repository.BillRepository.trashCandidates]。
      */
     private val trashCandidates: List<BillEntity> = emptyList(),
-    /** 「其他」分类下的活账单（整理用）。同样 T02b 才接数据源。 */
+    /** 「待定」分类下的活账单（整理用）。同样 T02b 才接数据源。 */
     private val otherBills: List<BillEntity> = emptyList()
 ) {
     /** 账本候选：按「模型可能要改/删的范围」分组，每组各自截断。 */
@@ -143,10 +143,10 @@ class PromptRenderer(
             trashCandidates.joinToString("\n") { line(it) }
     }
 
-    /** 「其他」分类下的账单整段（含标题）。同样列表为空时返回空串。 */
+    /** 「待定」分类下的账单整段（含标题）。同样列表为空时返回空串。 */
     private fun otherSection(): String {
         if (otherBills.isEmpty()) return ""
-        return "【「其他」分类下的账单】（整理用，方括号里是 id）\n" +
+        return "【「待定」分类下的账单】（整理用，方括号里是 id）\n" +
             otherBills.joinToString("\n") { line(it) }
     }
 

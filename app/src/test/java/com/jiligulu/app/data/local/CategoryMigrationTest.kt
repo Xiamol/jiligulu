@@ -39,7 +39,7 @@ class CategoryMigrationTest {
         names.forEach { context.deleteDatabase(it) }
     }
 
-    /** 仅有旧英文种子 → 迁移后为中文 + 内置「其他」，账单总数不变、挂点跟着改名走。 */
+    /** 仅有旧英文种子 → 迁移后为中文 + 内置「待定」，账单总数不变、挂点跟着改名走。 */
     @Test
     fun englishSeedsBecomeChineseAndVacuumIsAdded() = runBlocking {
         createV5("mig-english.db").use { db ->
@@ -51,7 +51,7 @@ class CategoryMigrationTest {
         val migrated = openMigrated("mig-english.db")
         val categories = migrated.categoryDao().findAllOnce()
 
-        assertEquals(setOf("吃饭", "饮品", "其他"), categories.map { it.name }.toSet())
+        assertEquals(setOf("吃饭", "饮品", "待定"), categories.map { it.name }.toSet())
         assertTrue(categories.none { it.name == "eating" || it.name == "drinking" })
 
         val vacuum = categories.single { it.name == CategoryDefaults.VACUUM_NAME }
@@ -111,11 +111,11 @@ class CategoryMigrationTest {
 
         assertEquals(1, categories.count { it.name == "吃饭" })
         assertEquals(3L, categories.single { it.name == "吃饭" }.id)
-        assertEquals(setOf("吃饭", "其他"), categories.map { it.name }.toSet())
+        assertEquals(setOf("吃饭", "待定"), categories.map { it.name }.toSet())
         assertEquals(listOf(3L), migrated.billDao().observeAll().first().map { it.categoryId })
     }
 
-    /** 「其他」已存在且有多条 → 收敛为一条、id 取 MIN、归 DEFAULT、不可删，账单并过来。 */
+    /** 「待定」已存在且有多条 → 收敛为一条、id 取 MIN、归 DEFAULT、不可删，账单并过来。 */
     @Test
     fun existingVacuumRowsConvergeToOneNonDeletable() = runBlocking {
         createV5("mig-vacuum.db").use { db ->

@@ -9,7 +9,7 @@ enum class CreatedBy { DEFAULT, AI, USER }
 
 /**
  * 分类 —— 对应 PRD §7 Category。
- * v0.6 起内置种子为「吃饭 / 饮品 / 其他」；AI 自动新建分类复用同一结构。
+ * v0.6 起内置种子为「吃饭 / 饮品 / 待定」；AI 自动新建分类复用同一结构。
  */
 @Entity(tableName = "categories")
 data class CategoryEntity(
@@ -30,9 +30,9 @@ data class CategoryEntity(
     /**
      * 能否删除。与 [createdBy] 正交——`createdBy` 表达「谁建的」，本列表达「能不能删」。
      *
-     * 为什么必须单独有一列：种子分类「吃饭」「饮品」与收纳箱「其他」的 `createdBy` 都是
+     * 为什么必须单独有一列：种子分类「吃饭」「饮品」与收纳箱「待定」的 `createdBy` 都是
      * [CreatedBy.DEFAULT]，但前者**允许**删除、后者**不允许**。同一个枚举取值被两种语义占用，
-     * 分类表里也没有别的字段能区分，所以只能显式记下来。`false` 目前只保留给「其他」。
+     * 分类表里也没有别的字段能区分，所以只能显式记下来。`false` 目前只保留给「待定」。
      */
     val deletable: Boolean = true
 )

@@ -1,7 +1,7 @@
 package com.jiligulu.app.domain.chat
 
 /**
- * 本地关键词预判，决定本轮要不要给模型塞「候选账单 / 回收站候选 / 其他账单」。
+ * 本地关键词预判，决定本轮要不要给模型塞「候选账单 / 回收站候选 / 待定账单」。
  *
  * 为什么要本地先判一次：候选三段的体积远大于账本摘要，而绝大多数输入（闲聊、记账）
  * 根本用不到它们。把它们无条件塞进去，既烧 token，又会让模型看到一堆用不上的 id 后瞎猜。
@@ -17,7 +17,7 @@ object ChatIntent {
     /** 恢复/回收站：命中才注入 `{trashCandidates}`。 */
     private val RESTORE = Regex("恢复|撤销|撤|捞|还回|回收站|垃圾桶|清空")
 
-    /** 整理「其他」：命中才注入 `{otherBills}`（R2-整理）。 */
+    /** 整理「待定」：命中才注入 `{otherBills}`（R2-整理）。 */
     private val OTHER = Regex("整理|收纳|收拾|其他里|一类|归类")
 
     fun needsCandidates(s: String) = CANDIDATE.containsMatchIn(s)
