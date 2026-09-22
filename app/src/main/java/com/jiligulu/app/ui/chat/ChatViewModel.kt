@@ -33,6 +33,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import java.io.IOException
 import java.time.ZoneId
 
 sealed interface ChatItem {
@@ -216,25 +217,30 @@ class ChatViewModel(
     /**
      * 降级路径的措辞必须能指路。原先除了「没配 Key」一律说「连不上网」，
      * 结果余额不足（402）也被说成网络问题，白白往错方向排查。
+     *
+     * v0.6 补：网络层失败（超时 / 连接被重置）与「本地规则也解析不出」是两回事——
+     * 前者要老实说网络，别让用户怀疑「是不是我说的话不被理解」。
      */
     private fun fallbackReply(nothingParsed: Boolean, cause: Throwable?): String {
         val keyProblem = cause?.message?.contains("API Key") == true
         val httpStatus = (cause as? DeepSeekHttpException)?.status
         return when {
             keyProblem && nothingParsed ->
-                "还没有配置 API Key，先到「我的 → AI 服务」里填一个，阿噜～"
+                "还没有配置 API Key，先到「设置 → AI 服务」里填一个，阿噜～"
             keyProblem ->
                 "先用本地规则整理好了，请核对后再确认入账（配置 API Key 后可让叽里咕噜帮你拆得更细）～"
             httpStatus == 402 ->
                 "叽里咕噜的账户余额不够啦，先去 DeepSeek 平台充值，再回来找我记账～"
             httpStatus == 401 ->
-                "这个 API Key 好像失效了，到「我的 → AI 服务」里换一个新的吧。"
+                "这个 API Key 好像失效了，到「设置 → AI 服务」里换一个新的吧。"
             httpStatus == 429 ->
                 "请求太频繁了，缓一会儿再跟我说～"
             httpStatus != null && httpStatus >= 500 ->
                 "DeepSeek 那边暂时有点忙，稍后再试一次。"
+            cause is IOException ->
+                "网络好像不太稳，阿噜没接上话，你再说一遍试试～"
             nothingParsed ->
-                "暂时没连上 DeepSeek。请分开说每笔账，例如「昨天中午吃饭 9 元」，我会先用本地规则整理。"
+                "暂时没连上 DeepSeek。记账的话一句一笔最稳（如「昨天中午吃饭 9 元」），再试一次也行～"
             else ->
                 "先用本地规则整理好了，请核对金额、名称和时间，再确认入账，阿噜～"
         }

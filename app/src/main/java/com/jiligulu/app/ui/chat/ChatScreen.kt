@@ -48,6 +48,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -67,6 +68,7 @@ import com.jiligulu.app.ui.components.BillDateTimeField
 import com.jiligulu.app.ui.theme.ExpenseGreen
 import com.jiligulu.app.ui.theme.IncomeRed
 import com.jiligulu.app.ui.theme.GuluBrandFont
+import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -85,15 +87,26 @@ fun ChatScreen(
     val pending by vm.pending.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
     var input by rememberSaveable { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
     val sendInput = {
         if (input.isNotBlank() && ready && !sending) {
             vm.send(input)
             input = ""
+            // 刚发出的话必须在看得见的位置——正翻历史时发消息也要拉回底部。
+            scope.launch { listState.animateScrollToItem(0) }
         }
     }
 
+    // 每次进入都停在最新一条（微信/QQ 的惯例）：瞬时定位，不播动画。
+    LaunchedEffect(Unit) { listState.scrollToItem(0) }
+
+    // reverseLayout 下 index 0 就是最新一条：一进页面天然停在底部，
+    // 不再需要「从顶部一路动画滚到底」——那既卡又难看（用户报过）。
+    // 只在自己已经在底部时跟随新消息；正在翻历史时不打断视线。
     LaunchedEffect(items.size) {
-        if (items.isNotEmpty()) listState.animateScrollToItem(items.size - 1)
+        val atBottom = listState.firstVisibleItemIndex == 0 &&
+            listState.firstVisibleItemScrollOffset == 0
+        if (atBottom) listState.animateScrollToItem(0)
     }
 
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
@@ -128,15 +141,17 @@ fun ChatScreen(
         }
 
         // ---------- 消息流 ----------
+        // reverseLayout = 微信/QQ 那套：最新消息贴底，往上滑就是历史，首次进入零滚动。
         LazyColumn(
             state = listState,
+            reverseLayout = true,
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth(),
             contentPadding = PaddingValues(horizontal = 18.dp, vertical = 14.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            items(items, key = { it.id }) { item ->
+            items(items.asReversed(), key = { it.id }) { item ->
                 // 设计稿动效③：对话气泡从底部上滑+渐显
                 Box(Modifier.animateItem()) {
                     when (item) {

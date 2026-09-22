@@ -3,6 +3,7 @@ package com.jiligulu.app.core.ai
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
@@ -128,61 +129,102 @@ class DeepSeekClient(private val apiKey: String, private val client: OkHttpClien
         systemPrompt: String,
         userInput: String,
         history: List<ChatTurn> = emptyList()
-    ): Result<AiParseResult> =
-        withContext(Dispatchers.IO) {
+    ): Result<AiParseResult> = withContext(Dispatchers.IO) {
+        var lastFailure: Exception? = null
+        for (attempt in 1..MAX_ATTEMPTS) {
             try {
-                val requestJson = buildJsonObject {
-                    put("model", AiConfig.MODEL)
-                    put("temperature", 0.7)
-                    put("response_format", buildJsonObject { put("type", "json_object") })
-                    put("messages", buildJsonArray {
-                        addJsonObject {
-                            put("role", "system")
-                            put("content", systemPrompt)
-                        }
-                        // 历史被时间窗裁过之后，最早的几条可能是 assistant 轮（它对应的 user 轮滚出去了）。
-                        // OpenAI 兼容接口要求首条必须是 user，所以把开头连续的 assistant 轮整体丢掉，
-                        // 直到遇到第一个 user 为止。
-                        history.dropWhile { it.role.equals("assistant", ignoreCase = true) }.forEach { turn ->
-                            addJsonObject {
-                                put("role", turn.role)
-                                put("content", turn.content)
-                            }
-                        }
-                        addJsonObject {
-                            put("role", "user")
-                            put("content", userInput)
-                        }
-                    })
-                }.toString()
-
-                val request = Request.Builder()
-                    .url(AiConfig.BASE_URL)
-                    .header("Authorization", "Bearer $apiKey")
-                    .post(requestJson.toRequestBody("application/json".toMediaType()))
-                    .build()
-
-                val parsed = client.newCall(request).awaitResponse().use { response ->
-                    val body = response.body?.string().orEmpty()
-                    if (!response.isSuccessful) {
-                        throw DeepSeekHttpException(response.code, body.take(400))
-                    }
-                    val root = json.parseToJsonElement(body).jsonObject
-                    logCacheUsage(root)
-                    val content = root["choices"]!!.jsonArray[0]
-                        .jsonObject["message"]!!.jsonObject["content"]!!.jsonPrimitive.content
-                    json.decodeFromString(AiParseResult.serializer(), unwrapJsonFence(content))
-                }
-                Result.success(parsed)
+                return@withContext Result.success(executeOnce(systemPrompt, userInput, history))
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (failure: Exception) {
-                Result.failure(failure)
+                lastFailure = failure
+                if (attempt < MAX_ATTEMPTS && isRetryable(failure)) {
+                    // 移动网络下「上一句还好、下一句就断」多半是 keep-alive 连接被静默回收，
+                    // 重发一次通常就好——这是用户能直接感知到的最大改善。
+                    Log.w(TAG, "第 $attempt 次请求失败，${RETRY_DELAY_MS}ms 后重试：${failure.message}")
+                    delay(RETRY_DELAY_MS)
+                } else {
+                    // 真实原因必须落日志：UI 只能给一句人话，
+                    // 到底是超时、连接被重置还是 5xx，只能靠这行定位。
+                    Log.w(TAG, "请求失败（不再重试）：${failure.message}", failure)
+                    return@withContext Result.failure(failure)
+                }
             }
         }
+        Result.failure(lastFailure ?: IllegalStateException("DeepSeek 请求失败"))
+    }
+
+    /** 单次请求：组装 → 发送 → 解析。重试策略与失败日志都在 [parseBill]。 */
+    private suspend fun executeOnce(
+        systemPrompt: String,
+        userInput: String,
+        history: List<ChatTurn>
+    ): AiParseResult {
+        val requestJson = buildJsonObject {
+            put("model", AiConfig.MODEL)
+            put("temperature", 0.7)
+            put("response_format", buildJsonObject { put("type", "json_object") })
+            put("messages", buildJsonArray {
+                addJsonObject {
+                    put("role", "system")
+                    put("content", systemPrompt)
+                }
+                // 历史被时间窗裁过之后，最早的几条可能是 assistant 轮（它对应的 user 轮滚出去了）。
+                // OpenAI 兼容接口要求首条必须是 user，所以把开头连续的 assistant 轮整体丢掉，
+                // 直到遇到第一个 user 为止。
+                history.dropWhile { it.role.equals("assistant", ignoreCase = true) }.forEach { turn ->
+                    addJsonObject {
+                        put("role", turn.role)
+                        put("content", turn.content)
+                    }
+                }
+                addJsonObject {
+                    put("role", "user")
+                    put("content", userInput)
+                }
+            })
+        }.toString()
+
+        val request = Request.Builder()
+            .url(AiConfig.BASE_URL)
+            .header("Authorization", "Bearer $apiKey")
+            .post(requestJson.toRequestBody("application/json".toMediaType()))
+            .build()
+
+        return client.newCall(request).awaitResponse().use { response ->
+            val body = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                throw DeepSeekHttpException(response.code, body.take(400))
+            }
+            val root = json.parseToJsonElement(body).jsonObject
+            logCacheUsage(root)
+            val content = root["choices"]!!.jsonArray[0]
+                .jsonObject["message"]!!.jsonObject["content"]!!.jsonPrimitive.content
+            json.decodeFromString(AiParseResult.serializer(), unwrapJsonFence(content))
+        }
+    }
 
     companion object {
         private const val TAG = "DeepSeekClient"
+
+        /** 首次 + 重试 1 次。移动网络下这一次重发就能救回绝大多数「偶发连不上」。 */
+        private const val MAX_ATTEMPTS = 2
+
+        /** 重试前的短暂退避：足够让连接池换一条新连接，又不至于让用户等太久。 */
+        private const val RETRY_DELAY_MS = 600L
+
+        /**
+         * 只有「重试有意义」的失败才重发：
+         * - [IOException]：连接被重置、DNS 抖动、读写超时——移动网络下最常见的偶发失败，重发基本必成
+         * - 429 / 5xx：服务端限流或打了个喷嚏
+         *
+         * Key 失效（401）、余额不足（402）、请求格式错（400）重试多少次都一样，不浪费用户的 token。
+         */
+        private fun isRetryable(failure: Exception): Boolean = when (failure) {
+            is IOException -> true
+            is DeepSeekHttpException -> failure.status == 429 || failure.status >= 500
+            else -> false
+        }
 
         private val sharedClient = OkHttpClient.Builder()
             .connectTimeout(15, TimeUnit.SECONDS)
