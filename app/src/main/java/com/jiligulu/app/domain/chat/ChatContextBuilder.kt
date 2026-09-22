@@ -41,10 +41,19 @@ object ChatContextBuilder {
     /** 账单时间窗：3 天。 */
     const val BILL_WINDOW_DAYS = 3L
 
-    /** 再保险：账单条数上限，避免某天记了 200 笔把 prompt 撑爆。 */
-    const val MAX_BILLS = 60
+    /**
+     * 账本条数上限。v0.6 从 60 收敛到 30：账本段落在动态区、每轮都是实打实的缓存 miss，
+     * 裁掉一半确实省 token。历史消息不受此影响（见 [MAX_MESSAGES]）。
+     */
+    const val MAX_BILLS = 30
 
-    /** 消息条数上限，同理。 */
+    /**
+     * 消息条数上限，约 30 轮。
+     *
+     * ⚠️ **刻意不收敛到 12 轮**：用户明确要求「历史对话是刚需，否则他可能无法接着跟我聊」；
+     * 而且 append-only 下历史越长，`[system + 历史]` 这个前缀命中得越多，裁切是双重损失。
+     * 所以这里保持 60。
+     */
     const val MAX_MESSAGES = 60
 
     private val dateFormat = DateTimeFormatter.ofPattern("M月d日 HH:mm")
@@ -58,7 +67,9 @@ object ChatContextBuilder {
         zone: ZoneId
     ): ChatContext {
         val nowZoned = Instant.ofEpochMilli(requestMillis).atZone(zone)
-        val now = nowZoned.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
+        // v0.6：`{now}` 粒度降到分钟。秒级时间每轮都在变，会让动态段最后一行的前缀永远错位；
+        // 记账也只需要到分钟，带上秒纯属噪声。
+        val clock = nowZoned.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))
         val weekday = nowZoned.format(weekdayFormat)
 
         val messageCutoff = requestMillis - MESSAGE_WINDOW_HOURS * 3_600_000L
@@ -78,7 +89,7 @@ object ChatContextBuilder {
             }
 
         return ChatContext(
-            now = "$now（$weekday）",
+            now = "$clock（$weekday）",
             timeZone = zone.id,
             recentMessages = lines,
             recentBills = billLines
@@ -103,9 +114,12 @@ object ChatContextBuilder {
             text.takeIf { it.isNotBlank() }?.let { ChatContext.MessageLine("叽里咕噜", it) }
         }
 
-        "DRAFT" -> {
-            val summary = draftSummary() ?: rawInput
-            summary.takeIf { it.isNotBlank() }?.let { ChatContext.MessageLine("（账单草稿）", it) }
+        "DRAFT" -> when (status) {
+            // R9/R3：草稿默认不进上下文。只有真正落库成功的草稿才让模型知道「这笔已入账」，
+            // 正在编辑/已收起/已删除的一律不喂——否则每轮的摘要都会随编辑状态变，
+            // 等于每轮亲手把上一轮的前缀缓存又砸掉一次。
+            "CONFIRMED" -> draftSummary()?.let { ChatContext.MessageLine("（账单草稿）", it) }
+            else -> null
         }
 
         // 改账/删账卡：告诉模型上轮它提过这么一次变更，用户有没有确认。
@@ -126,20 +140,20 @@ object ChatContextBuilder {
         "提议$verb ${payload.items.size} 笔账单（$state）"
     }.getOrNull()
 
-    /** 草稿卡摘要：「牛肉面 12 元（吃 · 已入账）」。解析失败就退回原话。 */
+    /**
+     * 草稿卡摘要：「牛肉面 12 元（已入账）」。
+     *
+     * 只有 `status == "CONFIRMED"` 的草稿会走到这里（见 [toLine]），所以措辞直接写「已入账」。
+     * R6 的「存活三态」（已删除 N 笔）需要回查 liveBillIds，属 T02b 范围，本次先不做。
+     */
     private fun ChatMessageEntity.draftSummary(): String? = runCatching {
         val drafts = DraftHistoryCodec.decode(draftPayload)
         if (drafts.isEmpty()) return@runCatching null
-        val state = when (status) {
-            "CONFIRMED" -> "已入账"
-            "DISMISSED" -> "用户取消了"
-            else -> "还没确认"
-        }
         drafts.take(4).joinToString("、") { draft ->
             val amount = draft.amountText.ifBlank { "?" }
             val name = draft.detail.ifBlank { draft.categoryName }
             "$name $amount 元"
-        } + "（$state）"
+        } + "（已入账）"
     }.getOrNull()
 
     /**

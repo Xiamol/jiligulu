@@ -12,5 +12,17 @@ object AiConfig {
      */
     val DEFAULT_API_KEY: String = com.jiligulu.app.BuildConfig.DEEPSEEK_API_KEY
 
-    const val PROMPT_ASSET_PATH = "prompts/parse_bill.txt"
+    /**
+     * R9：逐字不变的固定 system message。
+     *
+     * 它是 DeepSeek 前缀缓存的地基，**不含任何占位符**——昵称、时间、账本、分类一律不进这里，
+     * 否则改一个称呼就会打穿整段前缀，缓存命中率归零。
+     */
+    const val SYSTEM_PROMPT_ASSET_PATH = "prompts/parse_bill_system.txt"
+
+    /**
+     * R9：动态上下文模板，占位符顺序固定
+     * （称呼 → 分类 → 待补充 → 账本 → 候选 → 回收站候选 → 其他账单 → 时间 → 时区 → 输入）。
+     */
+    const val CONTEXT_PROMPT_ASSET_PATH = "prompts/parse_bill_context.txt"
 }

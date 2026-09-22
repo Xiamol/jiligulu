@@ -1,5 +1,6 @@
 package com.jiligulu.app.core.ai
 
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -7,9 +8,11 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.addJsonObject
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -118,7 +121,10 @@ class DeepSeekClient(private val apiKey: String, private val client: OkHttpClien
                             put("role", "system")
                             put("content", systemPrompt)
                         }
-                        history.forEach { turn ->
+                        // 历史被时间窗裁过之后，最早的几条可能是 assistant 轮（它对应的 user 轮滚出去了）。
+                        // OpenAI 兼容接口要求首条必须是 user，所以把开头连续的 assistant 轮整体丢掉，
+                        // 直到遇到第一个 user 为止。
+                        history.dropWhile { it.role.equals("assistant", ignoreCase = true) }.forEach { turn ->
                             addJsonObject {
                                 put("role", turn.role)
                                 put("content", turn.content)
@@ -142,8 +148,9 @@ class DeepSeekClient(private val apiKey: String, private val client: OkHttpClien
                     if (!response.isSuccessful) {
                         throw DeepSeekHttpException(response.code, body.take(400))
                     }
-                    val content = json.parseToJsonElement(body)
-                        .jsonObject["choices"]!!.jsonArray[0]
+                    val root = json.parseToJsonElement(body).jsonObject
+                    logCacheUsage(root)
+                    val content = root["choices"]!!.jsonArray[0]
                         .jsonObject["message"]!!.jsonObject["content"]!!.jsonPrimitive.content
                     json.decodeFromString(AiParseResult.serializer(), unwrapJsonFence(content))
                 }
@@ -156,11 +163,26 @@ class DeepSeekClient(private val apiKey: String, private val client: OkHttpClien
         }
 
     companion object {
+        private const val TAG = "DeepSeekClient"
+
         private val sharedClient = OkHttpClient.Builder()
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(60, TimeUnit.SECONDS)
             .callTimeout(75, TimeUnit.SECONDS)
             .build()
+    }
+
+    /**
+     * R9 的唯一可验收指标：本轮 prompt 的缓存命中 / 未命中 token 数。
+     *
+     * 只打日志、绝不改行为——命中率长期为 0 就说明 system 段被动态内容污染了，
+     * 或者历史又被每轮重排，看这行日志能第一时间发现。
+     */
+    private fun logCacheUsage(root: JsonObject) {
+        val usage = root["usage"]?.jsonObject ?: return
+        val hit = usage["prompt_cache_hit_tokens"]?.jsonPrimitive?.contentOrNull
+        val miss = usage["prompt_cache_miss_tokens"]?.jsonPrimitive?.contentOrNull
+        Log.d(TAG, "prompt cache: hit=$hit miss=$miss")
     }
 }
 

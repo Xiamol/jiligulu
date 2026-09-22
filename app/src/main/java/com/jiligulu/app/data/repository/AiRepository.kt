@@ -77,9 +77,14 @@ class AiRepository(
     private val userPrefs: UserPrefs,
     private val chatHistoryRepository: ChatHistoryRepository
 ) {
-    /** Versioned with the app; the complete parsing contract lives in one asset. */
-    private val promptTemplate: String by lazy {
-        context.assets.open(AiConfig.PROMPT_ASSET_PATH).bufferedReader().use { it.readText() }
+    /** R9：逐字不变的固定 system 段；版本随 App 走，解析契约全在这一个资源里。 */
+    private val systemPromptTemplate: String by lazy {
+        context.assets.open(AiConfig.SYSTEM_PROMPT_ASSET_PATH).bufferedReader().use { it.readText() }
+    }
+
+    /** R9：动态上下文模板（称呼/分类/账本/候选/时间/输入）。 */
+    private val contextPromptTemplate: String by lazy {
+        context.assets.open(AiConfig.CONTEXT_PROMPT_ASSET_PATH).bufferedReader().use { it.readText() }
     }
 
     /**
@@ -109,22 +114,26 @@ class AiRepository(
     suspend fun parse(input: String, requestMillis: Long, zone: ZoneId): Result<AiParseResult> {
         val categories = categoryRepository.getAll()
         val pending = PromptRenderer.pendingOf(chatHistoryRepository.latestPending())
-        val context = buildContext(categories, requestMillis, zone)
+        val chatContext = buildContext(categories, requestMillis, zone)
         val candidates = PromptRenderer.candidatesFrom(
             billRepository.recent(BillRepository.CANDIDATE_SCAN_LIMIT), requestMillis, zone
         )
-        val prompt = PromptRenderer(
-            template = promptTemplate,
+        // R9：system 段逐字不变（缓存地基），动态内容全部走 context 段。
+        val renderer = PromptRenderer(
+            systemTemplate = systemPromptTemplate,
+            contextTemplate = contextPromptTemplate,
             categories = categories,
-            context = context,
+            context = chatContext,
             nickname = userPrefs.nickname.first().ifBlank { "主人" },
             suffix = userPrefs.nameSuffix.first(),
             candidates = candidates,
             pending = pending,
             zone = zone
-        ).render(input)
+        )
+        val system = renderer.renderSystem()
+        val contextBlock = renderer.renderContext(input)
         return DeepSeekClient(effectiveApiKey())
-            .parseBill(prompt, input, history = recentTurns(requestMillis))
+            .parseBill(system, contextBlock, history = recentTurns(requestMillis))
     }
 
     /**

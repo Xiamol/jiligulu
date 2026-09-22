@@ -1,0 +1,21 @@
+称呼说明：{address}
+
+现有分类列表（name / 归类关键词）：
+{categories}
+
+【待补充的账】
+{pending}
+
+【最近三天的账本】（供你了解用户的近况）
+{bills}
+
+{candidates}
+
+{trashCandidates}
+
+{otherBills}
+
+当前时间：{now}
+设备时区：{timezone}
+
+用户这轮说：{input}

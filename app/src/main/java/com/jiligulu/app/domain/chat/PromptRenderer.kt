@@ -16,19 +16,32 @@ import java.time.format.DateTimeFormatter
 /**
  * 提示词的「填空」逻辑集中在这里。
  *
- * 原来这些都在 [com.jiligulu.app.data.repository.AiRepository] 里，
- * 拆出来是为了能单独测：提示词里少一个 `{bills}` 占位符、或者候选账单忘了带 id，
+ * v0.6 R9 起拆成两半，各管一段、都不许越界：
+ * - [renderSystem]：读逐字不变的 system 资源，**不做任何替换**。它是 DeepSeek 前缀缓存的地基——
+ *   缓存按前缀 64 token 一块地匹配，任何一个随请求变化的字符都会让整段命中率归零
+ *   （这正是 v0.5.5 命中率为 0 的根因：旧模板第 3 行的 `{now}` 每次都变，前缀在第 3 行就断了）。
+ * - [renderContext]：读动态上下文模板，按固定顺序填占位符。称呼、分类、账本、候选、时间、输入都在这里。
+ *
+ * 拆出来还有一个老理由：能单独测。提示词里少一个 `{bills}` 占位符、或者候选账单忘了带 id，
  * 模型就会静默地瞎猜，而单元测试能立刻抓到。
  */
 class PromptRenderer(
-    private val template: String,
+    private val systemTemplate: String,
+    private val contextTemplate: String,
     private val categories: List<CategoryEntity>,
     private val context: ChatContext,
     private val nickname: String,
     private val suffix: String,
     private val candidates: CandidateBills,
     private val pending: PendingDraft?,
-    private val zone: ZoneId
+    private val zone: ZoneId,
+    /**
+     * 回收站候选（恢复用）。T02a 还没有数据源，先留空；T02b 接
+     * [com.jiligulu.app.data.repository.BillRepository.trashCandidates]。
+     */
+    private val trashCandidates: List<BillEntity> = emptyList(),
+    /** 「其他」分类下的活账单（整理用）。同样 T02b 才接数据源。 */
+    private val otherBills: List<BillEntity> = emptyList()
 ) {
     /** 账本候选：按「模型可能要改/删的范围」分组，每组各自截断。 */
     data class CandidateBills(
@@ -43,25 +56,49 @@ class PromptRenderer(
             get() = latest.size + today.size + yesterday.size + beforeYesterday.size + thisWeek.size
     }
 
-    fun render(input: String): String = template
-        .replace("{nickname}", nickname)
-        .replace("{suffix}", suffix)
+    /**
+     * 固定 system 段。**逐字返回，不做任何替换**。
+     *
+     * 这里有且只有静态内容：人设、五类任务规则、新建分类规则、reply 要求、输出 JSON 格式。
+     * 昵称/时间/账本一旦出现在这里，改一次就得整段重算，前缀缓存的意义就没了。
+     */
+    fun renderSystem(): String = systemTemplate
+
+    /**
+     * 动态上下文段。占位符顺序**固定**（称呼 → 分类 → 待补充 → 账本 → 候选 → 时间 → 输入），
+     * 刻意用连续的 `replace` 而不是 Map：顺序一乱，模型读到的因果就乱了；这里也不允许换成无序结构。
+     *
+     * 候选三段「按需注入」：只有 [ChatIntent] 的本地关键词命中才注入，不命中就整段留空，
+     * 既省 token，也避免模型看到一堆用不上的候选后瞎改。
+     */
+    fun renderContext(input: String): String = contextTemplate
+        .replace("{address}", renderAddress())
         .replace("{categories}", renderCategories())
+        .replace("{pending}", renderPending())
+        .replace("{bills}", renderBills())
+        .replace("{candidates}", if (ChatIntent.needsCandidates(input)) candidatesSection() else "")
+        .replace("{trashCandidates}", if (ChatIntent.needsTrash(input)) trashSection() else "")
+        .replace("{otherBills}", if (ChatIntent.needsOtherBills(input)) otherSection() else "")
         .replace("{now}", context.now)
         .replace("{timezone}", zone.id)
-        .replace("{history}", renderHistory())
-        .replace("{bills}", renderBills())
-        .replace("{pending}", renderPending())
-        .replace("{candidates}", renderCandidates())
         .replace("{input}", input)
+
+    /**
+     * 称呼说明。昵称刻意放在动态段——它是「极低频率变化」，但一旦进了 system 就会污染前缀；
+     * 放这里之后，改一次称呼最多影响本轮这一小段，前面的 [renderSystem] 照样命中。
+     */
+    private fun renderAddress(): String {
+        val name = "$nickname$suffix"
+        return if (name.isBlank()) {
+            "用户还没告诉你该怎么称呼他，用「阿噜」的语气自然说话就好，不用硬叫名字。"
+        } else {
+            "用户希望你称他为：$name（不必每句都叫，自然一点）"
+        }
+    }
 
     private fun renderCategories(): String = categories.joinToString("\n") { category ->
         "- ${CategoryLabels.displayName(category.name)}（关键词：${category.keywords.ifBlank { "无" }}）"
     }
-
-    private fun renderHistory(): String =
-        if (context.recentMessages.isEmpty()) "（这是你们第一次说话）"
-        else context.recentMessages.joinToString("\n") { "${it.role}：${it.text}" }
 
     private fun renderBills(): String =
         if (context.recentBills.isEmpty()) "（最近三天还没有记过账）"
@@ -76,6 +113,10 @@ class PromptRenderer(
         if (pending == null) "（没有待补充的账）"
         else "用户之前说了「${pending.rawInput}」，记着一笔 ${pending.amountText} 元的${typeName(pending.type)}，" +
             "但还没说是什么。如果这轮补上了名目，请合并成一条完整的 add，不要再追问。"
+
+    /** 候选账单整段（含标题）。标题写在返回值里而不是模板里，这样不注入时整段为空、标题也不会漏出来。 */
+    private fun candidatesSection(): String =
+        "【候选账单】（改账/删账只能从这里面挑，方括号里是 id）\n" + renderCandidates()
 
     /**
      * 候选账单。
@@ -93,6 +134,20 @@ class PromptRenderer(
             block("本周更早", candidates.thisWeek)
         }
         return blocks.joinToString("\n\n")
+    }
+
+    /** 回收站候选整段（含标题）。T02a 数据源未接、列表恒空，返回空串，不留一个空标题。 */
+    private fun trashSection(): String {
+        if (trashCandidates.isEmpty()) return ""
+        return "【回收站候选】（恢复只能从这里面挑，方括号里是 id）\n" +
+            trashCandidates.joinToString("\n") { line(it) }
+    }
+
+    /** 「其他」分类下的账单整段（含标题）。同样列表为空时返回空串。 */
+    private fun otherSection(): String {
+        if (otherBills.isEmpty()) return ""
+        return "【「其他」分类下的账单】（整理用，方括号里是 id）\n" +
+            otherBills.joinToString("\n") { line(it) }
     }
 
     private fun MutableList<String>.block(title: String, bills: List<BillEntity>) {
@@ -116,6 +171,7 @@ class PromptRenderer(
 
     companion object {
         private val dateFormat = DateTimeFormatter.ofPattern("M月d日 EEE HH:mm", java.util.Locale.CHINA)
+
         /**
          * 编解码必须带上默认值。
          *

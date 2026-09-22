@@ -398,12 +398,13 @@ class ChatContextAndCommandsTest {
         val fixture = Fixture("prompt-render.db")
         val id = fixture.bill("牛肉面", 1200, fixture.at(12, 0))
         val context = ChatContext(
-            now = "2026-09-21 20:00:00（周一）", timeZone = fixture.zone.id,
+            now = "2026-09-21 20:00（周一）", timeZone = fixture.zone.id,
             recentMessages = listOf(ChatContext.MessageLine("用户", "我发个5")),
             recentBills = emptyList()
         )
-        val prompt = PromptRenderer(
-            template = "P={pending}\nC={candidates}\nH={history}",
+        val renderer = PromptRenderer(
+            systemTemplate = "你是叽里咕噜",
+            contextTemplate = "A={address}\nP={pending}\nC={candidates}",
             categories = listOf(CategoryEntity(id = 1, name = "eating", colorHue = 1f, colorIndex = 0)),
             context = context,
             nickname = "路陌", suffix = "大人",
@@ -412,11 +413,13 @@ class ChatContextAndCommandsTest {
             ),
             pending = PendingDraft("5", rawInput = "5", createdAt = fixture.now),
             zone = fixture.zone
-        ).render("面条")
+        )
+        // 这轮的输入会被 ChatIntent 判成「疑似改账」，候选段（及其 id）才会注入。
+        val prompt = renderer.renderContext("那碗面改成 15 块")
 
         assertTrue("挂起账必须进 prompt", prompt.contains("5 元"))
         assertTrue("候选账单必须带 id", prompt.contains("[$id]"))
-        assertTrue("上下文对话要带上", prompt.contains("我发个5"))
+        assertTrue("称呼进动态段", prompt.contains("路陌大人"))
     }
 
     @Test
