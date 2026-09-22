@@ -53,6 +53,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.ImeAction
@@ -68,10 +69,14 @@ import com.jiligulu.app.ui.components.BillDateTimeField
 import com.jiligulu.app.ui.theme.ExpenseGreen
 import com.jiligulu.app.ui.theme.IncomeRed
 import com.jiligulu.app.ui.theme.GuluBrandFont
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+
+/** 键盘收起动画的等待时长：等列表高度稳定后再定位，避免算错位置。 */
+private const val KEYBOARD_SETTLE_MS = 180L
 
 /** Persistent conversation with soft lavender bubbles and editable ledger draft cards. */
 @Composable
@@ -88,12 +93,19 @@ fun ChatScreen(
     val listState = rememberLazyListState()
     var input by rememberSaveable { mutableStateOf("") }
     val scope = rememberCoroutineScope()
+    val focusManager = LocalFocusManager.current
     val sendInput = {
         if (input.isNotBlank() && ready && !sending) {
             vm.send(input)
             input = ""
-            // 刚发出的话必须在看得见的位置——正翻历史时发消息也要拉回底部。
-            scope.launch { listState.animateScrollToItem(0) }
+            // 发完就收键盘、回到最新（用户报过：键盘不退、页面也不跟，回复被挡在下面）。
+            // 顺序要紧：先清焦点让键盘收起，等列表高度稳定后再定位，
+            // 否则键盘动画期间算出来的位置是错的。
+            focusManager.clearFocus()
+            scope.launch {
+                delay(KEYBOARD_SETTLE_MS)
+                listState.animateScrollToItem(0)
+            }
         }
     }
 
