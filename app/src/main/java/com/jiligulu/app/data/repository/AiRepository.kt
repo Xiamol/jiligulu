@@ -2,6 +2,7 @@ package com.jiligulu.app.data.repository
 
 import android.content.Context
 import com.jiligulu.app.core.ai.AiConfig
+import com.jiligulu.app.core.ai.AiOption
 import com.jiligulu.app.core.ai.AiParseResult
 import com.jiligulu.app.core.ai.ChatTurn
 import com.jiligulu.app.core.ai.DeepSeekClient
@@ -59,11 +60,17 @@ sealed interface AiTurn {
     /** 新增账单草稿。 */
     data class Drafts(val reply: String, val drafts: List<ConfirmItem>) : AiTurn
 
-    /** 改账/删账指令，等用户在卡片上点确认。 */
+    /** 改账/删账/恢复指令，等用户在卡片上点确认。 */
     data class Commands(val reply: String, val kind: CommandKind, val items: List<CommandItem>) : AiTurn
 
     /** 话没说完：挂起等下一句。 */
     data class Pending(val reply: String, val draft: PendingDraft) : AiTurn
+
+    /**
+     * R4/R5：可点选项（指路 / 带路）。用户没指定具体账单、只问「怎么恢复」，
+     * 或问「回收站在哪」时出现；选项的跳转/追问渲染归 T04，这里只携带归一化后的选项。
+     */
+    data class Choices(val reply: String, val options: List<AiOption>) : AiTurn
 }
 
 /**
@@ -76,7 +83,9 @@ class AiRepository(
     private val categoryRepository: CategoryRepository,
     private val billRepository: BillRepository,
     private val userPrefs: UserPrefs,
-    private val chatHistoryRepository: ChatHistoryRepository
+    private val chatHistoryRepository: ChatHistoryRepository,
+    /** R4：恢复时解析内置「待定」兜底分类（CategoryAdminRepository.vacuumId）。 */
+    private val categoryAdminRepository: CategoryAdminRepository
 ) {
     /** R9：逐字不变的固定 system 段；版本随 App 走，解析契约全在这一个资源里。 */
     private val systemPromptTemplate: String by lazy {
@@ -95,7 +104,8 @@ class AiRepository(
      */
     suspend fun effectiveApiKey(): String {
         val key = userPrefs.apiKeyOverride.first().ifBlank { AiConfig.DEFAULT_API_KEY }
-        require(key.isNotBlank()) { "还没有配置 API Key，请到「我的 → AI 服务」里填写" }
+        // R5：App 没有「我的」页，AI 服务在设置页——报错也要指路指对，跟功能地图口径一致。
+        require(key.isNotBlank()) { "还没有配置 API Key，请到「设置 → AI 服务」里填写" }
         return key
     }
 
@@ -119,6 +129,8 @@ class AiRepository(
         val candidates = PromptRenderer.candidatesFrom(
             billRepository.recent(BillRepository.CANDIDATE_SCAN_LIMIT), requestMillis, zone
         )
+        // R4：回收站候选（情况六 restore 的 target_id 来源）。是否注入由 ChatIntent.needsTrash 决定。
+        val trashCandidates = billRepository.trashCandidates(BillRepository.TRASH_CANDIDATE_LIMIT)
         // R9：system 段逐字不变（缓存地基），动态内容全部走 context 段。
         val renderer = PromptRenderer(
             systemTemplate = systemPromptTemplate,
@@ -129,7 +141,8 @@ class AiRepository(
             suffix = userPrefs.nameSuffix.first(),
             candidates = candidates,
             pending = pending,
-            zone = zone
+            zone = zone,
+            trashCandidates = trashCandidates
         )
         val system = renderer.renderSystem()
         val contextBlock = renderer.renderContext(input)
@@ -186,7 +199,27 @@ class AiRepository(
             return AiTurn.Chat(parsed.reply.ifBlank { "阿噜没找到你要删的那笔，说个大概时间或名目？" })
         }
 
-        val adds = parsed.bills.filter { it.isAdd || (!it.isUpdate && !it.isDelete) }
+        // R4 恢复：target_id 必须命中回收站候选，否则整条丢弃（与改/删同一道硬校验，防幻觉）。
+        val restores = parsed.bills.filter { it.isRestore }
+        if (restores.isNotEmpty()) {
+            val trashById = billRepository.trashCandidates(BillRepository.TRASH_CANDIDATE_LIMIT).associateBy { it.id }
+            val items = restores.mapNotNull { draft ->
+                trashById[draft.targetId]?.let { buildRestoreItem(it, categoryNames, zone) }
+            }
+            if (items.isNotEmpty()) return AiTurn.Commands(parsed.reply.ifBlank { "这些账阿噜从回收站捞回来，确认一下～" }, CommandKind.RESTORE, items)
+            return AiTurn.Chat(parsed.reply.ifBlank { "阿噜在回收站没找到你说的那笔，说个大概名目或哪天删的？" })
+        }
+
+        // R4/R5：没给任何账单动作时，可点选项（多选卡 / 单目标跳转）优先于闲聊。
+        if (parsed.bills.isEmpty()) {
+            val choices = normalizeOptions(parsed.options).ifEmpty {
+                parsed.navigate?.takeIf { it.isNotBlank() }?.let { listOf(AiOption(label = "", action = it)) }
+                    ?: emptyList()
+            }
+            if (choices.isNotEmpty()) return AiTurn.Choices(parsed.reply.ifBlank { "阿噜给你指条路～" }, choices)
+        }
+
+        val adds = parsed.bills.filter { it.isAdd || (!it.isUpdate && !it.isDelete && !it.isRestore) }
         // 模型报了「话没说完」；或者它这轮只回了一句话、又确实有挂着的账，就沿用挂起态。
         val carried = pending?.takeIf { adds.isEmpty() }
         val modelPending = parsed.pending?.takeIf { it.amountYuan > 0 }
@@ -277,6 +310,34 @@ class AiRepository(
         checked = true
     )
 
+    /** R4 恢复指令条目：before 标出「回收站中」，after 是捞回后的原貌（金额/分类不动）。 */
+    private fun buildRestoreItem(bill: BillEntity, categoryNames: Map<Long, String>, zone: ZoneId) = CommandItem(
+        billId = bill.id,
+        title = bill.detail.ifBlank { CategoryLabels.displayName(categoryNames[bill.categoryId].orEmpty()) },
+        categoryName = CategoryLabels.displayName(categoryNames[bill.categoryId].orEmpty()),
+        iconEmoji = "♻️",
+        isExpense = bill.type == BillType.EXPENSE,
+        before = "回收站中 · " + summary(bill, categoryNames, zone),
+        after = summary(bill, categoryNames, zone),
+        checked = true
+    )
+
+    /**
+     * R4/R5：把模型输出的 options 归一成 UI 能直接用的选项。
+     *
+     * - "navigate:xxx" 形式在这里剥掉前缀，UI 拿到的 action 就是跳转目标本身
+     * - label / action 为空的条目直接丢掉：点无可点，留着只会渲染出坏按钮
+     * - 表外取值（模型编造的 action）原样保留，忽略策略在 UI 侧——那里才知道自己认哪些值
+     */
+    private fun normalizeOptions(options: List<AiOption>): List<AiOption> = options.mapNotNull { option ->
+        val action = option.action
+        when {
+            option.label.isBlank() || action.isBlank() -> null
+            action.startsWith("navigate:") -> option.copy(action = action.removePrefix("navigate:"))
+            else -> option
+        }
+    }
+
     private fun summary(bill: BillEntity, categoryNames: Map<Long, String>, zone: ZoneId): String {
         val category = CategoryLabels.displayName(categoryNames[bill.categoryId].orEmpty())
         val extra = if (bill.note.isNotBlank()) " · ${bill.note}" else ""
@@ -290,7 +351,7 @@ class AiRepository(
     // ---------- 上下文 ----------
 
     /**
-     * 组装三层上下文：24 小时内的对话 + 最近 3 天的账本。
+     * 组装动态上下文：当前时间 + 最近 3 天的账本（对话历史改由 [recentTurns] 走 messages 数组）。
      *
      * 刻意宽松：任何一步失败都不该让整轮对话挂掉——上下文是"锦上添花"，
      * 拿不到就退化成"只有这一句话"，等价于改动之前的行为。
@@ -300,10 +361,9 @@ class AiRepository(
         requestMillis: Long,
         zone: ZoneId
     ): ChatContext = runCatching {
-        val messages = chatHistoryRepository.getAll()
         val bills = billRepository.recent(ChatContextBuilder.MAX_BILLS)
-        ChatContextBuilder.build(messages, bills, categories, requestMillis, zone)
-    }.getOrElse { ChatContext("", zone.id, emptyList(), emptyList()) }
+        ChatContextBuilder.build(bills, categories, requestMillis, zone)
+    }.getOrElse { ChatContext("", zone.id, emptyList()) }
 
     /**
      * 带回模型的多轮消息：只取真正的对话（USER / ASSISTANT 原文），草稿卡/指令卡一律不进上下文。
@@ -400,25 +460,39 @@ class AiRepository(
         if (stored.status != "EDITING") return@withTransaction 0
 
         val selected = existing.items.filter { it.checked }.take(pending)
-        val kind = if (existing.kind.equals(CommandKind.DELETE.name, true)) CommandKind.DELETE else CommandKind.UPDATE
+        // 三种动作都要认全：早先是 DELETE / 其余归 UPDATE 的二分法，
+        // R4 加了 RESTORE 后若仍这么写，「恢复」会被当成「改账」执行（灾难）。
+        // 未知值仍容错为 UPDATE，保持既有行为。
+        val kind = CommandKind.entries.firstOrNull { it.name.equals(existing.kind, true) }
+            ?: CommandKind.UPDATE
         val categoryIds = categoryRepository.getAll().associate { it.name.lowercase() to it.id }.toMutableMap()
         var applied = 0
 
         selected.forEach { item ->
-            if (kind == CommandKind.DELETE) {
-                if (billRepository.moveToTrash(item.billId, appliedAt)) applied++
-            } else {
-                val fen = Formatters.yuanTextToFen(item.newAmountText) ?: return@forEach
-                val key = item.newCategoryName.ifBlank { item.categoryName }.lowercase()
-                val categoryId = categoryIds[key] ?: createCategory(
-                    name = item.newCategoryName.ifBlank { item.categoryName },
-                    keywords = ""
-                ).also { categoryIds[key] = it }
-                if (billRepository.updateFromAi(
-                    id = item.billId, amountFen = fen, detail = item.newDetail,
-                    timestamp = item.newTimestamp.takeIf { it > 0 } ?: appliedAt,
-                    categoryId = categoryId, note = item.newNote
-                )) applied++
+            when (kind) {
+                CommandKind.DELETE -> {
+                    if (billRepository.moveToTrash(item.billId, appliedAt)) applied++
+                }
+
+                CommandKind.RESTORE -> {
+                    // 恢复：捞回活账本；原分类若已被删除（孤儿分类），DAO 兜底改挂内置「待定」。
+                    val fallbackId = categoryAdminRepository.vacuumId()
+                    if (billRepository.restoreToLive(item.billId, fallbackId)) applied++
+                }
+
+                CommandKind.UPDATE -> {
+                    val fen = Formatters.yuanTextToFen(item.newAmountText) ?: return@forEach
+                    val key = item.newCategoryName.ifBlank { item.categoryName }.lowercase()
+                    val categoryId = categoryIds[key] ?: createCategory(
+                        name = item.newCategoryName.ifBlank { item.categoryName },
+                        keywords = ""
+                    ).also { categoryIds[key] = it }
+                    if (billRepository.updateFromAi(
+                        id = item.billId, amountFen = fen, detail = item.newDetail,
+                        timestamp = item.newTimestamp.takeIf { it > 0 } ?: appliedAt,
+                        categoryId = categoryId, note = item.newNote
+                    )) applied++
+                }
             }
         }
 

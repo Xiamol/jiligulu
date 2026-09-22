@@ -7,14 +7,19 @@ import com.jiligulu.app.data.local.entity.ChatMessageEntity
 import com.jiligulu.app.data.repository.AiRepository
 import com.jiligulu.app.data.repository.AiTurn
 import com.jiligulu.app.data.repository.BillRepository
+import com.jiligulu.app.data.repository.CategoryAdminRepository
 import com.jiligulu.app.data.repository.CategoryRepository
 import com.jiligulu.app.data.repository.ChatHistoryRepository
 import com.jiligulu.app.data.repository.ConfirmItem
 import com.jiligulu.app.data.local.AppDatabase
 import com.jiligulu.app.data.prefs.UserPrefs
 import com.jiligulu.app.core.ai.AiBillDraft
+import com.jiligulu.app.core.ai.AiOption
 import com.jiligulu.app.core.ai.AiParseResult
 import com.jiligulu.app.core.ai.AiPendingDraft
+import com.jiligulu.app.core.ai.IntentActions
+import com.jiligulu.app.core.ai.NavTargets
+import com.jiligulu.app.ui.chat.ChatViewModel
 import com.jiligulu.app.ui.chat.CommandCardCodec
 import com.jiligulu.app.ui.chat.CommandCardPayload
 import com.jiligulu.app.ui.chat.CommandItem
@@ -353,6 +358,90 @@ class ChatContextAndCommandsTest {
         assertEquals(setOf(a, b), fixture.billRepository.recent(10).map { it.id }.toSet())
     }
 
+    // ---------- 恢复（R4） ----------
+
+    @Test
+    fun `a restore targets only bills really sitting in the trash`() = runBlocking {
+        val fixture = Fixture("restore-card.db")
+        val id = fixture.bill("昨天的奶茶", 800, fixture.at(-1, 15, 0))
+        fixture.billRepository.moveToTrash(id, fixture.now)
+
+        val turn = fixture.ai.toTurn(
+            AiParseResult(
+                bills = listOf(AiBillDraft(action = "restore", targetId = id)),
+                reply = "捞回来？"
+            ),
+            "把昨天的奶茶捞回来", fixture.now, fixture.zone, null
+        ) as AiTurn.Commands
+
+        assertEquals(CommandKind.RESTORE, turn.kind)
+        val item = turn.items.single()
+        assertTrue("恢复卡要标明来源是回收站：${item.before}", item.before.contains("回收站"))
+        assertTrue("恢复后仍是原样（金额不动）：${item.after}", item.after.contains("8 元"))
+        assertFalse("after 不该再带「回收站中」前缀", item.after.contains("回收站"))
+    }
+
+    @Test
+    fun `a restore pointing at a live bill or a hallucinated id is dropped`() = runBlocking {
+        val fixture = Fixture("restore-hallucination.db")
+        val live = fixture.bill("活着的账", 500, fixture.at(9, 0))
+
+        // 活账单不在回收站集合里 → 整条丢弃（与改/删同一道硬校验）。
+        val onLive = fixture.ai.toTurn(
+            AiParseResult(bills = listOf(AiBillDraft(action = "restore", targetId = live))),
+            "把刚才那笔捞回来", fixture.now, fixture.zone, null
+        )
+        assertTrue("活账单不能被「恢复」——应退回闲聊而不是造卡", onLive is AiTurn.Chat)
+
+        val ghost = fixture.ai.toTurn(
+            AiParseResult(bills = listOf(AiBillDraft(action = "restore", targetId = 999_999L))),
+            "把昨天那笔捞回来", fixture.now, fixture.zone, null
+        )
+        assertTrue("幻觉 id 同样丢弃", ghost is AiTurn.Chat)
+    }
+
+    @Test
+    fun `confirming a restore card brings the bill back into the live ledger`() = runBlocking {
+        val fixture = Fixture("restore-commit.db")
+        val id = fixture.bill("昨天的奶茶", 800, fixture.at(-1, 15, 0))
+        fixture.billRepository.moveToTrash(id, fixture.now)
+        assertEquals(1, fixture.billRepository.observeTrash().first().size)
+
+        val turn = fixture.ai.toTurn(
+            AiParseResult(bills = listOf(AiBillDraft(action = "restore", targetId = id))),
+            "捞回来", fixture.now, fixture.zone, null
+        ) as AiTurn.Commands
+        val cardId = fixture.storeCommandCard(turn)
+        val payload = CommandCardCodec.decode(fixture.history.getById(cardId)!!.draftPayload)!!
+
+        assertEquals(1, fixture.ai.commitCommands(cardId, payload))
+
+        assertNotNull("恢复后回到活账本", fixture.billRepository.getById(id))
+        assertTrue("回收站里不再有它", fixture.billRepository.observeTrash().first().isEmpty())
+    }
+
+    @Test
+    fun `restoring a bill whose category was deleted falls back to the vacuum category`() = runBlocking {
+        val fixture = Fixture("restore-orphan.db")
+        val id = fixture.bill("昨天的奶茶", 800, fixture.at(-1, 15, 0))
+        fixture.billRepository.moveToTrash(id, fixture.now)
+        // 孤儿场景：分类行被删掉，而账单（在回收站里）仍挂着那个已消失的 categoryId。
+        assertEquals(1, fixture.deleteCategory(1))
+
+        val turn = fixture.ai.toTurn(
+            AiParseResult(bills = listOf(AiBillDraft(action = "restore", targetId = id))),
+            "捞回来", fixture.now, fixture.zone, null
+        ) as AiTurn.Commands
+        val cardId = fixture.storeCommandCard(turn)
+        val payload = CommandCardCodec.decode(fixture.history.getById(cardId)!!.draftPayload)!!
+        fixture.ai.commitCommands(cardId, payload)
+
+        assertEquals(
+            "原分类已删 → 落内置兜底分类（待定），不能留悬空外键",
+            fixture.vacuumId(), fixture.billRepository.getById(id)!!.categoryId
+        )
+    }
+
     @Test
     fun `a command card survives a restart and a dismissed card rejects commits`() = runBlocking {
         val fixture = Fixture("commit-restart.db")
@@ -391,6 +480,71 @@ class ChatContextAndCommandsTest {
         assertEquals(1500L, fixture.billRepository.getById(id)!!.amountFen)
     }
 
+    @Test
+    fun `every command kind has its own appended conclusion line`() {
+        // R6 追加式铁律：状态变化只能靠追加 assistant 消息表达（不回改历史）。
+        // 这里锁「每种动作都有一句属于自己的话」——尤其 RESTORE 不许落进「改好了」的兜底分支。
+        val restore = ChatViewModel.commandResultLine(CommandKind.RESTORE, 2)
+        assertFalse("恢复不能复用「改好了」的兜底文案：$restore", restore.contains("改好了"))
+        assertTrue("恢复文案要带上条数：$restore", restore.contains("2"))
+        assertTrue("删账文案要提回收站", ChatViewModel.commandResultLine(CommandKind.DELETE, 1).contains("回收站"))
+        assertTrue("改账文案要提已更新", ChatViewModel.commandResultLine(CommandKind.UPDATE, 1).contains("改好"))
+        assertTrue("0 笔时的兜底文案", ChatViewModel.commandResultLine(CommandKind.RESTORE, 0).contains("没有改动"))
+    }
+
+    // ---------- 指路 / 带路（R4 选项、R5 跳转） ----------
+
+    @Test
+    fun `asking how to restore without naming a bill yields clickable options`() = runBlocking {
+        val fixture = Fixture("restore-choices.db")
+        fixture.bill("昨天的奶茶", 800, fixture.at(-1, 15, 0))
+
+        val turn = fixture.ai.toTurn(
+            AiParseResult(
+                reply = "想捞回来的话，阿噜可以帮你，也可以自己去回收站看看～",
+                options = listOf(
+                    AiOption(label = "让阿噜帮你恢复", action = "restore_assist"),
+                    AiOption(label = "我自己去回收站", action = "navigate:trash")
+                )
+            ),
+            "怎么把删掉的账找回来", fixture.now, fixture.zone, null
+        ) as AiTurn.Choices
+
+        assertEquals(2, turn.options.size)
+        assertEquals(IntentActions.RESTORE_ASSIST, turn.options[0].action)
+        // 「navigate:」前缀在这一层剥掉，UI 拿到的直接就是跳转目标本身。
+        assertEquals(NavTargets.TRASH, turn.options[1].action)
+    }
+
+    @Test
+    fun `a bare navigate instruction becomes a single option`() = runBlocking {
+        val fixture = Fixture("nav-single.db")
+        fixture.bill("任意一笔", 100, fixture.at(9, 0))
+
+        val turn = fixture.ai.toTurn(
+            AiParseResult(reply = "回收站在设置里，带你去～", navigate = "trash"),
+            "回收站在哪", fixture.now, fixture.zone, null
+        ) as AiTurn.Choices
+
+        assertEquals(1, turn.options.size)
+        assertEquals(NavTargets.TRASH, turn.options.single().action)
+    }
+
+    @Test
+    fun `an option with an unknown action survives for the ui layer to ignore`() = runBlocking {
+        // 表外取值（模型编的）原样保留：忽略策略在 UI——那里才知道自己认哪些页面。
+        // 这里只保证「不崩、不丢」，绝不在这里替 UI 做决定。
+        val fixture = Fixture("nav-unknown.db")
+        fixture.bill("任意一笔", 100, fixture.at(9, 0))
+
+        val turn = fixture.ai.toTurn(
+            AiParseResult(options = listOf(AiOption(label = "凭空捏造", action = "teleport:mars"))),
+            "带我去火星", fixture.now, fixture.zone, null
+        ) as AiTurn.Choices
+
+        assertEquals("teleport:mars", turn.options.single().action)
+    }
+
     // ---------- 提示词装配 ----------
 
     @Test
@@ -399,7 +553,6 @@ class ChatContextAndCommandsTest {
         val id = fixture.bill("牛肉面", 1200, fixture.at(12, 0))
         val context = ChatContext(
             now = "2026-09-21 20:00（周一）", timeZone = fixture.zone.id,
-            recentMessages = listOf(ChatContext.MessageLine("用户", "我发个5")),
             recentBills = emptyList()
         )
         val renderer = PromptRenderer(
@@ -445,7 +598,7 @@ class ChatContextAndCommandsTest {
         val history = ChatHistoryRepository(db)
         val ai = AiRepository(
             context, CategoryRepository(db.categoryDao()), billRepository,
-            UserPrefs(context), history
+            UserPrefs(context), history, CategoryAdminRepository(db)
         )
 
         fun billEntity(id: Long, detail: String, fen: Long, at: Long) = BillEntity(
@@ -479,6 +632,12 @@ class ChatContextAndCommandsTest {
                 )
             )
         }
+
+        /** 删掉某个分类行——模拟「分类被删、账单还躺在回收站」的孤儿场景。 */
+        fun deleteCategory(id: Long): Int = runBlocking { db.categoryDao().deleteById(id) }
+
+        /** 内置兜底分类（「待定」）的 id。 */
+        fun vacuumId(): Long = runBlocking { CategoryAdminRepository(db).vacuumId() }
     }
 
     private fun build(name: String): AppDatabase {

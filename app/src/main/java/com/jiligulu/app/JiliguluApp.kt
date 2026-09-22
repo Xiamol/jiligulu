@@ -32,7 +32,10 @@ class AppContainer(private val app: Application) {
     val categoryAdminRepository: CategoryAdminRepository by lazy { CategoryAdminRepository(database) }
     val chatHistoryRepository: ChatHistoryRepository by lazy { ChatHistoryRepository(database) }
     val aiRepository: AiRepository by lazy {
-        AiRepository(app, categoryRepository, billRepository, userPrefs, chatHistoryRepository)
+        AiRepository(
+            app, categoryRepository, billRepository, userPrefs,
+            chatHistoryRepository, categoryAdminRepository
+        )
     }
 
     val budgetRepository: BudgetRepository by lazy {

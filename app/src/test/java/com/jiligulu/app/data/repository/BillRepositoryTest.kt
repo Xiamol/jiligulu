@@ -78,6 +78,8 @@ class BillRepositoryTest {
         override suspend fun trashCandidates(limit: Int): List<BillEntity> = error("unused")
         override suspend fun moveToTrash(id: Long, deletedAt: Long): Int = error("unused")
         override suspend fun restore(id: Long): Int = error("unused")
+        override suspend fun restoreToLive(id: Long): Int = error("unused")
+        override suspend fun reassignCategoryIfOrphan(id: Long, fallbackCategoryId: Long): Int = error("unused")
         override fun observeTrash(): Flow<List<BillEntity>> = error("unused")
         override suspend fun getTrash(): List<BillEntity> = error("unused")
         override suspend fun purge(id: Long): Int = error("unused")

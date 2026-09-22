@@ -59,7 +59,7 @@ class R9WireDedupRegressionTest {
         systemTemplate = asset("prompts/parse_bill_system.txt"),
         contextTemplate = asset("prompts/parse_bill_context.txt"),
         categories = emptyList(),
-        context = ChatContext("2026-09-21 20:00（周一）", ZoneId.systemDefault().id, emptyList(), emptyList()),
+        context = ChatContext("2026-09-21 20:00（周一）", ZoneId.systemDefault().id, emptyList()),
         nickname = "路陌",
         suffix = "大人",
         candidates = PromptRenderer.CandidateBills(),

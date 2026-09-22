@@ -167,8 +167,11 @@ class R9HistoryRegressionTest {
 /**
  * P1 回归（QA: 严过关）——提示词资源在**运行时**（打包后的 assets）也必须逐字节可复现。
  *
- * 与 R9SystemSegmentTest 的「无 CRLF」互补：这里直接钉住**字节数** 5897 / 314，
+ * 与 R9SystemSegmentTest 的「无 CRLF」互补：这里直接钉住**字节数**，
  * 因为字节数是最抗篡改的不变量——多一个 `\r` 就会立刻让断言失败。
+ *
+ * ⚠️ 维护约定：**只要改了提示词正文，就要同步更新下面的字节数**（用 LF 版文件量）；
+ * 若数字对不上但内容确实改了，先量当前 LF 字节数再更新，别直接删断言。
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [28], manifest = Config.NONE, application = Application::class)
@@ -182,8 +185,9 @@ class R9PromptAssetByteRegressionTest {
         val system = bytesOf("prompts/parse_bill_system.txt")
         val context = bytesOf("prompts/parse_bill_context.txt")
 
-        assertEquals("system 资源字节数必须与仓库 LF 版一致（CRLF 版会多出\\r 变成 5987）", 5897, system.size)
-        assertEquals("context 资源字节数必须与仓库 LF 版一致（CRLF 版会多出\\r 变成 324）", 314, context.size)
+        // 7628 = v0.6 T02b 加「情况六 恢复 + App 功能地图 + navigate/options」后的 LF 字节数。
+        assertEquals("system 资源字节数必须与仓库 LF 版一致（CRLF 检出会让每个 \\r 多占一字节）", 7628, system.size)
+        assertEquals("context 资源字节数必须与仓库 LF 版一致（CRLF 版会多出 \\r 变成 324）", 314, context.size)
 
         assertEquals("system 不得含 CR", 0, system.count { it == '\r'.code.toByte() })
         assertEquals("context 不得含 CR", 0, context.count { it == '\r'.code.toByte() })

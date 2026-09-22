@@ -74,6 +74,20 @@ class BillRepository(
     /** 批量恢复，返回成功条数。 */
     suspend fun restore(ids: Collection<Long>): Int = ids.count { billDao.restore(it) == 1 }
 
+    /**
+     * AI「恢复账单」（R4）：把回收站里的账捞回活账本，返回是否真的恢复了。
+     *
+     * 比 [restore] 多做一步孤儿分类兜底：运行期删分类只转挂**活账单**，回收站账单保留的
+     * categoryId 可能已指向不存在的分类，恢复后由 DAO 子查询改挂到 [fallbackCategoryId]
+     * （内置「待定」）。两步不包在同一个事务里——与 [restore] / [moveToTrash] 的批量实现一致，
+     * 中途失败的最坏结果是一笔分类显示为「未分类」的账，不会损坏数据。
+     */
+    suspend fun restoreToLive(id: Long, fallbackCategoryId: Long): Boolean {
+        if (billDao.restoreToLive(id) != 1) return false
+        billDao.reassignCategoryIfOrphan(id, fallbackCategoryId)
+        return true
+    }
+
     fun observeTrash(): Flow<List<BillEntity>> = billDao.observeTrash()
 
     suspend fun trash(): List<BillEntity> = billDao.getTrash()
@@ -153,6 +167,14 @@ class BillRepository(
          * 只取「最近 45 条」会让某天记了 50 笔时昨天那组整个消失。
          */
         const val CANDIDATE_SCAN_LIMIT = 200
+
+        /**
+         * R4 恢复候选：回收站内取最近删的多少条进 prompt。
+         *
+         * 与活账候选的入 prompt 量（约 45）保持一致；回收站通常远少于这个数，
+         * 且只在用户提到「恢复」时才注入（见 ChatIntent.needsTrash），不额外烧 token。
+         */
+        const val TRASH_CANDIDATE_LIMIT = 45
     }
 }
 

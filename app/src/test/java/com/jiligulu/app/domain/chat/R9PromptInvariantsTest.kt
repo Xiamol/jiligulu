@@ -10,6 +10,7 @@ import com.jiligulu.app.data.local.entity.BillEntity
 import com.jiligulu.app.data.local.entity.BillType
 import com.jiligulu.app.data.local.entity.CategoryEntity
 import com.jiligulu.app.data.local.entity.ChatMessageEntity
+import com.jiligulu.app.data.repository.AiRepository
 import com.jiligulu.app.data.repository.ChatHistoryRepository
 import com.jiligulu.app.ui.chat.CommandCardCodec
 import com.jiligulu.app.ui.chat.CommandItem
@@ -49,7 +50,8 @@ import java.util.concurrent.atomic.AtomicReference
  * - system 段：原始字节多次读取一致、无 BOM、无混用行尾、无占位符、无任何随请求变化的内容；
  * - 动态段：满注入下的固定顺序、分钟粒度、昵称只在动态段；
  * - 候选按需注入：闲聊/改删/恢复三分，外加一批边界输入（误判如实记录）；
- * - 草稿三态：真 SQLite 验证 EDITING/DISMISSED/DELETED 不进、CONFIRMED 进；
+ * - 草稿三态：真 SQLite 验证草稿卡（任何状态）都不作为历史行进入上下文，
+ *   已确认的信息由追加的 assistant 消息承担（R6 追加式）；
  * - 硬约束：MAX_MESSAGES=60 / MAX_BILLS=30 且在 build() 真正生效；
  * - 「历史冻结」是否名存实亡：同一条消息在账本状态变化后渲染是否逐字不变（F 项核心）；
  * - 线上消息线格式：首条为 user（丢掉开头 assistant 轮）、缓存字段确实被打印。
@@ -72,7 +74,7 @@ private fun newRenderer(
     nickname: String = "路陌",
     suffix: String = "大人",
     categories: List<CategoryEntity> = listOf(R9.category()),
-    context: ChatContext = ChatContext("2026-09-21 20:00（周一）", R9.zone.id, emptyList(), emptyList()),
+    context: ChatContext = ChatContext("2026-09-21 20:00（周一）", R9.zone.id, emptyList()),
     candidates: PromptRenderer.CandidateBills = PromptRenderer.CandidateBills(),
     pending: PendingDraft? = null,
     trashCandidates: List<BillEntity> = emptyList(),
@@ -138,7 +140,6 @@ class R9SystemSegmentTest {
             categories = listOf(R9.category(id = 99, name = "饮品", keywords = "喝")),
             context = ChatContext(
                 now = "1999-01-01 00:00（周五）", timeZone = "Asia/Tokyo",
-                recentMessages = listOf(ChatContext.MessageLine("用户", "hi")),
                 recentBills = listOf(ChatContext.BillLine("[7] x"))
             ),
             candidates = PromptRenderer.candidatesFrom(listOf(bill(id = 7)), R9.now, R9.zone),
@@ -196,7 +197,6 @@ class R9ContextStructureTest {
         otherBills = listOf(bill(id = 11, detail = "其他分类的账")),
         context = ChatContext(
             now = "2026-09-21 20:00（周一）", timeZone = R9.zone.id,
-            recentMessages = emptyList(),
             recentBills = listOf(ChatContext.BillLine("[1] 9月21日 12:00 · 吃饭 · 牛肉面 · 12.00 元 · 支出"))
         )
     )
@@ -219,7 +219,7 @@ class R9ContextStructureTest {
 
     @Test
     fun `now is rendered to the minute and never carries seconds`() {
-        val c = ChatContextBuilder.build(emptyList(), emptyList(), emptyList(), R9.now, R9.zone)
+        val c = ChatContextBuilder.build(emptyList(), emptyList(), R9.now, R9.zone)
         assertTrue("now 应形如 yyyy-MM-dd HH:mm（周X）: ${c.now}",
             Regex("^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}（.+）$").containsMatchIn(c.now))
         assertFalse("now 不该带秒: ${c.now}", Regex(":\\d{2}:\\d{2}").containsMatchIn(c.now))
@@ -352,11 +352,12 @@ class R9DraftContextTest {
 
     private fun db(name: String) = AppDatabase.build(ctx, name).also { opened += it; names += name }
 
-    private fun contextLineFor(message: ChatMessageEntity): String = runBlocking {
+    /** R9/T02b：历史 = 只挑 USER/ASSISTANT 原文（草稿卡与指令卡都不在其中）。 */
+    private fun historyLineFor(message: ChatMessageEntity): String = runBlocking {
         val h = ChatHistoryRepository(db("r9-draft-${message.kind}-${message.status}-${message.id}.db"))
         h.insert(message)
-        ChatContextBuilder.build(h.getAll(), emptyList(), emptyList(), R9.now, R9.zone)
-            .recentMessages.joinToString("\n") { "${it.role}:${it.text}" }
+        AiRepository.chatTurnsFor(h.getAll(), R9.now)
+            .joinToString("\n") { "${it.role}:${it.content}" }
     }
 
     private fun draft(status: String) = ChatMessageEntity(
@@ -367,15 +368,26 @@ class R9DraftContextTest {
     )
 
     @Test
-    fun `only CONFIRMED drafts enter the context`() {
-        listOf("EDITING", "DISMISSED", "DELETED", "").forEach { status ->
-            assertFalse("$status 草稿不该进上下文", contextLineFor(draft(status)).contains("牛肉面"))
+    fun `draft cards never enter the model history whatever their status`() {
+        // v0.6 定稿（R6 追加式）：历史只挑 USER/ASSISTANT 原文；草稿卡（kind=DRAFT）任何状态都不进。
+        // 「已确认」这件事由 ChatViewModel 追加的 assistant 消息承担——见下一条用例。
+        listOf("EDITING", "DISMISSED", "DELETED", "CONFIRMED", "").forEach { status ->
+            assertFalse("$status 草稿卡不该作为历史行进入上下文", historyLineFor(draft(status)).contains("牛肉面"))
         }
-        assertTrue("CONFIRMED 草稿要进上下文", contextLineFor(draft("CONFIRMED")).contains("牛肉面"))
     }
 
     @Test
-    fun `a command card enters the context and its summary reflects the payload`() {
+    fun `a confirmed draft reaches the model through the appended assistant message`() {
+        // 追加式铁律：状态变化只追加新消息、永不回改历史。
+        // 确认入账后 ChatViewModel 会 append「已入库 N 条！」+ 接话，那条 ASSISTANT 原文就是模型看到的东西。
+        val appended = ChatMessageEntity(
+            kind = "ASSISTANT", content = "已入库 1 条！牛肉面 12 元记好啦", createdAt = R9.now
+        )
+        assertTrue("追加的 assistant 消息应进历史", historyLineFor(appended).contains("牛肉面"))
+    }
+
+    @Test
+    fun `a command card never enters the model history its outcome is appended instead`() {
         val cmd = ChatMessageEntity(
             kind = "COMMAND", status = "EDITING", createdAt = R9.now,
             draftPayload = CommandCardCodec.encode(
@@ -383,9 +395,7 @@ class R9DraftContextTest {
                 listOf(CommandItem(billId = 1, title = "牛肉面", newAmountText = "15"))
             )
         )
-        val line = contextLineFor(cmd)
-        assertTrue("指令卡摘要应进上下文: $line", line.contains("（改账/删账）"))
-        assertTrue("摘要应说明提议改动笔数: $line", line.contains("提议修改 1 笔账单"))
+        assertFalse("指令卡不该作为历史行进入上下文", historyLineFor(cmd).contains("牛肉面"))
     }
 }
 
@@ -414,25 +424,31 @@ class R9HistoryFreezeTest {
     }
 
     @Test
-    fun `build enforces at most 60 messages and 30 bills`() = runBlocking {
+    fun `history caps at 60 messages and the ledger block at 30 bills`() = runBlocking {
         val h = ChatHistoryRepository(db("r9-caps.db"))
-        repeat(70) { h.insert(ChatMessageEntity(kind = "USER", content = "m$it", createdAt = R9.now - 60_000 + it)) }
-        val messages = ChatContextBuilder.build(h.getAll(), emptyList(), emptyList(), R9.now, R9.zone)
-        assertEquals(60, messages.recentMessages.size)
+        // 交替 USER/ASSISTANT：让第 70 条（i=69）落在 assistant 上——
+        // chatTurnsFor 会裁掉「末尾未配对的 user」，若全插 USER 就只剩 59 条，测的就不是上限本身了。
+        repeat(70) { i ->
+            val kind = if (i % 2 == 0) "USER" else "ASSISTANT"
+            h.insert(ChatMessageEntity(kind = kind, content = "m$i", createdAt = R9.now - 60_000 + i))
+        }
+        val turns = AiRepository.chatTurnsFor(h.getAll(), R9.now)
+        assertEquals(60, turns.size)
 
         val bills = (1..40).map { bill(id = it.toLong(), detail = "b$it") }
-        val withBills = ChatContextBuilder.build(emptyList(), bills, emptyList(), R9.now, R9.zone)
-        assertEquals(30, withBills.recentBills.size)
+        val ctx = ChatContextBuilder.build(bills, emptyList(), R9.now, R9.zone)
+        assertEquals(30, ctx.recentBills.size)
     }
 
     /**
      * F 项核心：历史行是否「只依赖消息自身」。
      *
-     * 若 toLine()/draftSummary()/commandSummary() 依赖了当前时间、账本存活状态或分类查询，
-     * 同一条消息在账本变化后就会渲染出不同文本 → 历史每轮漂移 → 前缀缓存被反复重写 → R9 白做。
+     * v0.6 起历史由 [AiRepository.chatTurnsFor] 从消息表直接取原文（USER/ASSISTANT），
+     * 不再经过任何摘要渲染；本条锁定：同一份消息表取的两次历史逐字一致，
+     * 且与账本/分类/时间推进无关——否则前缀缓存会被反复重写，R9 就白做了。
      */
     @Test
-    fun `history lines are a pure function of the message and never drift with ledger state`() = runBlocking {
+    fun `history is a pure function of stored messages and never drifts with ledger state`() = runBlocking {
         val h = ChatHistoryRepository(db("r9-freeze.db"))
         h.insert(ChatMessageEntity(kind = "USER", content = "昨天中午吃饭 9 元", createdAt = R9.now - 3_000))
         h.insert(ChatMessageEntity(kind = "ASSISTANT", content = "记好啦～", createdAt = R9.now - 2_000))
@@ -440,27 +456,23 @@ class R9HistoryFreezeTest {
             ChatMessageEntity(
                 kind = "DRAFT", status = "CONFIRMED", createdAt = R9.now - 1_000,
                 draftPayload = DraftHistoryCodec.encode(
-                    listOf(DraftUi(amountText = "9", detail = "午饭", categoryName = "eating"))
+                    listOf(DraftUi(amountText = "9", detail = "午饭", categoryName = "吃饭"))
                 )
             )
         )
-        val liveBills = listOf(bill(id = 1, detail = "午饭", fen = 900))
-        val categories = listOf(R9.category(id = 1, name = "eating", keywords = "吃"))
 
-        val first = ChatContextBuilder.build(h.getAll(), liveBills, categories, R9.now, R9.zone)
+        val first = AiRepository.chatTurnsFor(h.getAll(), R9.now)
+        // 时间推进一小时（仍在 24h 窗口内）：历史必须逐字不变。
+        val second = AiRepository.chatTurnsFor(h.getAll(), R9.now + 3_600_000L)
 
-        // 改变账本状态：账单全部删除、分类清空、时间参数也推进一小时。
-        val second = ChatContextBuilder.build(h.getAll(), emptyList(), emptyList(), R9.now + 3_600_000L, R9.zone)
-
-        assertEquals("历史行在账本/分类/时间变化后必须逐字不变", first.recentMessages, second.recentMessages)
-        // 顺带固定住当前实际文本，防止将来悄悄改口径
-        assertTrue(first.recentMessages.any { it.text.contains("午饭 9 元（已入账）") })
+        assertEquals("历史在时间推进后必须逐字不变（冻结）", first, second)
+        assertEquals("历史只含 USER/ASSISTANT 原文，草稿卡不进", 2, first.size)
+        assertEquals("昨天中午吃饭 9 元", first.first().content)
     }
 
     @Test
     fun `empty history renders without crashing`() {
-        val c = ChatContextBuilder.build(emptyList(), emptyList(), emptyList(), R9.now, R9.zone)
-        assertTrue(c.recentMessages.isEmpty())
+        val c = ChatContextBuilder.build(emptyList(), emptyList(), R9.now, R9.zone)
         assertTrue(c.recentBills.isEmpty())
         assertTrue(newRenderer(ctx, context = c).renderContext("你好").contains("最近三天还没有记过账"))
     }

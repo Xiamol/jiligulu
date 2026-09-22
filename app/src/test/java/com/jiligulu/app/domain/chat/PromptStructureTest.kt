@@ -6,6 +6,7 @@ import com.jiligulu.app.data.local.entity.BillEntity
 import com.jiligulu.app.data.local.entity.BillType
 import com.jiligulu.app.data.local.entity.CategoryEntity
 import com.jiligulu.app.data.local.entity.ChatMessageEntity
+import com.jiligulu.app.data.repository.AiRepository
 import com.jiligulu.app.ui.chat.DraftHistoryCodec
 import com.jiligulu.app.ui.chat.DraftUi
 import org.junit.Assert.assertEquals
@@ -105,10 +106,11 @@ class PromptStructureTest {
     // ---------- 草稿默认不进上下文 ----------
 
     @Test
-    fun `drafts only enter the context once they are confirmed`() {
-        assertTrue("CONFIRMED 草稿要进上下文", contextForStatus("CONFIRMED").contains("牛肉面 12 元"))
-        listOf("EDITING", "DISMISSED", "DELETED").forEach { status ->
-            assertFalse("$status 草稿不该进上下文", contextForStatus(status).contains("牛肉面"))
+    fun `draft cards never enter the model history whatever their status`() {
+        // v0.6 定稿（R6 追加式）：历史只挑 USER/ASSISTANT 原文；草稿卡（kind=DRAFT）任何状态都不进。
+        // 「已确认」这件事由 ChatViewModel 追加的 assistant 消息承担——历史冻结，永不回改草稿卡。
+        listOf("CONFIRMED", "EDITING", "DISMISSED", "DELETED").forEach { status ->
+            assertFalse("$status 草稿卡不该作为历史行进入上下文", contextForStatus(status).contains("牛肉面"))
         }
     }
 
@@ -116,7 +118,7 @@ class PromptStructureTest {
 
     @Test
     fun `the current time is rendered to the minute without seconds`() {
-        val ctx = ChatContextBuilder.build(emptyList(), emptyList(), emptyList(), now, zone)
+        val ctx = ChatContextBuilder.build(emptyList(), emptyList(), now, zone)
         assertTrue(
             "时间应形如 yyyy-MM-dd HH:mm",
             Regex("\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}").containsMatchIn(ctx.now)
@@ -135,9 +137,10 @@ class PromptStructureTest {
                 listOf(DraftUi(amountText = "12", detail = "牛肉面", categoryName = "吃饭"))
             )
         )
-        return ChatContextBuilder.build(listOf(message), emptyList(), emptyList(), now, zone)
-            .recentMessages
-            .joinToString("\n") { "${it.role}：${it.text}" }
+        // R9/T02b：草稿是否进模型上下文，现在由「历史消息 → chatTurnsFor 只挑 USER/ASSISTANT 原文」
+        // 这条链路决定（草稿卡是 DRAFT kind，本就不在挑选范围内）。
+        return AiRepository.chatTurnsFor(listOf(message), now)
+            .joinToString("\n") { "${it.role}：${it.content}" }
     }
 
     private fun renderer(
@@ -170,7 +173,7 @@ class PromptStructureTest {
     )
 
     private fun ctx(nowText: String = "2026-09-21 20:00（周一）") =
-        ChatContext(now = nowText, timeZone = zone.id, recentMessages = emptyList(), recentBills = emptyList())
+        ChatContext(now = nowText, timeZone = zone.id, recentBills = emptyList())
 
     private object AiPrompts {
         const val SYSTEM = "prompts/parse_bill_system.txt"

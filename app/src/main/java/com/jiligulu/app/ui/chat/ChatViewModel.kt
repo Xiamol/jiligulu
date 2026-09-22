@@ -284,8 +284,23 @@ class ChatViewModel(
                 history.update(card)
                 replace(card.toUi())
                 appendReply(turn.reply.ifBlank {
-                    if (turn.kind == CommandKind.DELETE) "这些账阿噜先收进回收站，确认一下～" else "这些要改的账，确认一下～"
+                    when (turn.kind) {
+                        CommandKind.DELETE -> "这些账阿噜先收进回收站，确认一下～"
+                        CommandKind.RESTORE -> "这些账阿噜从回收站捞回来，确认一下～"
+                        else -> "这些要改的账，确认一下～"
+                    }
                 })
+                clearPending()
+                return
+            }
+
+            is AiTurn.Choices -> {
+                // R4/R5：可点选项（(a)帮我恢复 /(b)自己去、页面跳转）。
+                // T04 会把这里换成带按钮的 ActionCard 并接 onNavigate；
+                // 在此之前先以文本回复落地，保证「指路」信息不丢，也不引入半成品 UI。
+                val message = pendingMsg.copy(status = "", content = turn.reply.ifBlank { "阿噜给你指条路～" })
+                history.update(message)
+                replace(message.toUi())
                 clearPending()
                 return
             }
@@ -455,12 +470,6 @@ class ChatViewModel(
         }
     }
 
-    private fun commandResultLine(kind: CommandKind, applied: Int): String = when {
-        applied <= 0 -> "这次没有改动任何账单。"
-        kind == CommandKind.DELETE -> "收好了，$applied 笔账进了回收站，反悔了随时捞回来 ♡"
-        else -> "改好了，$applied 笔账已更新 ♡"
-    }
-
     /** 勾选状态要跟着卡片一起落库，否则退出再进来勾选全丢。 */
     private fun persistCommand(cardId: Long, card: ChatItem.CommandCard) {
         viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
@@ -508,7 +517,8 @@ class ChatViewModel(
             if (payload == null || payload.items.isEmpty()) {
                 ChatItem.GuluMsg(id, "这张旧变更卡暂时无法展示。原话：$rawInput")
             } else {
-                val kind = if (payload.kind.equals(CommandKind.DELETE.name, true)) CommandKind.DELETE else CommandKind.UPDATE
+                val kind = CommandKind.entries.firstOrNull { it.name.equals(payload.kind, true) }
+                    ?: CommandKind.UPDATE
                 val done = CommandCardCodec.pendingCount(payload) <= 0
                 ChatItem.CommandCard(
                     id = id, kind = kind, params = payload.items,
@@ -544,6 +554,19 @@ class ChatViewModel(
     private fun trimAmount(value: Double) = java.math.BigDecimal.valueOf(value).stripTrailingZeros().toPlainString()
 
     companion object {
+        /**
+         * 一次指令提交后追加给用户的结论行（R6：状态变化只能靠**追加消息**表达，永不回改历史）。
+         *
+         * 纯函数、放 companion：每种动作都必须有自己的那句（尤其 RESTORE 不能落进「改好了」），
+         * 单测直接断言文案归属，不必构造整个 ViewModel。
+         */
+        internal fun commandResultLine(kind: CommandKind, applied: Int): String = when {
+            applied <= 0 -> "这次没有改动任何账单。"
+            kind == CommandKind.DELETE -> "收好了，$applied 笔账进了回收站，反悔了随时捞回来 ♡"
+            kind == CommandKind.RESTORE -> "捞回来了，$applied 笔账回到账本啦 ♡"
+            else -> "改好了，$applied 笔账已更新 ♡"
+        }
+
         val Factory = viewModelFactory {
             initializer {
                 val app = this[APPLICATION_KEY] as JiliguluApp

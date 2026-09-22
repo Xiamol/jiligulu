@@ -15,6 +15,7 @@ import com.jiligulu.app.data.local.entity.IconType
 import com.jiligulu.app.data.prefs.UserPrefs
 import com.jiligulu.app.data.repository.AiRepository
 import com.jiligulu.app.data.repository.BillRepository
+import com.jiligulu.app.data.repository.CategoryAdminRepository
 import com.jiligulu.app.data.repository.CategoryRepository
 import com.jiligulu.app.data.repository.ChatHistoryRepository
 import com.jiligulu.app.data.repository.ConfirmItem
@@ -269,7 +270,7 @@ class DatabaseUpgradeTest {
         opened += db
         val history = ChatHistoryRepository(db)
         val ai = AiRepository(context, CategoryRepository(db.categoryDao()),
-            BillRepository(db.billDao()), UserPrefs(context), history)
+            BillRepository(db.billDao()), UserPrefs(context), history, CategoryAdminRepository(db))
         val id = history.insert(ChatMessageEntity(kind = "DRAFT", status = "EDITING"))
         val explicitTime = millis(2026, 8, 31)
         val draft = ConfirmItem(amountText = "9.00", type = BillType.EXPENSE,

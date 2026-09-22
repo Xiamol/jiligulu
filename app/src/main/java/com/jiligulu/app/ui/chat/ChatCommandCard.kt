@@ -34,7 +34,8 @@ data class CommandItem(
 }
 
 /** 指令卡能干的三种事。 */
-enum class CommandKind { UPDATE, DELETE }
+/** 指令卡的动作类型。RESTORE（R4）的卡片 UI 渲染归 T04，这里只声明枚举值。 */
+enum class CommandKind { UPDATE, DELETE, RESTORE }
 
 /** 「变更已提交」在 [CommandCardPayload.confirmFailed] 之外的所有情况下的含义。 */
 @Serializable

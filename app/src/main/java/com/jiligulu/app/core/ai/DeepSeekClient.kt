@@ -33,7 +33,7 @@ import kotlin.coroutines.resumeWithException
 @Serializable
 data class AiBillDraft(
     /**
-     * 动作类型：add（新增）/ update（改已有）/ delete（删已有）。
+     * 动作类型：add（新增）/ update（改已有）/ delete（删已有）/ restore（从回收站恢复）。
      * 未知值一律按 add 处理，保证老格式的返回仍可用。
      */
     val action: String = "add",
@@ -54,7 +54,22 @@ data class AiBillDraft(
     val isAdd: Boolean get() = action.equals("add", true)
     val isUpdate: Boolean get() = action.equals("update", true)
     val isDelete: Boolean get() = action.equals("delete", true)
+    val isRestore: Boolean get() = action.equals("restore", true)
 }
+
+/**
+ * R4/R5：一个可点选项（跳转或进入追问）。
+ *
+ * 由模型在「用户没指定具体账单、只问怎么恢复」这类场景输出；点击语义由 [action] 决定。
+ * [action] 取值只认 [NavTargets] / [IntentActions] 里定义的常量——UI 拿到未知值一律忽略、不崩，
+ * 因为模型随口编一个跳转目标比「不给」更糟。
+ */
+@Serializable
+data class AiOption(
+    val label: String = "",
+    /** NavTargets / IntentActions 取值；未知值一律忽略，不崩 */
+    val action: String = ""
+)
 
 /**
  * 只有金额、没有名目的残缺输入（如「5」）。
@@ -76,7 +91,11 @@ data class AiParseResult(
     val bills: List<AiBillDraft> = emptyList(),
     val reply: String = "",
     /** 待补充：模型认为这句话只说了一半。 */
-    val pending: AiPendingDraft? = null
+    val pending: AiPendingDraft? = null,
+    /** R5：单目标跳转指令（NavTargets 取值）；不需要跳转时为 null。老响应缺此字段，默认兼容。 */
+    val navigate: String? = null,
+    /** R4：多选项卡，非空时优先于 navigate；不需要时为 []。老响应缺此字段，默认兼容。 */
+    val options: List<AiOption> = emptyList()
 )
 
 /**

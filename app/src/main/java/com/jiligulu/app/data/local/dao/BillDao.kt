@@ -98,6 +98,27 @@ interface BillDao {
     @Query("UPDATE bills SET deletedAt = NULL WHERE id = :id AND deletedAt IS NOT NULL")
     suspend fun restore(id: Long): Int
 
+    /**
+     * R4 AI 恢复：把回收站里的账捞回活账本（deletedAt 置空）。
+     * 与 [restore] 语义相同、独立成方法，是因为调用方还要紧跟一步孤儿分类兜底
+     * （见 [reassignCategoryIfOrphan]），两步在仓库层成对出现，分开命名方便测试桩按需覆写。
+     */
+    @Query("UPDATE bills SET deletedAt = NULL WHERE id = :id AND deletedAt IS NOT NULL")
+    suspend fun restoreToLive(id: Long): Int
+
+    /**
+     * 恢复后兜底：账单的 categoryId 指向已不存在的分类时，改挂到 [fallbackCategoryId]（内置「待定」）。
+     *
+     * 为什么会有孤儿分类：运行期删分类只把**活账单**转挂「待定」（见 [reassignCategory]），
+     * 回收站里的账单保持原 categoryId——等它被恢复时再由本查询兜底，避免指向不存在的分类。
+     * 子查询只匹配「分类表里没有的行」，活分类下的账单不受影响。
+     */
+    @Query(
+        "UPDATE bills SET categoryId = :fallbackCategoryId " +
+            "WHERE id = :id AND categoryId NOT IN (SELECT id FROM categories)"
+    )
+    suspend fun reassignCategoryIfOrphan(id: Long, fallbackCategoryId: Long): Int
+
     /** 回收站列表：按删除时间倒序，最新删的在最上面。 */
     @Query("SELECT * FROM bills WHERE deletedAt IS NOT NULL ORDER BY deletedAt DESC")
     fun observeTrash(): Flow<List<BillEntity>>
