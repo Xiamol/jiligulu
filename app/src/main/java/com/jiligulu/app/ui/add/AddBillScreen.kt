@@ -1,14 +1,18 @@
 package com.jiligulu.app.ui.add
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -18,14 +22,16 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -34,11 +40,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -57,7 +60,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -72,9 +78,11 @@ import com.jiligulu.app.domain.category.CategoryLabels
 import com.jiligulu.app.ui.components.BillDateTimeField
 import com.jiligulu.app.ui.components.LedgerCard
 import com.jiligulu.app.ui.components.PaperNote
+import com.jiligulu.app.ui.theme.GuluBrandFont
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddBillScreen(onBack: () -> Unit, vm: AddBillViewModel = viewModel(factory = AddBillViewModel.Factory)) {
     val categories by vm.categories.collectAsStateWithLifecycle()
@@ -100,14 +108,29 @@ fun AddBillScreen(onBack: () -> Unit, vm: AddBillViewModel = viewModel(factory =
     val editable = !saveState.isSaving
     // 长按分类要删它——先把「删谁、会挪走几笔」查清楚再问，不让用户自己数。
     var pendingDelete by remember { mutableStateOf<PendingCategoryDelete?>(null) }
-    val snackbarHostState = remember { SnackbarHostState() }
+    // 轻提示（"收纳箱删不得"、删除结果）：不用 Material 的 Snackbar 灰条，
+    // 换成阿噜的胶囊小气泡，配色和圆角跟奶油风一致。
+    var tip by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
+    LaunchedEffect(tip) {
+        if (tip != null) {
+            delay(2400)
+            tip = null
+        }
+    }
 
     Scaffold(
         modifier = Modifier.imePadding(),
         containerColor = MaterialTheme.colorScheme.background,
-        // 轻提示（"收纳箱删不得"、删除结果）走 Snackbar，不打断填写。
-        snackbarHost = { SnackbarHost(snackbarHostState) },
+        snackbarHost = {
+            AnimatedVisibility(
+                visible = tip != null,
+                enter = fadeIn() + slideInVertically { it / 2 },
+                exit = fadeOut()
+            ) {
+                GuluTip(tip.orEmpty(), Modifier.padding(bottom = 12.dp))
+            }
+        },
         topBar = {
             TopAppBar(
                 title = { Text("记一笔", style = MaterialTheme.typography.titleLarge) },
@@ -173,34 +196,43 @@ fun AddBillScreen(onBack: () -> Unit, vm: AddBillViewModel = viewModel(factory =
                         style = MaterialTheme.typography.labelMedium)
                 }
             }
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text("分类", style = MaterialTheme.typography.titleSmall)
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    categories.forEach { category ->
-                        // 自绘 chip 而不是 FilterChip：FilterChip 自带 onClick，外层再套
-                        // combinedClickable 会抢手势（长按不触发 / 单击被吞），两个手势必须落在同一层。
-                        CategoryChip(
-                            label = "${category.iconValue} ${CategoryLabels.displayName(category.name)}",
-                            selected = effectiveCategoryId == category.id,
-                            enabled = editable,
-                            onClick = { selectedCategoryId = category.id; userPickedCategory = true },
-                            onLongClick = {
-                                val displayName = CategoryLabels.displayName(category.name)
-                                if (!category.deletable) {
-                                    scope.launch {
-                                        snackbarHostState.showSnackbar("「$displayName」是收纳箱，删不得哦～")
+                // 三个一行、等宽铺开：不论分类几个，都不会出现「最后一行挤在左边」的参差感。
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    categories.chunked(3).forEach { row ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            row.forEach { category ->
+                                // 自绘 chip 而不是 FilterChip：FilterChip 自带 onClick，外层再套
+                                // combinedClickable 会抢手势（长按不触发 / 单击被吞），两个手势必须落在同一层。
+                                CategoryChip(
+                                    label = "${category.iconValue} ${CategoryLabels.displayName(category.name)}".trim(),
+                                    selected = effectiveCategoryId == category.id,
+                                    enabled = editable,
+                                    modifier = Modifier.weight(1f),
+                                    onClick = { selectedCategoryId = category.id; userPickedCategory = true },
+                                    onLongClick = {
+                                        val displayName = CategoryLabels.displayName(category.name)
+                                        if (!category.deletable) {
+                                            tip = "「$displayName」是收纳箱，删不得哦～"
+                                        } else {
+                                            scope.launch {
+                                                pendingDelete = PendingCategoryDelete(
+                                                    id = category.id,
+                                                    name = displayName,
+                                                    liveCount = vm.liveBillCount(category.id)
+                                                )
+                                            }
+                                        }
                                     }
-                                } else {
-                                    scope.launch {
-                                        pendingDelete = PendingCategoryDelete(
-                                            id = category.id,
-                                            name = displayName,
-                                            liveCount = vm.liveBillCount(category.id)
-                                        )
-                                    }
-                                }
+                                )
                             }
-                        )
+                            // 补足空位：最后一行不足 3 个时，前面的格子宽度保持不变
+                            repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
+                        }
                     }
                 }
                 if (suggested != null && !userPickedCategory) Text(
@@ -240,11 +272,11 @@ fun AddBillScreen(onBack: () -> Unit, vm: AddBillViewModel = viewModel(factory =
                             val moved = if (result.reassigned > 0)
                                 "，${result.reassigned} 笔账挪到「${CategoryDefaults.VACUUM_NAME}」了"
                             else ""
-                            snackbarHostState.showSnackbar("「${pending.name}」删掉啦$moved")
+                            tip = "「${pending.name}」删掉啦$moved"
                         }
 
                         is CategoryDeletionResult.Refused ->
-                            snackbarHostState.showSnackbar(result.reason)
+                            tip = result.reason
                     }
                 }
             }
@@ -265,32 +297,79 @@ private fun CategoryDeleteDialog(
     onDismiss: () -> Unit,
     onConfirm: () -> Unit
 ) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Text(
-                if (pending.liveCount > 0) "删除「${pending.name}」这个分类？"
-                else "「${pending.name}」下面还没有账单，删掉它吗？"
-            )
-        },
-        text = {
-            Text(
-                if (pending.liveCount > 0)
-                    "这个分类下的 ${pending.liveCount} 笔账单会移到「${CategoryDefaults.VACUUM_NAME}」，不会丢。" +
-                        "以后同类消费阿噜可能会再帮你建一个新分类。"
-                else
-                    "删掉它不会影响任何已有记录。以后同类消费阿噜可能会再帮你建一个新分类。"
-            )
-        },
-        confirmButton = {
-            TextButton(onClick = onConfirm) {
-                Text("删除", color = MaterialTheme.colorScheme.error)
+    // 自绘而不是 Material 的 AlertDialog：默认弹窗方正、字体生硬，
+    // 跟奶油手账的圆润贴纸感完全两回事（用户报过「感觉都不可爱」）。
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(26.dp),
+            color = MaterialTheme.colorScheme.surface,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.6f)),
+            shadowElevation = 10.dp
+        ) {
+            Column(Modifier.padding(22.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .background(MaterialTheme.colorScheme.tertiaryContainer, RoundedCornerShape(50)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("🗂️", style = MaterialTheme.typography.bodyMedium)
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        if (pending.liveCount > 0) "删除「${pending.name}」这个分类？"
+                        else "删掉「${pending.name}」？",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontFamily = GuluBrandFont,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+                Spacer(Modifier.height(14.dp))
+                Text(
+                    if (pending.liveCount > 0)
+                        "这个分类下的 ${pending.liveCount} 笔账单会挪到「${CategoryDefaults.VACUUM_NAME}」，不会丢哦～" +
+                            "\n以后同类消费，阿噜可能还会帮你建一个新分类。"
+                    else
+                        "它下面还没有账单，删掉不影响任何记录。" +
+                            "\n以后同类消费，阿噜可能还会帮你建一个新分类。",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(20.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    TipButton("再想想", MaterialTheme.colorScheme.surfaceVariant,
+                        MaterialTheme.colorScheme.onSurfaceVariant, Modifier.weight(1f), onDismiss)
+                    TipButton("删除", MaterialTheme.colorScheme.errorContainer,
+                        MaterialTheme.colorScheme.onErrorContainer, Modifier.weight(1f), onConfirm)
+                }
             }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("再想想") }
         }
-    )
+    }
+}
+
+/** 弹窗里的胶囊按钮：左右等分，配色跟随传入的容器色。 */
+@Composable
+private fun TipButton(
+    text: String,
+    container: Color,
+    contentColor: Color,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    Surface(
+        modifier = modifier.clip(RoundedCornerShape(50)).clickable(onClick = onClick),
+        shape = RoundedCornerShape(50),
+        color = container
+    ) {
+        Box(Modifier.padding(vertical = 12.dp), contentAlignment = Alignment.Center) {
+            Text(text, style = MaterialTheme.typography.labelLarge, color = contentColor)
+        }
+    }
 }
 
 /**
@@ -305,6 +384,7 @@ private fun CategoryChip(
     label: String,
     selected: Boolean,
     enabled: Boolean,
+    modifier: Modifier = Modifier,
     onClick: () -> Unit,
     onLongClick: () -> Unit
 ) {
@@ -313,18 +393,58 @@ private fun CategoryChip(
     val content = if (selected) MaterialTheme.colorScheme.onSecondaryContainer
     else MaterialTheme.colorScheme.onSurfaceVariant
     Box(
-        modifier = Modifier
-            .clip(MaterialTheme.shapes.large)
+        modifier = modifier
+            .clip(MaterialTheme.shapes.extraLarge)
             .background(container)
             .border(
                 width = 1.dp,
-                color = if (selected) Color.Transparent else MaterialTheme.colorScheme.outlineVariant,
-                shape = MaterialTheme.shapes.large
+                // 选中的那格描边带一点品牌紫，比纯色块更有"被挑中"的感觉
+                color = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)
+                else MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
+                shape = MaterialTheme.shapes.extraLarge
             )
             .combinedClickable(enabled = enabled, onClick = onClick, onLongClick = onLongClick)
-            .padding(horizontal = 14.dp, vertical = 8.dp)
+            .padding(horizontal = 10.dp, vertical = 11.dp),
+        contentAlignment = Alignment.Center
     ) {
-        Text(label, style = MaterialTheme.typography.labelLarge, color = content)
+        Text(
+            label,
+            style = MaterialTheme.typography.labelLarge,
+            color = content,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center
+        )
+    }
+}
+
+/**
+ * 阿噜的胶囊小提示。
+ *
+ * 刻意不用 Material 默认的 Snackbar：那条灰黑长条跟「奶油手账」的圆润配色完全两个世界，
+ * 在记账页里显得生硬（用户报过「提示词显示那里有点丑」）。
+ */
+@Composable
+private fun GuluTip(text: String, modifier: Modifier = Modifier) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(50),
+        color = MaterialTheme.colorScheme.primaryContainer,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)),
+        shadowElevation = 6.dp
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("🐾", style = MaterialTheme.typography.bodyMedium)
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onPrimaryContainer
+            )
+        }
     }
 }
 
