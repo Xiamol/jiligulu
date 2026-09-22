@@ -80,6 +80,14 @@ class PromptStructureTest {
         assertTrue("用户这轮说必须在最后", time < input)
     }
 
+    @Test
+    fun `the current input shows up in the dynamic block`() {
+        // 本轮输入只从 `用户这轮说：{input}` 出现——history 由 chatTurnsFor 负责不重复携带同一句。
+        val rendered = renderer().renderContext("晚饭 30 块")
+        assertTrue("用户这轮说段要带上原话", rendered.contains("用户这轮说：晚饭 30 块"))
+        assertEquals("本轮输入在动态段里只出现一次", 1, Regex("晚饭 30 块").findAll(rendered).count())
+    }
+
     // ---------- 候选按需注入 ----------
 
     @Test

@@ -10,6 +10,7 @@ import com.jiligulu.app.core.util.Formatters
 import com.jiligulu.app.data.local.entity.BillEntity
 import com.jiligulu.app.data.local.entity.BillType
 import com.jiligulu.app.data.local.entity.CategoryEntity
+import com.jiligulu.app.data.local.entity.ChatMessageEntity
 import com.jiligulu.app.data.local.entity.CreatedBy
 import com.jiligulu.app.data.local.entity.IconType
 import com.jiligulu.app.data.prefs.UserPrefs
@@ -304,25 +305,51 @@ class AiRepository(
         ChatContextBuilder.build(messages, bills, categories, requestMillis, zone)
     }.getOrElse { ChatContext("", zone.id, emptyList(), emptyList()) }
 
-    /** 带回模型的多轮消息：只取真正的对话，草稿卡摘要作为 assistant 侧信息带入。 */
+    /**
+     * 带回模型的多轮消息：只取真正的对话（USER / ASSISTANT 原文），草稿卡/指令卡一律不进上下文。
+     *
+     * R9 之后历史改走 messages 数组，本轮输入则改由 `renderContext` 的 `用户这轮说：` 承载；
+     * 因此这里必须把「本轮刚落库的那条 USER」剔掉，否则模型会把同一句话看到两遍（见 [chatTurnsFor]）。
+     */
     private suspend fun recentTurns(requestMillis: Long): List<ChatTurn> = runCatching {
-        val cutoff = requestMillis - ChatContextBuilder.MESSAGE_WINDOW_HOURS * 3_600_000L
-        chatHistoryRepository.getAll()
-            .filter { it.createdAt >= cutoff }
-            .mapNotNull { message ->
-                when (message.kind) {
-                    "USER" -> message.content.takeIf { it.isNotBlank() }
-                        ?.let { ChatTurn("user", it) }
-
-                    "ASSISTANT" -> message.content.takeIf {
-                        it.isNotBlank() && message.status != "PENDING" && message.status != "INTERRUPTED"
-                    }?.let { ChatTurn("assistant", it) }
-
-                    else -> null
-                }
-            }
-            .takeLast(ChatContextBuilder.MAX_MESSAGES)
+        chatTurnsFor(chatHistoryRepository.getAll(), requestMillis)
     }.getOrElse { emptyList() }
+
+    companion object {
+        /**
+         * 把持久化消息映射成带回模型的多轮对话（仅 USER/ASSISTANT 原文）。
+         *
+         * 为什么要丢掉末尾那条 user：本轮 `send()` 会先落一条 USER、随后落一条 ASSISTANT(PENDING)，
+         * 而 PENDING 的 assistant 会在下面被滤掉——于是本轮那条 USER 就成了列表末尾「没有回复的 user」。
+         * 本轮输入已经由动态上下文里的 `用户这轮说：{input}` 承担，若历史里再出现一次，
+         * 模型会以为用户连说了两轮同样的话，因此只裁掉末尾这一条。
+         *
+         * 刻意「只裁末尾一条」而不是 `dropLastWhile`：更早的 user 是真实历史——哪怕它的 assistant
+         * 曾被中断过，也该留给模型承接上下文（用户明确要求「历史对话是刚需」）。
+         *
+         * 选「末尾未配对的 user」而不是「按 id 排除」，是因为前者不依赖调用方把 id 传进来，
+         * 也能在异常恢复后自洽；它同样不改动 [ChatContextBuilder.MAX_MESSAGES] 的窗口语义，
+         * 更不引入任何按轮数的裁切。
+         */
+        internal fun chatTurnsFor(messages: List<ChatMessageEntity>, requestMillis: Long): List<ChatTurn> {
+            val cutoff = requestMillis - ChatContextBuilder.MESSAGE_WINDOW_HOURS * 3_600_000L
+            val turns = messages
+                .filter { it.createdAt >= cutoff }
+                .mapNotNull { message ->
+                    when (message.kind) {
+                        "USER" -> message.content.takeIf { it.isNotBlank() }?.let { ChatTurn("user", it) }
+
+                        "ASSISTANT" -> message.content.takeIf {
+                            it.isNotBlank() && message.status != "PENDING" && message.status != "INTERRUPTED"
+                        }?.let { ChatTurn("assistant", it) }
+
+                        else -> null
+                    }
+                }
+                .takeLast(ChatContextBuilder.MAX_MESSAGES)
+            return if (turns.lastOrNull()?.role == "user") turns.dropLast(1) else turns
+        }
+    }
 
     // ---------- 落库 ----------
 

@@ -5,6 +5,11 @@
 *.sh text eol=lf
 gradlew text eol=lf
 
+# 提示词资源钉死 LF，且不随平台转换（core.autocrlf=true 时默认会在检出时转成 CRLF）。
+# R9 的全部价值建立在「system 段逐字节可复现」之上：一旦 fresh clone 的字节与开发机不同，
+# 提示词就不可复现，多出的 \r 还会白吃 token。所以这里显式覆盖上面的 `* text=auto`。
+app/src/main/assets/prompts/*.txt text eol=lf
+
 # Windows 批处理保持 CRLF
 *.bat text eol=crlf
 *.cmd text eol=crlf
