@@ -5,8 +5,10 @@ import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.AP
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.jiligulu.app.BuildConfig
 import com.jiligulu.app.JiliguluApp
 import com.jiligulu.app.core.ai.AiParseResult
+import com.jiligulu.app.core.ai.DeepSeekEmptyResponseException
 import com.jiligulu.app.core.ai.DeepSeekHttpException
 import com.jiligulu.app.core.ai.LocalBillParser
 import com.jiligulu.app.data.local.entity.BillType
@@ -214,37 +216,7 @@ class ChatViewModel(
         return AiParseResult(bills = drafts, reply = fallbackReply(drafts.isEmpty(), cause))
     }
 
-    /**
-     * 降级路径的措辞必须能指路。原先除了「没配 Key」一律说「连不上网」，
-     * 结果余额不足（402）也被说成网络问题，白白往错方向排查。
-     *
-     * v0.6 补：网络层失败（超时 / 连接被重置）与「本地规则也解析不出」是两回事——
-     * 前者要老实说网络，别让用户怀疑「是不是我说的话不被理解」。
-     */
-    private fun fallbackReply(nothingParsed: Boolean, cause: Throwable?): String {
-        val keyProblem = cause?.message?.contains("API Key") == true
-        val httpStatus = (cause as? DeepSeekHttpException)?.status
-        return when {
-            keyProblem && nothingParsed ->
-                "还没有配置 API Key，先到「设置 → AI 服务」里填一个，阿噜～"
-            keyProblem ->
-                "先用本地规则整理好了，请核对后再确认入账（配置 API Key 后可让叽里咕噜帮你拆得更细）～"
-            httpStatus == 402 ->
-                "叽里咕噜的账户余额不够啦，先去 DeepSeek 平台充值，再回来找我记账～"
-            httpStatus == 401 ->
-                "这个 API Key 好像失效了，到「设置 → AI 服务」里换一个新的吧。"
-            httpStatus == 429 ->
-                "请求太频繁了，缓一会儿再跟我说～"
-            httpStatus != null && httpStatus >= 500 ->
-                "DeepSeek 那边暂时有点忙，稍后再试一次。"
-            cause is IOException ->
-                "网络好像不太稳，阿噜没接上话，你再说一遍试试～"
-            nothingParsed ->
-                "暂时没连上 DeepSeek。记账的话一句一笔最稳（如「昨天中午吃饭 9 元」），再试一次也行～"
-            else ->
-                "先用本地规则整理好了，请核对金额、名称和时间，再确认入账，阿噜～"
-        }
-    }
+    // 降级文案的实现见 companion：纯函数，单测可直接断言「每种失败都有专属说法」。
 
     /**
      * 把一轮结论落成聊天流里的东西。
@@ -560,6 +532,60 @@ class ChatViewModel(
     private fun trimAmount(value: Double) = java.math.BigDecimal.valueOf(value).stripTrailingZeros().toPlainString()
 
     companion object {
+        /**
+         * 降级路径的措辞必须能指路。
+         *
+         * 历史教训：原先除「没配 Key」外一律说「连不上网」，于是余额不足（402）、
+         * 内容被服务端拒（400）、审核拦截（空响应）全被报成网络问题，用户往完全错的方向排查。
+         *
+         * 现在每类原因各有说法，尤其这四种必须分开（用户能据此做不同的事）：
+         * - 400：服务端拒了这条请求（内容不合适）→ 换个说法
+         * - 空响应：内容审核拦截（finish_reason=content_filter）→ 换个话题
+         * - [IOException]：真·网络问题 → 重发一次
+         * - 其他 HTTP 码 → 如实报码，别推给网络
+         *
+         * 纯函数放 companion：单测直接断言「每种失败都有专属文案」。
+         */
+        internal fun fallbackReply(nothingParsed: Boolean, cause: Throwable?): String {
+            val base = fallbackReplyText(nothingParsed, cause)
+            // 调试期把真实异常贴出来：用户截图即可定位，不用再连手机抓日志。
+            // 只在 debug 包生效，release 不会暴露内部细节。
+            if (!BuildConfig.DEBUG || cause == null) return base
+            val detail = "${cause.javaClass.simpleName}: ${cause.message?.take(160)}"
+            return "$base\n（调试：$detail）"
+        }
+
+        private fun fallbackReplyText(nothingParsed: Boolean, cause: Throwable?): String {
+            val keyProblem = cause?.message?.contains("API Key") == true
+            val httpStatus = (cause as? DeepSeekHttpException)?.status
+            return when {
+                keyProblem && nothingParsed ->
+                    "还没有配置 API Key，先到「设置 → AI 服务」里填一个，阿噜～"
+                keyProblem ->
+                    "先用本地规则整理好了，请核对后再确认入账（配置 API Key 后可让叽里咕噜帮你拆得更细）～"
+                httpStatus == 402 ->
+                    "叽里咕噜的账户余额不够啦，先去 DeepSeek 平台充值，再回来找我记账～"
+                httpStatus == 401 ->
+                    "这个 API Key 好像失效了，到「设置 → AI 服务」里换一个新的吧。"
+                httpStatus == 429 ->
+                    "请求太频繁了，缓一会儿再跟我说～"
+                httpStatus == 400 ->
+                    "这句话阿噜接不住，换个说法嘛～ 记账、唠嗑、问功能，阿噜都在行 ♡"
+                httpStatus != null && httpStatus >= 500 ->
+                    "DeepSeek 那边暂时有点忙，稍后再试一次。"
+                httpStatus != null ->
+                    "阿噜这边出了点小状况（DeepSeek 返回 $httpStatus），稍后再试试～"
+                cause is DeepSeekEmptyResponseException ->
+                    "这个阿噜变不出来呀，换个话题嘛 ♡ 记账、唠嗑、问功能都行～"
+                cause is IOException ->
+                    "网络好像不太稳，阿噜没接上话，你再说一遍试试～"
+                nothingParsed ->
+                    "阿噜这句没接住。记账的话一句一笔最稳（如「昨天中午吃饭 9 元」），再试一次也行～"
+                else ->
+                    "先用本地规则整理好了，请核对金额、名称和时间，再确认入账，阿噜～"
+            }
+        }
+
         /**
          * 一次指令提交后追加给用户的结论行（R6：状态变化只能靠**追加消息**表达，永不回改历史）。
          *

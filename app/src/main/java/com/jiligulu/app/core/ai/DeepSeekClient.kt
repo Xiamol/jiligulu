@@ -106,6 +106,18 @@ data class AiParseResult(
  */
 class DeepSeekHttpException(val status: Int, val detail: String) : IOException("DeepSeek HTTP $status")
 
+/**
+ * 服务端返回了 200，但没有给出任何内容。
+ *
+ * 实测场景：请求里含「变个女朋友」「变一百万」这类内容时，DeepSeek 会直接结束生成
+ * （`finish_reason = content_filter`），`content` 为空。**这不是网络故障**——
+ * 把它说成「没连上」会让用户一直重试同一句话，方向完全错了。
+ *
+ * 刻意不继承 [IOException]：它重试没有意义，也不该被网络类文案吃掉。
+ */
+class DeepSeekEmptyResponseException(val finishReason: String?) :
+    IllegalStateException("DeepSeek 返回空内容（finish_reason=${finishReason ?: "未知"}）")
+
 /** 一轮已有对话。[role] 只能是 "user" 或 "assistant"。 */
 data class ChatTurn(val role: String, val content: String)
 
@@ -198,9 +210,24 @@ class DeepSeekClient(private val apiKey: String, private val client: OkHttpClien
             }
             val root = json.parseToJsonElement(body).jsonObject
             logCacheUsage(root)
-            val content = root["choices"]!!.jsonArray[0]
-                .jsonObject["message"]!!.jsonObject["content"]!!.jsonPrimitive.content
-            json.decodeFromString(AiParseResult.serializer(), unwrapJsonFence(content))
+            // 逐步取，不用 !!：DeepSeek 对触发内容审核的请求会返回 200 但内容为空
+            // （finish_reason = content_filter），也有过 choices 为空的形态。
+            // 用 !! 会炸成 NPE / 下标越界，最后被 UI 当成「没连上」——那是误导。
+            val choice = root["choices"]?.jsonArray?.firstOrNull()?.jsonObject
+            val finishReason = choice?.get("finish_reason")?.jsonPrimitive?.contentOrNull
+            val content = choice?.get("message")?.jsonObject?.get("content")?.jsonPrimitive?.contentOrNull
+            if (content.isNullOrBlank()) {
+                Log.w(TAG, "响应没有内容：finish_reason=$finishReason body=${body.take(300)}")
+                throw DeepSeekEmptyResponseException(finishReason)
+            }
+            try {
+                json.decodeFromString(AiParseResult.serializer(), unwrapJsonFence(content))
+            } catch (parseFailure: Exception) {
+                // 模型偶尔会吐出畸形 JSON（典型是 reply 里带了未转义的引号）。
+                // 把原文打进日志——否则这个异常到了 UI 只剩「没连上」，永远查不出真因。
+                Log.w(TAG, "解析失败（${parseFailure.message}）原文=${content.take(500)}")
+                throw parseFailure
+            }
         }
     }
 
@@ -214,15 +241,22 @@ class DeepSeekClient(private val apiKey: String, private val client: OkHttpClien
         private const val RETRY_DELAY_MS = 600L
 
         /**
-         * 只有「重试有意义」的失败才重发：
-         * - [IOException]：连接被重置、DNS 抖动、读写超时——移动网络下最常见的偶发失败，重发基本必成
-         * - 429 / 5xx：服务端限流或打了个喷嚏
+         * 只有「重试有意义」的失败才重发。
          *
-         * Key 失效（401）、余额不足（402）、请求格式错（400）重试多少次都一样，不浪费用户的 token。
+         * ⚠️ **顺序要紧**：[DeepSeekHttpException] 继承自 [IOException]，
+         * 若把 `is IOException` 写在前面，401（Key 失效）/402（余额不足）这类
+         * 「重试多少次都一样」的失败也会被重发，白白烧用户的 token。
+         *
+         * - 429 / 5xx：限流或服务端打喷嚏 → 重发
+         * - [DeepSeekEmptyResponseException]：实测约 8% 的请求（尤其「给我变个女朋友」这种）
+         *   会返回 200 + 空白内容，而同一句话多数时候是正常回答 → 重发基本能拿到结果
+         * - 其他 [IOException]：连接被重置、超时、DNS 抖动 → 重发
+         * - 401 / 402 / 400：重试无意义
          */
-        private fun isRetryable(failure: Exception): Boolean = when (failure) {
-            is IOException -> true
+        internal fun isRetryable(failure: Exception): Boolean = when (failure) {
             is DeepSeekHttpException -> failure.status == 429 || failure.status >= 500
+            is DeepSeekEmptyResponseException -> true
+            is IOException -> true
             else -> false
         }
 
