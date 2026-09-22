@@ -567,7 +567,7 @@ private fun CommandCardView(
                 Text(if (deleting) "正在收起来…" else "正在改…", style = MaterialTheme.typography.bodySmall)
             }
             ChatItem.CommandCard.Status.DONE -> Text(
-                if (deleting) "已进回收站，可以在「我的 → 回收站」里恢复" else "已经按上面的样子改好了",
+                if (deleting) "已进回收站，可以在「设置 → 数据管理 → 回收站」里恢复" else "已经按上面的样子改好了",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

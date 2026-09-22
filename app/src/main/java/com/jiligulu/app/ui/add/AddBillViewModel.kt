@@ -9,6 +9,8 @@ import com.jiligulu.app.JiliguluApp
 import com.jiligulu.app.data.local.entity.BillType
 import com.jiligulu.app.data.local.entity.CategoryEntity
 import com.jiligulu.app.data.repository.BillRepository
+import com.jiligulu.app.data.repository.CategoryAdminRepository
+import com.jiligulu.app.data.repository.CategoryDeletionResult
 import com.jiligulu.app.data.repository.CategoryRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.Channel
@@ -27,7 +29,8 @@ data class AddBillSaveState(
 
 class AddBillViewModel(
     private val billRepository: BillRepository,
-    categoryRepository: CategoryRepository
+    categoryRepository: CategoryRepository,
+    private val categoryAdminRepository: CategoryAdminRepository
 ) : ViewModel() {
 
     val categories: StateFlow<List<CategoryEntity>> = categoryRepository.categories
@@ -38,6 +41,23 @@ class AddBillViewModel(
 
     private val savedEvents = Channel<Unit>(Channel.BUFFERED)
     val saved = savedEvents.receiveAsFlow()
+
+    /**
+     * 该分类下的活账单条数。
+     *
+     * 删除弹窗要如实告诉用户「会挪走几笔」——先查数再问，而不是让用户自己数。
+     * 只数活账单（回收站里的不计入、也不改归属）。
+     */
+    suspend fun liveBillCount(categoryId: Long): Int = billRepository.countLiveByCategory(categoryId)
+
+    /**
+     * 删除分类：活账单整体转挂「待定」+ 删分类行，一个事务。
+     *
+     * 返回 sealed 而不是布尔：[CategoryDeletionResult.Refused]（如收纳箱不可删）与
+     * [CategoryDeletionResult.Deleted]（附带挪走条数，用于文案）要给用户不同反馈。
+     */
+    suspend fun deleteCategory(categoryId: Long): CategoryDeletionResult =
+        categoryAdminRepository.deleteCategoryAndReassign(categoryId)
 
     fun save(
         amountFen: Long,
@@ -79,7 +99,11 @@ class AddBillViewModel(
         val Factory = viewModelFactory {
             initializer {
                 val app = this[APPLICATION_KEY] as JiliguluApp
-                AddBillViewModel(app.container.billRepository, app.container.categoryRepository)
+                AddBillViewModel(
+                    app.container.billRepository,
+                    app.container.categoryRepository,
+                    app.container.categoryAdminRepository
+                )
             }
         }
     }

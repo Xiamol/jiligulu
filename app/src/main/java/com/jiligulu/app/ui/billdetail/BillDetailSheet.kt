@@ -154,7 +154,7 @@ fun BillDetailSheet(billId: Long, onDismiss: () -> Unit) {
     if (confirmDelete) {
         AlertDialog(onDismissRequest = { confirmDelete = false },
             title = { Text("删除这笔账？") },
-            text = { Text("${detail.ifBlank { state.categoryName }}  ¥$amount\n删除后无法恢复。") },
+            text = { Text("${detail.ifBlank { state.categoryName }}  ¥$amount\n删除后可在「设置 → 数据管理 → 回收站」里找回。") },
             confirmButton = { TextButton(onClick = { confirmDelete = false; vm.delete() }) {
                 Text("确认删除", color = MaterialTheme.colorScheme.error)
             } },
