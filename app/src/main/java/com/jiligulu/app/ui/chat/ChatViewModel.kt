@@ -13,9 +13,11 @@ import com.jiligulu.app.data.local.entity.BillType
 import com.jiligulu.app.data.local.entity.CategoryEntity
 import com.jiligulu.app.data.local.entity.ChatMessageEntity
 import com.jiligulu.app.data.repository.AiRepository
+import com.jiligulu.app.data.repository.AiTurn
 import com.jiligulu.app.data.repository.CategoryRepository
 import com.jiligulu.app.data.repository.ChatHistoryRepository
 import com.jiligulu.app.data.repository.ConfirmItem
+import com.jiligulu.app.domain.chat.PromptRenderer
 import com.jiligulu.app.domain.category.CategoryEngine
 import com.jiligulu.app.domain.persona.PersonaEngine
 import com.jiligulu.app.domain.persona.QuipLibrary
@@ -43,8 +45,27 @@ sealed interface ChatItem {
         val drafts: List<DraftUi>,
         val status: Status = Status.EDITING,
         val savedCount: Int = 0
-    ) : ChatItem
-    enum class Status { EDITING, SAVING, CONFIRMED, CANCELLED }
+    ) : ChatItem {
+        enum class Status { EDITING, SAVING, CONFIRMED, CANCELLED }
+    }
+
+    /**
+     * 改账 / 删账确认卡。
+     *
+     * 和草稿卡分开是因为两者可编辑的自由度完全不同：草稿卡什么都能改，
+     * 指令卡是「模型已经算好的一个变更」，用户只能勾选要不要执行。
+     */
+    data class CommandCard(
+        override val id: Long,
+        val kind: CommandKind,
+        val params: List<CommandItem>,
+        val status: Status = Status.EDITING,
+        val appliedCount: Int = 0
+    ) : ChatItem {
+        /** 卡上还有没有没提交的条目。 */
+        val pendingCount: Int get() = params.count { it.checked } - appliedCount
+        enum class Status { EDITING, SAVING, DONE, CANCELLED }
+    }
 }
 
 class ChatViewModel(
@@ -66,6 +87,10 @@ class ChatViewModel(
     val categories: StateFlow<List<CategoryEntity>> = categoryRepository.categories
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    /** 当前挂起中的「待补充」账。不为空时输入栏上方会出现一条提示气泡。 */
+    private val _pending = MutableStateFlow<PendingDraft?>(null)
+    val pending: StateFlow<PendingDraft?> = _pending
+
     init { loadHistory() }
 
     fun loadHistory() {
@@ -76,6 +101,7 @@ class ChatViewModel(
                 writes.withLock {
                     history.markPendingInterrupted()
                     _items.value = history.getAll().map { it.toUi() }
+                    _pending.value = PromptRenderer.pendingOf(history.latestPending())
                     if (_items.value.isEmpty()) {
                         val name = aiRepository.nicknameWithSuffix()
                         appendReply("阿噜！${if (name.isBlank()) "" else "${name}，"}今天花了什么？补记也可以说「昨天中午吃饭 9 元」～")
@@ -101,23 +127,30 @@ class ChatViewModel(
         val requestMillis = System.currentTimeMillis()
         val zone = ZoneId.systemDefault()
         viewModelScope.launch {
-            var pending: ChatMessageEntity? = null
+            var pendingMsg: ChatMessageEntity? = null
             try {
+                val carried = _pending.value
                 writes.withLock {
                     val (user, message) = history.beginRequest(input, requestMillis)
                     append(user.toUi())
-                    pending = message
-                    append(pending!!.toUi())
+                    pendingMsg = message
+                    append(pendingMsg!!.toUi())
                 }
                 val result = aiRepository.parse(input, requestMillis, zone)
+                // 模型没连上时降级到本地规则；本地规则不会改账删账，也不会扯上下文。
                 val parsed = result.getOrNull() ?: localParse(input, result.exceptionOrNull())
-                writes.withLock { finishRequest(pending!!, input, parsed, requestMillis, zone) }
+                val turn = if (result.isSuccess) {
+                    aiRepository.toTurn(parsed, input, requestMillis, zone, carried)
+                } else {
+                    localTurn(parsed, input, requestMillis, zone)
+                }
+                writes.withLock { finishRequest(pendingMsg!!, input, turn, parsed.reply, requestMillis) }
             } catch (cancelled: CancellationException) {
                 // Durable PENDING rows become INTERRUPTED on the next visit.
                 throw cancelled
             } catch (_: Exception) {
                 _error.value = "这次没有完成，请稍后重试；已有账单和历史仍会保留。"
-                pending?.let { message ->
+                pendingMsg?.let { message ->
                     try {
                         writes.withLock {
                             val current = history.getById(message.id)
@@ -133,6 +166,44 @@ class ChatViewModel(
                 _sending.value = false
             }
         }
+    }
+
+    /**
+     * 降级到本地规则时的结论。
+     *
+     * 本地规则只能新增，不能改账删账——与其猜，不如老老实实记账。
+     * 这里只把 AI 草稿翻译成草稿卡，不做任何动作分派：没有模型就没有理解，
+     * 硬把用户的话当成改账指令是最危险的猜法。
+     */
+    private fun localTurn(parsed: AiParseResult, input: String, requestMillis: Long, zone: ZoneId): AiTurn {
+        if (parsed.bills.isEmpty()) {
+            // 离线时「5」这种话说不完整，本地也得挂起，不能提示「请分开说每笔账」。
+            return if (PendingInputDetector.looksIncomplete(input)) {
+                AiTurn.Pending(
+                    reply = parsed.reply,
+                    draft = PendingDraft(
+                        amountText = PendingInputDetector.amountOf(input).orEmpty(),
+                        rawInput = input,
+                        createdAt = requestMillis
+                    )
+                )
+            } else AiTurn.Chat(parsed.reply)
+        }
+        val drafts = parsed.bills.map { bill ->
+            val expression = BillTimeResolver.expressionForBill(input, bill.detail, parsed.bills.size, bill.timeExpression)
+            val time = BillTimeResolver.resolve(expression, bill.occurredAt, requestMillis, zone)
+            ConfirmItem(
+                amountText = if (bill.amountYuan.isFinite() && bill.amountYuan > 0)
+                    java.math.BigDecimal.valueOf(bill.amountYuan).stripTrailingZeros().toPlainString() else "",
+                type = if (bill.type.equals("INCOME", true)) BillType.INCOME else BillType.EXPENSE,
+                categoryName = bill.category.ifBlank { "未分类" },
+                isNewCategory = bill.isNewCategory,
+                iconEmoji = bill.iconEmoji, iconSvg = bill.iconSvg, keywords = bill.keywords,
+                detail = bill.detail, note = bill.note, checked = true,
+                timestamp = time.timestamp, timeNeedsReview = time.needsReview, timeHint = time.hint
+            )
+        }
+        return AiTurn.Drafts(parsed.reply, drafts)
     }
 
     private fun localParse(input: String, cause: Throwable? = null): AiParseResult {
@@ -169,45 +240,86 @@ class ChatViewModel(
         }
     }
 
+    /**
+     * 把一轮结论落成聊天流里的东西。
+     *
+     * 挂起账的清除放在这里统一做：只要这轮有了结论（草稿/指令/闲聊），
+     * 上一轮的挂起就该退场——补全了、或者用户改聊别的了。
+     */
     private suspend fun finishRequest(
-        pending: ChatMessageEntity,
+        pendingMsg: ChatMessageEntity,
         input: String,
-        parsed: AiParseResult,
-        requestMillis: Long,
-        zone: ZoneId
+        turn: AiTurn,
+        reply: String,
+        requestMillis: Long
     ) {
-        if (parsed.bills.isEmpty()) {
-            val reply = pending.copy(status = "", content = parsed.reply.ifBlank { "阿噜？还没找到这笔账的金额，再说具体一点吧～" })
-            history.update(reply)
-            replace(reply.toUi())
-            return
+        when (turn) {
+            is AiTurn.Pending -> {
+                // 追问本身就是模型给的 reply，直接原样显示，同时把挂起态落库。
+                val text = turn.reply.ifBlank { "这笔多少钱是花在哪儿啦？阿噜先记着～" }
+                val message = pendingMsg.copy(status = "", content = text)
+                history.update(message)
+                replace(message.toUi())
+                history.suspendPending(
+                    PromptRenderer.encodePending(turn.draft), requestMillis
+                )
+                _pending.value = turn.draft
+                return
+            }
+
+            is AiTurn.Chat -> {
+                val message = pendingMsg.copy(status = "", content = turn.reply.ifBlank { "阿噜在听，你说～" })
+                history.update(message)
+                replace(message.toUi())
+                clearPending()
+                return
+            }
+
+            is AiTurn.Commands -> {
+                val payload = CommandCardCodec.encode(turn.kind, turn.items)
+                val card = pendingMsg.copy(
+                    kind = "COMMAND", content = "", rawInput = input,
+                    draftPayload = payload, status = "EDITING"
+                )
+                history.update(card)
+                replace(card.toUi())
+                appendReply(turn.reply.ifBlank {
+                    if (turn.kind == CommandKind.DELETE) "这些账阿噜先收进回收站，确认一下～" else "这些要改的账，确认一下～"
+                })
+                clearPending()
+                return
+            }
+
+            is AiTurn.Drafts -> {
+                if (turn.drafts.isEmpty()) {
+                    val message = pendingMsg.copy(status = "", content = reply.ifBlank { "阿噜？还没找到这笔账的金额，再说具体一点吧～" })
+                    history.update(message)
+                    replace(message.toUi())
+                    clearPending()
+                    return
+                }
+                val card = pendingMsg.copy(
+                    kind = "DRAFT", content = "", rawInput = input,
+                    draftPayload = DraftHistoryCodec.encode(turn.drafts.map { it.toDraftUi() }),
+                    status = "EDITING"
+                )
+                history.update(card)
+                replace(card.toUi())
+                appendReply(turn.reply.ifBlank { "草稿整理好了，确认一下就记入账本，阿噜～" })
+                clearPending()
+            }
         }
-        val drafts = parsed.bills.map { bill ->
-            val expression = BillTimeResolver.expressionForBill(input, bill.detail, parsed.bills.size, bill.timeExpression)
-            val time = BillTimeResolver.resolve(expression, bill.occurredAt, requestMillis, zone)
-            DraftUi(
-                amountText = if (bill.amountYuan.isFinite() && bill.amountYuan > 0) trimAmount(bill.amountYuan) else "",
-                type = if (bill.type.equals("INCOME", true)) BillType.INCOME else BillType.EXPENSE,
-                categoryName = bill.category.ifBlank { "未分类" },
-                isNewCategory = bill.isNewCategory,
-                iconEmoji = bill.iconEmoji,
-                iconSvg = bill.iconSvg,
-                keywords = bill.keywords,
-                detail = bill.detail,
-                note = bill.note,
-                timestamp = time.timestamp,
-                timeNeedsReview = time.needsReview,
-                timeHint = time.hint
-            )
-        }
-        val card = pending.copy(kind = "DRAFT", content = "", rawInput = input, draftPayload = DraftHistoryCodec.encode(drafts), status = "EDITING")
-        history.update(card)
-        replace(card.toUi())
-        appendReply(parsed.reply.ifBlank { "草稿整理好了，确认一下就记入账本，阿噜～" })
+    }
+
+    /** 挂起账离场。它已经完成使命（被补全 / 被放弃 / 被指令或闲聊取代）。 */
+    private suspend fun clearPending() {
+        if (_pending.value == null) return
+        runCatching { history.clearPending() }
+        _pending.value = null
     }
 
     fun updateDraft(cardId: Long, index: Int, transform: (DraftUi) -> DraftUi) {
-        val card = findCard(cardId)?.takeIf { it.status == ChatItem.Status.EDITING } ?: return
+        val card = findCard(cardId)?.takeIf { it.status == ChatItem.DraftCard.Status.EDITING } ?: return
         val updated = card.copy(drafts = card.drafts.mapIndexed { i, draft -> if (i == index) transform(draft) else draft })
         replace(updated)
         viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
@@ -220,14 +332,14 @@ class ChatViewModel(
     }
 
     fun confirmCard(cardId: Long) {
-        val card = findCard(cardId)?.takeIf { it.status == ChatItem.Status.EDITING } ?: return
+        val card = findCard(cardId)?.takeIf { it.status == ChatItem.DraftCard.Status.EDITING } ?: return
         val selected = card.drafts.filter { it.checked }
         if (selected.isEmpty() || selected.any { !it.isValid }) {
             _error.value = "请先核对所选账单的金额和时间。"
             return
         }
         // Synchronous guard closes the double-tap window before the coroutine starts.
-        replace(card.copy(status = ChatItem.Status.SAVING))
+        replace(card.copy(status = ChatItem.DraftCard.Status.SAVING))
         val confirmedAt = System.currentTimeMillis()
         val finalCard = card.copy(drafts = card.drafts.map {
             if (it.checked && it.timestamp == null) it.copy(timestamp = confirmedAt, timeHint = "按确认入账的时间记录") else it
@@ -238,7 +350,7 @@ class ChatViewModel(
                 val saved = writes.withLock {
                     aiRepository.confirm(cardId, finalCard.drafts.map { it.toConfirmItem() }, card.rawInput, DraftHistoryCodec.encode(finalCard.drafts))
                 }
-                replace(finalCard.copy(status = ChatItem.Status.CONFIRMED, savedCount = saved))
+                replace(finalCard.copy(status = ChatItem.DraftCard.Status.CONFIRMED, savedCount = saved))
                 writes.withLock {
                     appendReply("记好了，$saved 笔账已放进账本 ♡")
                     val name = aiRepository.nicknameWithSuffix()
@@ -259,12 +371,116 @@ class ChatViewModel(
     }
 
     fun cancelCard(cardId: Long) {
-        val card = findCard(cardId)?.takeIf { it.status == ChatItem.Status.EDITING } ?: return
-        replace(card.copy(status = ChatItem.Status.CANCELLED))
+        val card = findCard(cardId)?.takeIf { it.status == ChatItem.DraftCard.Status.EDITING } ?: return
+        replace(card.copy(status = ChatItem.DraftCard.Status.CANCELLED))
         viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
             withContext(NonCancellable) {
                 try { writes.withLock { history.dismissDraft(cardId) } }
                 catch (_: Exception) { replace(card); _error.value = "取消没有保存成功，请重试。" }
+            }
+        }
+    }
+
+    // ---------- 改账 / 删账确认卡 ----------
+
+    fun toggleCommandItem(cardId: Long, billId: Long) {
+        val card = findCommandCard(cardId)?.takeIf { it.status == ChatItem.CommandCard.Status.EDITING } ?: return
+        val updated = card.copy(params = card.params.map { if (it.billId == billId) it.copy(checked = !it.checked) else it })
+        replace(updated)
+        persistCommand(cardId, updated)
+    }
+
+    fun toggleCommandAll(cardId: Long) {
+        val card = findCommandCard(cardId)?.takeIf { it.status == ChatItem.CommandCard.Status.EDITING } ?: return
+        val selectAll = card.params.any { !it.checked }
+        val updated = card.copy(params = card.params.map { it.copy(checked = selectAll) })
+        replace(updated)
+        persistCommand(cardId, updated)
+    }
+
+    fun confirmCommandCard(cardId: Long) {
+        val card = findCommandCard(cardId)?.takeIf { it.status == ChatItem.CommandCard.Status.EDITING } ?: return
+        if (card.pendingCount <= 0) return
+        replace(card.copy(status = ChatItem.CommandCard.Status.SAVING))
+        _error.value = null
+        viewModelScope.launch {
+            try {
+                val applied = writes.withLock {
+                    aiRepository.commitCommands(
+                        cardId,
+                        CommandCardPayload(
+                            kind = card.kind.name,
+                            items = card.params,
+                            alreadyApplied = card.appliedCount
+                        )
+                    )
+                }
+                val stored = history.getById(cardId)
+                val done = stored?.toUi()
+                if (done is ChatItem.CommandCard) replace(done)
+                else replace(card.copy(status = ChatItem.CommandCard.Status.DONE, appliedCount = card.appliedCount + applied))
+                // 点确认时一条都没勾上，说明用户其实想反悔——直接当取消处理，别留一张悬着的卡。
+                if (applied == 0 && card.params.none { it.checked }) {
+                    replace(card.copy(status = ChatItem.CommandCard.Status.CANCELLED))
+                    history.dismissDraft(cardId)
+                    return@launch
+                }
+                writes.withLock {
+                    appendReply(commandResultLine(card.kind, applied))
+                }
+            } catch (cancelled: CancellationException) { throw cancelled
+            } catch (_: Exception) {
+                // 「已经改到数据库、但卡片状态没写进去」是最坏的情况：UI 以为什么都没发生，
+                // 用户再点一次就会重复执行。所以失败时先在卡片上留一个记号。
+                val stored = try { history.getById(cardId) } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { null }
+                if (stored?.status == "DISMISSED") {
+                    replace(stored.toUi())
+                } else {
+                    runCatching { aiRepository.markCommandConfirmationFailed(cardId) }
+                    history.getById(cardId)?.toUi()?.let { replace(it) }
+                }
+                _error.value = "这次没能改成功，请再试一次；不会改到一半。"
+            }
+        }
+    }
+
+    fun cancelCommandCard(cardId: Long) {
+        val card = findCommandCard(cardId)?.takeIf { it.status == ChatItem.CommandCard.Status.EDITING } ?: return
+        replace(card.copy(status = ChatItem.CommandCard.Status.CANCELLED))
+        viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
+            withContext(NonCancellable) {
+                try { writes.withLock { history.dismissDraft(cardId) } }
+                catch (_: Exception) { replace(card); _error.value = "取消没有保存成功，请重试。" }
+            }
+        }
+    }
+
+    private fun commandResultLine(kind: CommandKind, applied: Int): String = when {
+        applied <= 0 -> "这次没有改动任何账单。"
+        kind == CommandKind.DELETE -> "收好了，$applied 笔账进了回收站，反悔了随时捞回来 ♡"
+        else -> "改好了，$applied 笔账已更新 ♡"
+    }
+
+    /** 勾选状态要跟着卡片一起落库，否则退出再进来勾选全丢。 */
+    private fun persistCommand(cardId: Long, card: ChatItem.CommandCard) {
+        viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
+            withContext(NonCancellable) {
+                try {
+                    writes.withLock {
+                        history.updateCard(
+                            cardId,
+                            "COMMAND",
+                            CommandCardCodec.encode(
+                                CommandCardPayload(
+                                    kind = card.kind.name,
+                                    items = card.params,
+                                    alreadyApplied = card.appliedCount,
+                                    confirmFailed = false
+                                )
+                            )
+                        )
+                    }
+                } catch (_: Exception) { _error.value = "勾选状态没保存上，提交前请再核对一次。" }
             }
         }
     }
@@ -276,20 +492,53 @@ class ChatViewModel(
 
     private fun ChatMessageEntity.toUi(): ChatItem = when (kind) {
         "USER" -> ChatItem.UserMsg(id, content)
+
         "DRAFT" -> try {
             ChatItem.DraftCard(id, rawInput, DraftHistoryCodec.decode(draftPayload), when (status) {
-                "CONFIRMED" -> ChatItem.Status.CONFIRMED
-                "DISMISSED" -> ChatItem.Status.CANCELLED
-                else -> ChatItem.Status.EDITING
+                "CONFIRMED" -> ChatItem.DraftCard.Status.CONFIRMED
+                "DISMISSED" -> ChatItem.DraftCard.Status.CANCELLED
+                else -> ChatItem.DraftCard.Status.EDITING
             }, savedCount)
         } catch (_: Exception) {
             ChatItem.GuluMsg(id, "这张旧草稿暂时无法展示，原始记录仍已保留。原话：$rawInput")
         }
+
+        "COMMAND" -> {
+            val payload = CommandCardCodec.decode(draftPayload)
+            if (payload == null || payload.items.isEmpty()) {
+                ChatItem.GuluMsg(id, "这张旧变更卡暂时无法展示。原话：$rawInput")
+            } else {
+                val kind = if (payload.kind.equals(CommandKind.DELETE.name, true)) CommandKind.DELETE else CommandKind.UPDATE
+                val done = CommandCardCodec.pendingCount(payload) <= 0
+                ChatItem.CommandCard(
+                    id = id, kind = kind, params = payload.items,
+                    status = if (done) ChatItem.CommandCard.Status.DONE else ChatItem.CommandCard.Status.EDITING,
+                    appliedCount = payload.alreadyApplied
+                )
+            }
+        }
+
+        // 挂起记录不单独成条：它的提示已经由本轮追问气泡承担了。
+        "PENDING_DRAFT" -> ChatItem.GuluMsg(id, "", loading = false)
+
         else -> ChatItem.GuluMsg(id, content, status == "PENDING")
     }
 
-    private fun DraftUi.toConfirmItem() = ConfirmItem(amountText, type, categoryName, isNewCategory, iconEmoji, iconSvg, keywords, detail, note, checked, timestamp)
+    private fun ConfirmItem.toDraftUi() = DraftUi(
+        amountText = amountText, type = type, categoryName = categoryName,
+        isNewCategory = isNewCategory, iconEmoji = iconEmoji, iconSvg = iconSvg,
+        keywords = keywords, detail = detail, note = note, checked = checked,
+        timestamp = timestamp, timeNeedsReview = timeNeedsReview,
+        timeHint = timeHint.ifBlank { "未提及时间，确认入账时记录此刻" }
+    )
+
+    private fun DraftUi.toConfirmItem() = ConfirmItem(
+        amountText, type, categoryName, isNewCategory, iconEmoji, iconSvg, keywords,
+        detail, note, checked, timestamp, timeNeedsReview, timeHint
+    )
+
     private fun findCard(id: Long) = _items.value.filterIsInstance<ChatItem.DraftCard>().find { it.id == id }
+    private fun findCommandCard(id: Long) = _items.value.filterIsInstance<ChatItem.CommandCard>().find { it.id == id }
     private fun append(item: ChatItem) { _items.value = _items.value + item }
     private fun replace(item: ChatItem) { _items.value = _items.value.map { if (it.id == item.id) item else it } }
     private fun trimAmount(value: Double) = java.math.BigDecimal.valueOf(value).stripTrailingZeros().toPlainString()

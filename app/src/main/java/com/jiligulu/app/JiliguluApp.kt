@@ -3,6 +3,7 @@ package com.jiligulu.app
 import android.app.Application
 import com.jiligulu.app.data.local.AppDatabase
 import com.jiligulu.app.data.prefs.UserPrefs
+import com.jiligulu.app.data.reminder.WaterReminderScheduler
 import com.jiligulu.app.data.reminder.WaterReminderWorker
 import com.jiligulu.app.data.repository.AiRepository
 import com.jiligulu.app.data.repository.BillRepository
@@ -19,7 +20,7 @@ import kotlinx.coroutines.flow.first
  * 手动 DI 容器：M1 规模用不上 Hilt，一个 AppContainer 就够；
  * 后续模块（人格引擎、悬浮窗服务）都往这里挂，保证可升级。
  */
-class AppContainer(app: Application) {
+class AppContainer(private val app: Application) {
     private val database: AppDatabase by lazy { AppDatabase.build(app) }
 
     val userPrefs: UserPrefs by lazy { UserPrefs(app) }
@@ -51,6 +52,35 @@ class AppContainer(app: Application) {
             async { budgetRepository.observeStatus().first() }
         )
     }
+
+    /**
+     * 一次性迁移：把喝水提醒从「周期任务」换成「OneTimeWork 自链」。
+     *
+     * 必须只在升级后的第一次启动跑一次，不能每次冷启动都排：
+     * 重排会重置 `setInitialDelay` 的倒计时，用户只要开 App 比提醒间隔勤快，
+     * 提醒就永远等不到。所以用 [UserPrefs.waterScheduleVersion] 做闸门，
+     * 迁移完写上新版本号，之后每次启动读完这个值就直接返回。
+     *
+     * 关着开关时也要清一次——旧的周期任务不会因为开关是关的就自己消失，
+     * 它还在 WorkManager 队列里躺着被触发。
+     *
+     * 全程吞异常：这是启动关键路径上的一次「顺手收拾」，提醒排不上是小事，
+     * 进不去 App 是大事。
+     *
+     * @return 是否真的做了迁移（未迁移 = 闸门已过或失败，供测试断言用）
+     */
+    suspend fun migrateWaterScheduleIfNeeded(): Boolean = runCatching {
+        if (userPrefs.waterScheduleVersion.first() >= WaterReminderScheduler.SCHEDULE_VERSION) {
+            return@runCatching false
+        }
+        val enabled = userPrefs.waterEnabled.first()
+        val minutes = userPrefs.waterIntervalMinutes.first()
+        if (enabled) WaterReminderScheduler.schedule(app, minutes) else WaterReminderScheduler.cancel(app)
+        // 版本号只在排成之后写。写早了会把一次「排失败」永久记成「已迁移」，
+        // 用户之后每次打开 App 都不会再重试，提醒就静默地再也不来了。
+        userPrefs.setWaterScheduleVersion(WaterReminderScheduler.SCHEDULE_VERSION)
+        true
+    }.getOrDefault(false)
 }
 
 class JiliguluApp : Application() {

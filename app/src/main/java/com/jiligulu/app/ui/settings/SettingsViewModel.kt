@@ -106,7 +106,10 @@ class SettingsViewModel(
     }
 
     fun setWaterInterval(minutes: Int) {
-        if (minutes !in WATER_INTERVALS) return
+        // 不再用白名单卡死取值：1 分钟到 12 小时 59 分随意选。
+        // （原实现只放行 [15,30,45,60,90,120]，其余值静默 return，
+        //   表现为「选了时间点确认完全没反应」。）
+        if (minutes < MIN_WATER_INTERVAL) return
         writePreference {
             prefs.setWaterIntervalMinutes(minutes)
             if (prefs.waterEnabled.first()) {
@@ -180,7 +183,9 @@ class SettingsViewModel(
     }
 
     companion object {
-        val WATER_INTERVALS = listOf(15, 30, 45, 60, 90, 120)
+        /** 下界取 1 分钟：WorkManager 的周期任务实际最小间隔由系统决定，这里只管业务下限。 */
+        const val MIN_WATER_INTERVAL = 1
+        const val MAX_WATER_INTERVAL = 12 * 60 + 59
 
         val Factory = viewModelFactory {
             initializer {

@@ -93,8 +93,9 @@ class HomeViewModel(
             )
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), HomeUiState())
 
+    /** 删除 = 移入回收站（软删除），保留期内可在回收站恢复。 */
     fun deleteBill(bill: BillEntity) {
-        viewModelScope.launch { billRepository.delete(bill) }
+        viewModelScope.launch { billRepository.moveToTrash(bill.id) }
     }
 
     private fun BillEntity.toUi(category: com.jiligulu.app.data.local.entity.CategoryEntity?): BillUi {

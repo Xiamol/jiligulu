@@ -113,6 +113,16 @@ class StatsDateNavigationTest {
             override suspend fun deleteById(id: Long): Int = error("Date navigation must not write bills")
             override suspend fun updateDetails(id: Long, amountFen: Long, detail: String, timestamp: Long): Int =
                 error("Date navigation must not write bills")
+            override suspend fun updateFromAi(id: Long, amountFen: Long, detail: String, timestamp: Long, categoryId: Long, note: String): Int =
+                error("Date navigation must not write bills")
+            override suspend fun recentSince(startMillis: Long, limit: Int): List<BillEntity> = error("unused")
+            override suspend fun recent(limit: Int): List<BillEntity> = error("unused")
+            override suspend fun moveToTrash(id: Long, deletedAt: Long): Int = error("unused")
+            override suspend fun restore(id: Long): Int = error("unused")
+            override fun observeTrash(): Flow<List<BillEntity>> = error("unused")
+            override suspend fun getTrash(): List<BillEntity> = error("unused")
+            override suspend fun purge(id: Long): Int = error("unused")
+            override suspend fun purgeExpired(beforeMillis: Long): Int = error("unused")
         }
         val categoryDao = object : CategoryDao {
             override fun observeAll(): Flow<List<CategoryEntity>> = flowOf(emptyList())

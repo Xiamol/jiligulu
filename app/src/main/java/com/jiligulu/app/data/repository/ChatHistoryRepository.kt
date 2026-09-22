@@ -16,6 +16,24 @@ class ChatHistoryRepository(private val database: AppDatabase) {
     suspend fun updateDraft(id: Long, payload: String): Int = dao.updateDraft(id, payload)
     suspend fun dismissDraft(id: Long): Int = dao.dismissDraft(id)
 
+    /**
+     * 写一张指令卡的载荷。
+     *
+     * 必须挑对具体 DAO 方法：`updateDraft` 的 WHERE 里带 `kind = 'DRAFT'`，
+     * 拿它去存指令卡的勾选状态会静默地更新 0 行。
+     */
+    suspend fun updateCard(id: Long, kind: String, payload: String): Int =
+        if (kind.equals("COMMAND", true)) dao.updateCommand(id, payload) else dao.updateDraft(id, payload)
+
+    /**
+     * 把一串写入包进一个事务。
+     *
+     * 改账/删账要「新建分类 + 改每一条账单 + 写卡片状态」三者一致，
+     * 但那条链路跨了三个 Repository——各家自己开事务会各自提交，
+     * 中途出错就会留下改了一半的账本。所以由这里统一开口子。
+     */
+    suspend fun <T> withTransaction(block: suspend () -> T): T = database.withTransaction { block() }
+
     /** A sent message always has a durable pending response, including when the screen closes. */
     suspend fun beginRequest(input: String, requestedAt: Long): Pair<ChatMessageEntity, ChatMessageEntity> =
         database.withTransaction {
@@ -24,6 +42,37 @@ class ChatHistoryRepository(private val database: AppDatabase) {
                 status = "PENDING", createdAt = requestedAt)
             user.copy(id = dao.insert(user)) to pending.copy(id = dao.insert(pending))
         }
+
+    // ---------- 待补充账（用户只说了金额） ----------
+
+    /**
+     * 挂起一条「待补充」的账。
+     *
+     * 复用 DRAFT 行的 `draftPayload`，不新开表：这就是一条临时草稿，
+     * 生命周期只到下一条消息为止，为它做一次 schema 迁移不值得。
+     * 同一时刻只留一条挂起记录——否则用户连发两个数字，「补齐」该补到哪条就说不清了。
+     */
+    suspend fun suspendPending(payload: String, requestedAt: Long): Long = database.withTransaction {
+        dao.clearPendingPayload()
+        dao.insert(
+            ChatMessageEntity(
+                kind = "PENDING_DRAFT",
+                draftPayload = payload,
+                // 必须显式写 EDITING：DAO 是按这个状态找挂起记录的，
+                // 留空的话插入能成功，但再查就查不到了（表现为「挂起账凭空消失」）。
+                status = "EDITING",
+                createdAt = requestedAt
+            )
+        )
+    }
+
+    /** 最近的挂起记录；没有就返回 null。 */
+    suspend fun latestPending(): ChatMessageEntity? = dao.latestPending()
+
+    suspend fun clearPending(): Int = dao.clearPendingPayload()
+
+    /** 把挂起记录标记成已补齐，避免它在下一次 [latestPending] 里再冒出来。 */
+    suspend fun consumePending(id: Long): Int = dao.consumePending(id)
 
     suspend fun markPendingInterrupted(): Int = dao.markPendingInterrupted(
         "上次对话中断了，这条消息还没有生成账单。可以重新发送，我会再帮你看看。"

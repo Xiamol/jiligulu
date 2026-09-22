@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -76,6 +77,7 @@ import com.jiligulu.app.ui.theme.GuluBrandFont
 fun SettingsScreen(
     onBack: () -> Unit,
     onPreviewWelcome: () -> Unit = {},
+    onOpenTrash: () -> Unit = {},
     vm: SettingsViewModel = viewModel(factory = SettingsViewModel.Factory)
 ) {
     val state by vm.uiState.collectAsStateWithLifecycle()
@@ -107,8 +109,7 @@ fun SettingsScreen(
             minute = total % 60,
             hourRange = 0..12,
             minuteStep = 1,
-            confirmEnabled = { h, m -> h * 60 + m >= 15 },
-            confirmHint = "最少 15 分钟",
+            // 不再设下限提示：1 分钟到 12 小时 59 分都允许，让用户自己决定。
             onDismiss = { showIntervalPicker = false },
             onConfirm = { h, m ->
                 vm.setWaterInterval(h * 60 + m)
@@ -277,7 +278,7 @@ fun SettingsScreen(
                             TimePickerField(
                                 label = "提醒间隔",
                                 value = intervalText(intervalHours, intervalMinutes),
-                                supporting = "点右边选个时长，最少 15 分钟",
+                                supporting = "点右边选个时长，1 分钟到 12 小时 59 分都行",
                                 enabled = editable,
                                 onClick = { showIntervalPicker = true }
                             )
@@ -321,6 +322,22 @@ fun SettingsScreen(
                         )
                     }
 
+                    SettingsSection("数据管理", "删掉的东西，先放在手边", "🗂️") {
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text("回收站", style = MaterialTheme.typography.bodyLarge)
+                                Text(
+                                    "删掉的账单会先收在这儿，后悔了能捞回来",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            TextButton(onClick = onOpenTrash, modifier = Modifier.testTag("settings-trash-entry")) {
+                                Text("去看看")
+                            }
+                        }
+                    }
+
                     SettingsSection("关于叽里咕噜", "小小的账本，大大的生活", "🌱") {
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -332,14 +349,30 @@ fun SettingsScreen(
                                     style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onPrimaryContainer)
                             }
                         }
-                        Text("一个本地优先的 AI 记账小助手。账本与对话都保存在本机，覆盖安装更新时保留记录。",
+                        Text("一个本地优先的 AI 记账小助手，也是一个会唠叨你好好吃饭的小搭子。",
                             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text("制作人：路陌", style = MaterialTheme.typography.bodyMedium)
-                            Text("AI 助手：DeepSeek", style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+                        AboutLine(
+                            title = "制作人",
+                            value = "路陌",
+                            brand = true
+                        )
+                        AboutLine(title = "AI 助手", value = "DeepSeek V4.1-Flash")
+                        AboutLine(title = "数据去向", value = "只存在这台手机里，不上传任何服务器")
+                        AboutLine(title = "对话内容", value = "记账时会发给 DeepSeek 用于理解，不用于训练")
+                        AboutLine(title = "免登录", value = "没有账号，没有同步，也就没有泄露")
+
+                        Text(
+                            "阿噜想说的话：谢谢你愿意把每天的花销交给我。我不会评判你买了什么，" +
+                                "但如果你连着两天只吃面，我可能会念叨一句要记得吃肉。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            lineHeight = MaterialTheme.typography.bodySmall.lineHeight
+                        )
+
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            TextButton(onClick = { showFontLicense = true }) { Text("字体与开源许可") }
                         }
-                        TextButton(onClick = { showFontLicense = true }) { Text("字体与开源许可") }
                     }
                     TypingSoundSettingsCard(onPreviewWelcome)
                     UpdateSettingsCard()
@@ -364,6 +397,37 @@ fun SettingsScreen(
                 }
             },
             confirmButton = { TextButton(onClick = { showFontLicense = false }) { Text("知道啦") } }
+        )
+    }
+}
+
+/** 关于页的一行：左边浅色标签，右边内容。brand=true 时用卡通字体（制作人署名）。 */
+@Composable
+private fun AboutLine(title: String, value: String, brand: Boolean = false) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.Top
+    ) {
+        Text(
+            title,
+            modifier = Modifier.width(64.dp),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            value,
+            modifier = Modifier.weight(1f),
+            style = if (brand) {
+                MaterialTheme.typography.titleMedium.copy(
+                    fontFamily = GuluBrandFont,
+                    fontWeight = FontWeight.Normal
+                )
+            } else {
+                MaterialTheme.typography.bodySmall
+            },
+            color = if (brand) MaterialTheme.colorScheme.primary
+            else MaterialTheme.colorScheme.onSurface
         )
     }
 }

@@ -29,6 +29,13 @@ import kotlin.coroutines.resumeWithException
 /** AI 返回的单条账单草稿 */
 @Serializable
 data class AiBillDraft(
+    /**
+     * 动作类型：add（新增）/ update（改已有）/ delete（删已有）。
+     * 未知值一律按 add 处理，保证老格式的返回仍可用。
+     */
+    val action: String = "add",
+    /** update / delete 时指向目标账单 id；add 时为 0。 */
+    @SerialName("target_id") val targetId: Long = 0,
     @SerialName("amount_yuan") val amountYuan: Double = 0.0,
     val type: String = "EXPENSE",
     val category: String = "",
@@ -40,12 +47,33 @@ data class AiBillDraft(
     val keywords: String = "",
     @SerialName("time_expression") val timeExpression: String = "",
     @SerialName("occurred_at") val occurredAt: String = ""
+) {
+    val isAdd: Boolean get() = action.equals("add", true)
+    val isUpdate: Boolean get() = action.equals("update", true)
+    val isDelete: Boolean get() = action.equals("delete", true)
+}
+
+/**
+ * 只有金额、没有名目的残缺输入（如「5」）。
+ *
+ * 按 coder 定的规则：不直接出草稿卡，而是挂起等下一句补全。
+ * 模型把金额和它猜的可能名目报上来，本地决定是追问还是直接成草稿。
+ */
+@Serializable
+data class AiPendingDraft(
+    @SerialName("amount_yuan") val amountYuan: Double = 0.0,
+    /** 模型猜的名目；空串表示它也不知道。 */
+    val detail: String = "",
+    val type: String = "EXPENSE",
+    @SerialName("time_expression") val timeExpression: String = ""
 )
 
 @Serializable
 data class AiParseResult(
     val bills: List<AiBillDraft> = emptyList(),
-    val reply: String = ""
+    val reply: String = "",
+    /** 待补充：模型认为这句话只说了一半。 */
+    val pending: AiPendingDraft? = null
 )
 
 /**
@@ -55,6 +83,9 @@ data class AiParseResult(
  */
 class DeepSeekHttpException(val status: Int, val detail: String) : IOException("DeepSeek HTTP $status")
 
+/** 一轮已有对话。[role] 只能是 "user" 或 "assistant"。 */
+data class ChatTurn(val role: String, val content: String)
+
 /**
  * DeepSeek 官方 API（OpenAI 兼容格式）。
  * 强制 response_format=json_object，本地再做 schema 解析兜底（PRD §8 风险 4）。
@@ -63,7 +94,19 @@ class DeepSeekClient(private val apiKey: String, private val client: OkHttpClien
 
     private val json = Json { ignoreUnknownKeys = true }
 
-    suspend fun parseBill(systemPrompt: String, userInput: String): Result<AiParseResult> =
+    /**
+     * 多轮对话解析。
+     *
+     * [history] 是**已有**对话（不含本轮），会原样作为 user/assistant 消息排在
+     * system 之后、本轮输入之前。上一轮我们自己的回复必须是 assistant 角色、
+     * 本轮输入必须是 user——这既让模型能承接「5 → 面条」这样的跨句补全，
+     * 也让它能引用账本上下文闲聊（coder 要的「生活搭子」效果）。
+     */
+    suspend fun parseBill(
+        systemPrompt: String,
+        userInput: String,
+        history: List<ChatTurn> = emptyList()
+    ): Result<AiParseResult> =
         withContext(Dispatchers.IO) {
             try {
                 val requestJson = buildJsonObject {
@@ -74,6 +117,12 @@ class DeepSeekClient(private val apiKey: String, private val client: OkHttpClien
                         addJsonObject {
                             put("role", "system")
                             put("content", systemPrompt)
+                        }
+                        history.forEach { turn ->
+                            addJsonObject {
+                                put("role", turn.role)
+                                put("content", turn.content)
+                            }
                         }
                         addJsonObject {
                             put("role", "user")

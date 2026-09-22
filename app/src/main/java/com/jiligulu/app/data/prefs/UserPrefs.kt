@@ -30,6 +30,7 @@ class UserPrefs(private val context: Context) {
         private val KEY_THEME_MODE = stringPreferencesKey("theme_mode")
         private val KEY_WATER_ENABLED = booleanPreferencesKey("water_enabled")
         private val KEY_WATER_INTERVAL = intPreferencesKey("water_interval_minutes")
+        private val KEY_WATER_SCHEDULE_VERSION = intPreferencesKey("water_schedule_version")
         private val KEY_QUIET_START = intPreferencesKey("quiet_start_minutes")
         private val KEY_QUIET_END = intPreferencesKey("quiet_end_minutes")
         private val KEY_LAST_GREET = stringPreferencesKey("last_greet_slot")
@@ -41,6 +42,7 @@ class UserPrefs(private val context: Context) {
         private val KEY_AUTO_UPDATES = booleanPreferencesKey("auto_check_updates")
         private val KEY_UPDATE_CHECKED_AT = longPreferencesKey("update_checked_at")
         private val KEY_UPDATE_CHECKED_VERSION = stringPreferencesKey("update_checked_version")
+        private val KEY_TRASH_RETENTION_DAYS = intPreferencesKey("trash_retention_days")
         const val DEFAULT_SUFFIX = "大人"
 
         /** 主题模式：跟随系统 / 强制浅色 / 强制深色 */
@@ -58,6 +60,10 @@ class UserPrefs(private val context: Context) {
          * 用户可在「设置 → 应用更新」里改成自己的仓库，或清空以停用检查。
          */
         const val DEFAULT_UPDATE_REPOSITORY = "Xiamol/jiligulu"
+
+        /** 回收站保留天数，默认 30；0 表示永不自动清除。 */
+        const val DEFAULT_TRASH_RETENTION_DAYS = 30
+        const val TRASH_RETENTION_FOREVER = 0
     }
 
     /** null = 还没读过；"" = 未设置（需要 Onboarding） */
@@ -77,6 +83,16 @@ class UserPrefs(private val context: Context) {
     /** 喝水提醒间隔分钟数（默认 60） */
     val waterIntervalMinutes: Flow<Int> =
         context.dataStore.data.map { it[KEY_WATER_INTERVAL] ?: DEFAULT_WATER_INTERVAL }
+
+    /**
+     * 喝水提醒「调度实现」的版本号，0 表示还是 0.5.4 及以前的周期任务方案。
+     *
+     * 这个值只服务于一次性迁移：0.5.5 起把 PeriodicWorkRequest 换成 OneTimeWork 自链，
+     * 旧任务若不清理就会和新链并行、提醒翻倍。冷启动检查一次，迁移完就写上新版本号，
+     * 之后每次启动都是一次 DataStore 读后直接返回，不会重置提醒倒计时。
+     */
+    val waterScheduleVersion: Flow<Int> =
+        context.dataStore.data.map { it[KEY_WATER_SCHEDULE_VERSION] ?: 0 }
 
     /** 免打扰开始（一天内分钟数，默认 23:00） */
     val quietStartMinutes: Flow<Int> =
@@ -103,6 +119,11 @@ class UserPrefs(private val context: Context) {
 
     val autoCheckUpdates = context.dataStore.data.map { it[KEY_AUTO_UPDATES] ?: true }.distinctUntilChanged()
     val updateCheckedAt = context.dataStore.data.map { it[KEY_UPDATE_CHECKED_AT] ?: 0L }
+
+    /** 回收站保留天数（默认 30，0 = 永不自动清除） */
+    val trashRetentionDays = context.dataStore.data
+        .map { it[KEY_TRASH_RETENTION_DAYS] ?: DEFAULT_TRASH_RETENTION_DAYS }
+        .distinctUntilChanged()
 
     /**
      * 上次「已是最新」结论对应的应用版本。
@@ -186,6 +207,10 @@ class UserPrefs(private val context: Context) {
         context.dataStore.edit { it[KEY_WATER_INTERVAL] = value }
     }
 
+    suspend fun setWaterScheduleVersion(value: Int) {
+        context.dataStore.edit { it[KEY_WATER_SCHEDULE_VERSION] = value }
+    }
+
     suspend fun setQuietHours(startMinutes: Int, endMinutes: Int) {
         context.dataStore.edit {
             it[KEY_QUIET_START] = startMinutes
@@ -195,5 +220,9 @@ class UserPrefs(private val context: Context) {
 
     suspend fun setLastGreetKey(value: String) {
         context.dataStore.edit { it[KEY_LAST_GREET] = value }
+    }
+
+    suspend fun setTrashRetentionDays(days: Int) {
+        context.dataStore.edit { it[KEY_TRASH_RETENTION_DAYS] = days.coerceAtLeast(0) }
     }
 }

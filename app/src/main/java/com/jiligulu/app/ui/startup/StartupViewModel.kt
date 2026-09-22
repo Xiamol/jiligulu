@@ -4,6 +4,7 @@ import android.os.SystemClock
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.jiligulu.app.AppContainer
+import com.jiligulu.app.data.repository.TrashCleaner
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -25,6 +26,12 @@ class StartupViewModel(
             val nickname = container.userPrefs.nickname.first()
             container.preloadLedger()
             container.userPrefs.pendingWater.first()
+            // 顺手清掉过期的回收站账单。不是时间敏感的事，冷启动扫一遍就够，
+            // 不值得为它单独养一个 WorkManager 任务。失败不影响启动。
+            TrashCleaner.purgeExpired(container.billRepository, container.userPrefs)
+            // 一次性把喝水提醒换成自链调度（含清理 0.5.4 遗留的周期任务）。
+            // 内部有版本号闸门，迁移过就是一次 DataStore 读，不会重置提醒倒计时。
+            container.migrateWaterScheduleIfNeeded()
             nickname
         },
         onStartupFinished = { container.startupCompleted = true }

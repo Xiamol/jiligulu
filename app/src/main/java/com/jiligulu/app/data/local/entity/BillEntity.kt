@@ -30,5 +30,10 @@ data class BillEntity(
     val timestamp: Long,
     val source: BillSource = BillSource.MANUAL,
     /** AI 原始输入（M2 预留） */
-    val rawText: String = ""
+    val rawText: String = "",
+    /**
+     * 软删除标记：null = 正常账单，非 null = 已移入回收站的时刻。
+     * 所有面向用户的查询都必须过滤 `deletedAt IS NULL`，否则回收站里的账单会重新冒出来。
+     */
+    val deletedAt: Long? = null
 )

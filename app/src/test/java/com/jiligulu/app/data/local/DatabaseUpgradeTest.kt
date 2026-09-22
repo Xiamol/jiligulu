@@ -57,6 +57,7 @@ class DatabaseUpgradeTest {
     @Test fun version1PreservesBillsAndCategories() = verifyUpgrade(1)
     @Test fun version2PreservesBillsAndSvgCategories() = verifyUpgrade(2)
     @Test fun version3PreservesBillsCategoriesAndBudget() = verifyUpgrade(3)
+    @Test fun version4PreservesLedgerAndStartsWithAnEmptyTrash() = verifyUpgrade(4)
 
     private fun verifyUpgrade(version: Int) = runBlocking {
         val name = "migration-$version.db"
@@ -68,8 +69,11 @@ class DatabaseUpgradeTest {
         assertEquals(1, categories.size)
         assertEquals(sampleCategory.copy(iconSvg = if (version == 1) "" else SVG), categories.single())
         assertEquals(if (version >= 3) sampleBudget else null, db.budgetDao().observe().first())
-        assertTrue(db.chatMessageDao().getAll().isEmpty())
-        assertEquals(4, db.openHelper.readableDatabase.version)
+        assertEquals(if (version >= 4) 1 else 0, db.chatMessageDao().getAll().size)
+        assertEquals(5, db.openHelper.readableDatabase.version)
+        // v5 之前没有软删除列，历史账单迁移后一律视为「活着的」，回收站是空的。
+        assertTrue(db.billDao().getTrash().isEmpty())
+        assertNull(db.billDao().getById(sampleBill.id)?.deletedAt)
 
         val addedBill = db.billDao().insert(sampleBill.copy(id = 0, detail = "升级后新账单"))
         assertTrue(addedBill > sampleBill.id)
@@ -86,10 +90,72 @@ class DatabaseUpgradeTest {
 
     @Test
     fun firstOpenSeedsAreReadyAndReopeningDoesNotDuplicateThem() = runBlocking {
-        val db = open("fresh.db")
+        names += "fresh.db"
+        val db = AppDatabase.build(context, "fresh.db")
+        opened += db
         assertEquals(listOf("eating", "drinking"), db.categoryDao().observeAll().first().map { it.name })
         db.close()
-        assertEquals(2, open("fresh.db").categoryDao().count())
+        val reopened = AppDatabase.build(context, "fresh.db")
+        opened += reopened
+        assertEquals(2, reopened.categoryDao().count())
+    }
+
+    /**
+     * v0.6 回收站：软删除的账单必须从所有用户可见视图消失，但仍在回收站里等着被捞回来。
+     * 用真 SQLite 跑，因为「deletedAt IS NULL」写错一个字，只有真库会告诉你。
+     */
+    @Test
+    fun trashedBillsLeaveEveryVisibleViewButStayRecoverable() = runBlocking {
+        names += "trash.db"
+        val db = AppDatabase.build(context, "trash.db")
+        opened += db
+        val bills = BillRepository(db.billDao())
+        val kept = bills.addManual(1200, BillType.EXPENSE, 1, "留下的面", "")
+        val doomed = bills.addManual(3000, BillType.EXPENSE, 1, "要删的火锅", "")
+        val dayStart = millis(2020, 1, 1)
+        val dayEnd = millis(2030, 1, 1)
+
+        assertEquals(2, db.billDao().observeBetween(dayStart, dayEnd).first().size)
+        assertEquals(1, db.billDao().moveToTrash(doomed, 1_000L))
+        // 首页/统计/导出走的都是这几个查询——一处漏过滤就会让删掉的账单诈尸。
+        assertEquals(listOf(kept), db.billDao().observeBetween(dayStart, dayEnd).first().map { it.id })
+        assertEquals(listOf(kept), db.billDao().observeAll().first().map { it.id })
+        assertEquals(listOf(kept), db.billDao().recent(10).map { it.id })
+        assertEquals(listOf(doomed), bills.observeTrash().first().map { it.id })
+        assertNotNull(db.billDao().getById(doomed)?.deletedAt)
+
+        // 已在回收站里的不会被重复盖章，第二条同样的删除请求返回 0。
+        assertEquals(0, db.billDao().moveToTrash(doomed, 2_000L))
+        // 改账不该改到回收站里的东西。
+        assertEquals(0, db.billDao().updateFromAi(doomed, 1, "改不动", 0, 1, ""))
+
+        assertEquals(1, db.billDao().restore(doomed))
+        assertEquals(2, db.billDao().observeAll().first().size)
+        assertTrue(bills.observeTrash().first().isEmpty())
+    }
+
+    @Test
+    fun expiredTrashIsPurgedWhileRecentDeletionsAndLiveBillsSurvive() = runBlocking {
+        names += "trash-expiry.db"
+        val db = AppDatabase.build(context, "trash-expiry.db")
+        opened += db
+        val now = millis(2026, 9, 21)
+        val bills = BillRepository(db.billDao()) { now }
+        val live = bills.addManual(500, BillType.EXPENSE, 1, "活的", "")
+        val stale = bills.addManual(600, BillType.EXPENSE, 1, "删很久了", "")
+        val fresh = bills.addManual(700, BillType.EXPENSE, 1, "刚删的", "")
+        db.billDao().moveToTrash(stale, now - 40L * 86_400_000L)
+        db.billDao().moveToTrash(fresh, now - 2L * 86_400_000L)
+
+        assertEquals(1, bills.purgeExpired(UserPrefs.DEFAULT_TRASH_RETENTION_DAYS))
+        assertEquals(listOf(fresh), bills.observeTrash().first().map { it.id })
+        assertEquals(listOf(live), db.billDao().observeAll().first().map { it.id })
+        // 0 = 永不自动清除，此时一行都不许动。
+        assertEquals(0, bills.purgeExpired(UserPrefs.TRASH_RETENTION_FOREVER))
+        assertEquals(1, bills.observeTrash().first().size)
+        // 彻底删除只作用于回收站内的账单，活账单不会因为 id 撞上就被顺手清掉。
+        assertEquals(0, db.billDao().purge(live))
+        assertEquals(1, db.billDao().observeAll().first().size)
     }
 
     @Test
@@ -193,7 +259,10 @@ class DatabaseUpgradeTest {
 
     @Test(timeout = 30_000)
     fun aiConfirmationSharesTransactionAndKeepsExplicitTime() = runBlocking {
-        val db = open("ai-confirm.db")
+        // 走真实生产构建器：默认种子 eating / drinking 会在建库时写入。
+        names += "ai-confirm.db"
+        val db = AppDatabase.build(context, "ai-confirm.db")
+        opened += db
         val history = ChatHistoryRepository(db)
         val ai = AiRepository(context, CategoryRepository(db.categoryDao()),
             BillRepository(db.billDao()), UserPrefs(context), history)
@@ -212,6 +281,7 @@ class DatabaseUpgradeTest {
         assertEquals(setOf(BillSource.AI_CHAT), bills.map { it.source }.toSet())
         val category = db.categoryDao().findByName("深夜食堂")!!
         assertEquals(setOf(category.id), bills.map { it.categoryId }.toSet())
+        // 默认种子 eating / drinking + AI 新建的「深夜食堂」。种子由真实生产构建器种下。
         assertEquals(3, db.categoryDao().count())
         assertEquals("CONFIRMED", history.getById(id)?.status)
     }
@@ -249,14 +319,16 @@ class DatabaseUpgradeTest {
     @Test
     fun unsupportedDowngradeFailsWithoutErasingTheLedger() = runBlocking {
         val name = "future-version.db"
-        val db = open(name)
+        names += name
+        val db = AppDatabase.build(context, name)
+        opened += db
         db.billDao().insert(sampleBill)
         db.close()
         SQLiteDatabase.openDatabase(context.getDatabasePath(name).path, null, SQLiteDatabase.OPEN_READWRITE).use {
-            it.version = 5
+            it.version = 6
         }
         try {
-            open(name).billDao().observeAll().first()
+            openWithMigrations(name).billDao().observeAll().first()
             fail("Missing migration must not silently recreate tables")
         } catch (_: IllegalStateException) { }
         SQLiteDatabase.openDatabase(context.getDatabasePath(name).path, null, SQLiteDatabase.OPEN_READONLY).use {
@@ -265,14 +337,50 @@ class DatabaseUpgradeTest {
                 assertEquals(sampleBill.detail, cursor.getString(0))
                 assertEquals(sampleBill.amountFen, cursor.getLong(1))
             }
-            assertEquals(5, it.version)
+            assertEquals(6, it.version)
+        }
+    }
+
+    /**
+     * 根因断言：不带迁移时 Room 会认为「schema 对不上，重建吧」。
+     * 这个测试锁的是 [AppDatabase.builder] 的行为，和生产路径的迁移链互补。
+     */
+    @Test
+    fun bareBuilderReportsTheSchemaMismatchInsteadOfRebuildingSilently() = runBlocking {
+        val name = "bare-builder.db"
+        names += name
+        val future = AppDatabase.SCHEMA_VERSION + 1
+        val created = AppDatabase.build(context, name)
+        created.billDao().insert(sampleBill)
+        created.close()
+        SQLiteDatabase.openDatabase(context.getDatabasePath(name).path, null, SQLiteDatabase.OPEN_READWRITE).use {
+            it.version = future
+        }
+        try {
+            openBare(name).billDao().observeAll().first()
+            fail("No migration registered means Room must refuse to open a future schema")
+        } catch (_: IllegalStateException) { }
+        SQLiteDatabase.openDatabase(context.getDatabasePath(name).path, null, SQLiteDatabase.OPEN_READONLY).use {
+            it.rawQuery("SELECT detail FROM bills WHERE id = 42", null).use { cursor ->
+                assertTrue("Ledger must survive a refused open", cursor.moveToFirst())
+                assertEquals(sampleBill.detail, cursor.getString(0))
+            }
+            assertEquals(future, it.version)
         }
     }
 
     private fun open(name: String): AppDatabase {
         names += name
-        return AppDatabase.build(context, name).also { opened += it }
+        return openWithMigrations(name).also { opened += it }
     }
+
+    /** 装齐迁移链，用来断言「历史库能否被真实迁移并验证 schema」。 */
+    private fun openWithMigrations(name: String): AppDatabase =
+        AppDatabase.builder(context, name).addMigrations(*AppDatabase.ALL_MIGRATIONS).build()
+
+    /** 只装 schema（无迁移、无种子），断言根因时用。 */
+    private fun openBare(name: String): AppDatabase =
+        AppDatabase.builder(context, name).build()
 
     private fun createHistoricalDatabase(name: String, version: Int) {
         names += name
@@ -307,6 +415,8 @@ class DatabaseUpgradeTest {
                     sampleBill.source.name, sampleBill.rawText))
             if (version >= 3) db.execSQL("INSERT INTO budgets (id, amountFen, periodType, anchorDay, updatedAt) VALUES (?, ?, ?, ?, ?)",
                 arrayOf(sampleBudget.id, sampleBudget.amountFen, sampleBudget.periodType.name, sampleBudget.anchorDay, sampleBudget.updatedAt))
+            if (version >= 4) db.execSQL("INSERT INTO chat_messages (id, kind, content, rawInput, draftPayload, status, savedCount, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                arrayOf(1L, "USER", "历史对话", "", "", "", 0, millis(2026, 9, 30)))
             db.version = version
         }
     }

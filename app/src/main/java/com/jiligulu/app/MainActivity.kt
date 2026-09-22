@@ -43,6 +43,7 @@ import com.jiligulu.app.ui.settings.UpdatePromptHost
 import com.jiligulu.app.ui.startup.StartupScreen
 import com.jiligulu.app.ui.startup.StartupViewModel
 import com.jiligulu.app.ui.theme.GuluTheme
+import com.jiligulu.app.ui.trash.TrashScreen
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.MutableStateFlow
 
@@ -53,6 +54,7 @@ object Routes {
     const val SETTINGS = "settings"
     const val ONBOARDING = "onboarding"
     const val WELCOME_PREVIEW = "welcome_preview"
+    const val TRASH = "trash"
 }
 
 class MainActivity : ComponentActivity() {
@@ -165,8 +167,10 @@ private fun JiliguluRoot(waterRequest: Int) {
                 composable(Routes.CHAT) { ChatScreen(onBack = { navController.popBackStack() }) }
                 composable(Routes.SETTINGS) {
                     SettingsScreen(onBack = { navController.popBackStack() },
-                        onPreviewWelcome = { navController.navigate(Routes.WELCOME_PREVIEW) })
+                        onPreviewWelcome = { navController.navigate(Routes.WELCOME_PREVIEW) },
+                        onOpenTrash = { navController.navigate(Routes.TRASH) })
                 }
+                composable(Routes.TRASH) { TrashScreen(onBack = { navController.popBackStack() }) }
                 composable(Routes.WELCOME_PREVIEW) {
                     OnboardingScreen(onDone = { navController.popBackStack() }, preview = true, active = !showSplash)
                 }

@@ -61,9 +61,10 @@ class BillDetailViewModel(
         write { repository.updateDetails(billId, amountFen, detail, timestamp) }
     }
 
+    /** 删除 = 移入回收站（软删除），保留期内可恢复。 */
     fun delete() {
         if (_state.value.isSaving || _state.value.isComplete || _state.value.bill == null) return
-        write { repository.deleteById(billId) }
+        write { repository.moveToTrash(billId) }
     }
 
     private fun write(action: suspend () -> Unit) {

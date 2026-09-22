@@ -66,9 +66,18 @@ class BillRepositoryTest {
         override fun observeById(id: Long): Flow<BillEntity?> = error("unused")
         override suspend fun getById(id: Long): BillEntity? = error("unused")
         override suspend fun updateDetails(id: Long, amountFen: Long, detail: String, timestamp: Long): Int = error("unused")
+        override suspend fun updateFromAi(id: Long, amountFen: Long, detail: String, timestamp: Long, categoryId: Long, note: String): Int = error("unused")
         override suspend fun deleteById(id: Long): Int = error("unused")
         override suspend fun insert(bill: BillEntity): Long = error("unused")
         override suspend fun delete(bill: BillEntity): Unit = error("unused")
         override fun observeAll(): Flow<List<BillEntity>> = error("unused")
+        override suspend fun recentSince(startMillis: Long, limit: Int): List<BillEntity> = error("unused")
+        override suspend fun recent(limit: Int): List<BillEntity> = error("unused")
+        override suspend fun moveToTrash(id: Long, deletedAt: Long): Int = error("unused")
+        override suspend fun restore(id: Long): Int = error("unused")
+        override fun observeTrash(): Flow<List<BillEntity>> = error("unused")
+        override suspend fun getTrash(): List<BillEntity> = error("unused")
+        override suspend fun purge(id: Long): Int = error("unused")
+        override suspend fun purgeExpired(beforeMillis: Long): Int = error("unused")
     }
 }

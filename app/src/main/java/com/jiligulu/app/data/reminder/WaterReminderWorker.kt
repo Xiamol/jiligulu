@@ -11,16 +11,19 @@ import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.work.CoroutineWorker
-import androidx.work.ExistingPeriodicWorkPolicy
-import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.ExistingWorkPolicy
+import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
+import androidx.work.workDataOf
 import com.jiligulu.app.JiliguluApp
 import com.jiligulu.app.MainActivity
 import com.jiligulu.app.R
+import com.jiligulu.app.data.prefs.UserPrefs
 import com.jiligulu.app.domain.persona.PersonaEngine
 import com.jiligulu.app.domain.persona.PersonaEventBus
 import com.jiligulu.app.domain.persona.QuipLibrary
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
 import java.util.concurrent.TimeUnit
 
@@ -30,7 +33,9 @@ import java.util.concurrent.TimeUnit
  * - 常驻桌宠可见 → 发事件更新文案；
  * - 后台或停留二级页面 → 发系统通知（文案从台词库 water 类型抽）。
  *
- * 注意：WorkManager 周期任务硬下限 15 分钟（系统限制）。
+ * **它不是周期任务**：跑完一次后自己把下一次排进队列（见 [WaterReminderScheduler]）。
+ * 这么做是因为 WorkManager 对 `PeriodicWorkRequest` 有 15 分钟的硬下限，
+ * 而用户设的间隔可以短到 1 分钟。
  */
 class WaterReminderWorker(
     context: Context,
@@ -40,20 +45,46 @@ class WaterReminderWorker(
     override suspend fun doWork(): Result {
         val app = applicationContext as JiliguluApp
         val prefs = app.container.userPrefs
-        if (!prefs.waterEnabled.first()) return Result.success()
+        try {
+            if (!prefs.waterEnabled.first()) return Result.success()
 
-        val engine = PersonaEngine(QuipLibrary.get(applicationContext))
-        val now = System.currentTimeMillis()
-        val quietStart = prefs.quietStartMinutes.first()
-        val quietEnd = prefs.quietEndMinutes.first()
-        if (engine.inQuietHours(now, quietStart, quietEnd)) return Result.success()
+            val engine = PersonaEngine(QuipLibrary.get(applicationContext))
+            val now = System.currentTimeMillis()
+            val quietStart = prefs.quietStartMinutes.first()
+            val quietEnd = prefs.quietEndMinutes.first()
+            if (engine.inQuietHours(now, quietStart, quietEnd)) return Result.success()
 
-        val name = buildDisplayName(prefs.nickname.first(), prefs.nameSuffix.first())
-        val pending = prefs.markWaterDue(now, engine.nextWaterQuipForNotification(name))
-        if (pending.isPending && !(app.isForeground && PersonaEventBus.isHostVisible)) {
-            postNotification(pending.text, pending.id)
+            val name = buildDisplayName(prefs.nickname.first(), prefs.nameSuffix.first())
+            val pending = prefs.markWaterDue(now, engine.nextWaterQuipForNotification(name))
+            if (pending.isPending && !(app.isForeground && PersonaEventBus.isHostVisible)) {
+                postNotification(pending.text, pending.id)
+            }
+            return Result.success()
+        } finally {
+            // 排下一次。放在 finally 是必须的：这是条「自己接自己」的链，
+            // 少排一次提醒就永久停摆，而 WorkManager 不会报任何错。
+            try {
+                reschedule(app, prefs)
+            } catch (cancelled: CancellationException) {
+                // 任务被撤回（用户关了提醒）时协程已取消，本来就不该再排下一次。
+                // 这里重新抛出而不是用 runCatching 吞掉——吞掉会破坏协程的取消语义。
+                throw cancelled
+            } catch (_: Exception) {
+                // 排不上是小事，别让它盖掉 doWork 的返回值。
+            }
         }
-        return Result.success()
+    }
+
+    /**
+     * 把下一次提醒排到另一个槽位。
+     *
+     * 间隔现读而不是从 inputData 取：用户在等待期间改了频率，下一次就该按新频率走。
+     * 读失败时什么都不做——此时提醒已经处于异常状态，硬排一个猜出来的间隔更糟。
+     */
+    private suspend fun reschedule(app: JiliguluApp, prefs: UserPrefs) {
+        val slot = inputData.getString(WaterReminderScheduler.KEY_SLOT) ?: return
+        if (!prefs.waterEnabled.first()) return
+        WaterReminderScheduler.enqueueNext(applicationContext, slot, prefs.waterIntervalMinutes.first())
     }
 
     private fun buildDisplayName(nickname: String, suffix: String): String =
@@ -144,21 +175,70 @@ class WaterReminderWorker(
     }
 }
 
-/** 喝水提醒调度封装：设置页开关/改频率时用 */
+/**
+ * 喝水提醒调度（设置页开关 / 改频率时用）。
+ *
+ * **为什么不用 `PeriodicWorkRequest`**：
+ * WorkManager 对它写死了 15 分钟下限（`WorkSpec.MIN_PERIODIC_INTERVAL_MILLIS`），
+ * 传更小的值会被 `clampPeriodicIntervalDuration()` 静默提升到 15 分钟——
+ * 结果就是设置页显示 1 分钟、实际 15 分钟，还查不出原因。
+ * `OneTimeWorkRequest` 没有这个限制（`setInitialDelay` 收任意值），
+ * 所以改成「一次性任务 + 跑完自己排下一次」来等效周期，间隔可以真做到 1 分钟。
+ *
+ * **为什么要两个槽位**：
+ * 自链需要在 Worker 里重新入队。若始终用同一个 unique name 配 `REPLACE`，
+ * 新任务会把**正在运行的自己**取消掉。于是 A/B 交替：这次跑 A，下次排 B，再下次排 A。
+ *
+ * **代价**：Doze 深度省电下仍可能被系统延后——这是所有后台任务共有的，换机制也绕不开。
+ */
 object WaterReminderScheduler {
-    private const val UNIQUE_WORK = "water_reminder"
+    /** 两个槽位名对测试可见，好断言「跑完 A 就排 B」这条链真的接上了。 */
+    internal const val SLOT_A = "water_reminder_a"
+    internal const val SLOT_B = "water_reminder_b"
+
+    /**
+     * 0.5.4 及以前用的周期任务名。升级上来的设备里它还躺在 WorkManager 数据库中，
+     * 不主动取消就会和新链并行跑，提醒直接翻倍。
+     */
+    internal const val LEGACY_PERIODIC_WORK = "water_reminder"
+
+    /**
+     * 调度实现的版本号。改了调度机制就递增，配合 [UserPrefs.waterScheduleVersion]
+     * 做一次性的升级迁移。
+     */
+    const val SCHEDULE_VERSION = 2
+
+    /** Worker 从 inputData 读自己被排在了哪个槽，好知道下一次该排到哪儿。 */
+    const val KEY_SLOT = "water_reminder_slot"
 
     fun schedule(context: Context, intervalMinutes: Int) {
-        val request = PeriodicWorkRequestBuilder<WaterReminderWorker>(
-            intervalMinutes.coerceAtLeast(15).toLong(), TimeUnit.MINUTES
-        ).build()
-        WorkManager.getInstance(context).enqueueUniquePeriodicWork(
-            UNIQUE_WORK, ExistingPeriodicWorkPolicy.UPDATE, request
-        )
+        val manager = WorkManager.getInstance(context)
+        // 清掉两个历史包袱：旧的周期任务，以及另一个槽里可能残留的链。
+        // 少了这一步，一条遗留的链会和新链各跑各的，提醒变成双份。
+        manager.cancelUniqueWork(LEGACY_PERIODIC_WORK)
+        manager.cancelUniqueWork(SLOT_B)
+        enqueue(context, SLOT_A, intervalMinutes)
+    }
+
+    /** 仅由 [WaterReminderWorker] 在干完活之后调用，把下一次排到另一个槽。 */
+    internal fun enqueueNext(context: Context, fromSlot: String, intervalMinutes: Int) {
+        enqueue(context, if (fromSlot == SLOT_A) SLOT_B else SLOT_A, intervalMinutes)
+    }
+
+    private fun enqueue(context: Context, slot: String, intervalMinutes: Int) {
+        val request = OneTimeWorkRequestBuilder<WaterReminderWorker>()
+            // 下限 1 分钟是业务下限，不是系统下限——one-time 任务没有 15 分钟限制。
+            .setInitialDelay(intervalMinutes.coerceAtLeast(1).toLong(), TimeUnit.MINUTES)
+            .setInputData(workDataOf(KEY_SLOT to slot))
+            .build()
+        WorkManager.getInstance(context).enqueueUniqueWork(slot, ExistingWorkPolicy.REPLACE, request)
     }
 
     fun cancel(context: Context) {
-        WorkManager.getInstance(context).cancelUniqueWork(UNIQUE_WORK)
+        val manager = WorkManager.getInstance(context)
+        manager.cancelUniqueWork(LEGACY_PERIODIC_WORK)
+        manager.cancelUniqueWork(SLOT_A)
+        manager.cancelUniqueWork(SLOT_B)
         WaterReminderWorker.cancelAllNotifications(context)
     }
 }

@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -55,8 +56,11 @@ fun TimePickerDialog(
     confirmHint: String? = null
 ) {
     // 弹窗内的草稿值：只有点确认才向外提交，取消等于什么都没发生。
-    var draftHour by rememberSaveable(title) { mutableIntStateOf(hour) }
-    var draftMinute by rememberSaveable(title) { mutableIntStateOf(minute) }
+    // key 必须带上 hour/minute —— 只用 title 的话，同一个弹窗关掉再开时会复用
+    // 上一次的草稿（rememberSaveable 按 key 缓存），表现为「怎么改都回到旧值」。
+    val draftKey = "$title:$hour:$minute"
+    var draftHour by rememberSaveable(draftKey) { mutableIntStateOf(hour) }
+    var draftMinute by rememberSaveable(draftKey) { mutableIntStateOf(minute) }
     val ok = confirmEnabled(draftHour, draftMinute)
 
     AlertDialog(
@@ -140,6 +144,9 @@ private fun TimeWheel(
 private const val WHEEL_ITEM_HEIGHT_DP = 42
 private const val WHEEL_VISIBLE = 5
 
+/** 首尾各补这么多空位，第一个/最后一个真实值才能滚到正中（否则 02 和 21 永远选不中）。 */
+private const val WHEEL_PAD = WHEEL_VISIBLE / 2
+
 @Composable
 private fun WheelColumn(
     values: List<Int>,
@@ -151,9 +158,10 @@ private fun WheelColumn(
     val listState = rememberLazyListState()
     val initialIndex = remember(values) { values.indexOf(selected).coerceAtLeast(0) }
 
-    // 打开时直接定位到当前值（不带动画，避免弹窗一进来就在滚）。
+    // 补过空位后，第 i 个真实值位于列表第 (i + WHEEL_PAD) 项。
+    // 直接 scrollToItem 到它，居中由空位保证——不再依赖「尽量往中间推」。
     LaunchedEffect(initialIndex) {
-        listState.scrollToItem((initialIndex - WHEEL_VISIBLE / 2).coerceAtLeast(0))
+        listState.scrollToItem(initialIndex + WHEEL_PAD)
     }
 
     val snapBehavior = rememberSnapFlingBehavior(listState)
@@ -168,7 +176,9 @@ private fun WheelColumn(
                 val closest = info.visibleItemsInfo.minByOrNull {
                     kotlin.math.abs((it.offset + it.size / 2) - center)
                 } ?: return@collect
-                values.getOrNull(closest.index)?.let { onSelect(it) }
+                // 换算回真实值下标：减去首部空位，越界即落在空位上，不动。
+                val valueIndex = closest.index - WHEEL_PAD
+                values.getOrNull(valueIndex)?.let { onSelect(it) }
             }
     }
 
@@ -177,9 +187,10 @@ private fun WheelColumn(
         derivedStateOf {
             val info = listState.layoutInfo
             val center = (info.viewportStartOffset + info.viewportEndOffset) / 2
-            info.visibleItemsInfo.minByOrNull {
+            val raw = info.visibleItemsInfo.minByOrNull {
                 kotlin.math.abs((it.offset + it.size / 2) - center)
             }?.index ?: -1
+            if (raw < 0) -1 else raw - WHEEL_PAD
         }
     }
 
@@ -204,6 +215,8 @@ private fun WheelColumn(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier.fillMaxWidth()
         ) {
+            // 首尾空位：撑出滚动空间，让边界值也能停在正中。
+            items(WHEEL_PAD) { Spacer(Modifier.height(itemHeight).width(84.dp)) }
             items(values.size) { index ->
                 val value = values[index]
                 val isSelected = index == centerIndex
@@ -222,6 +235,7 @@ private fun WheelColumn(
                     )
                 }
             }
+            items(WHEEL_PAD) { Spacer(Modifier.height(itemHeight).width(84.dp)) }
         }
     }
 }

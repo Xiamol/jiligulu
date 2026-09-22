@@ -93,4 +93,19 @@ class WaterReminderPersistenceTest {
         assertNull(shadowOf(app.getSystemService(NotificationManager::class.java))
             .getNotification(WaterReminderWorker.notificationIdFor(1L)))
     }
+
+    /**
+     * 这个类刻意不初始化 WorkManager，于是 `WaterReminderScheduler` 一定失败——
+     * 正好用来验证「迁移失败绝不写版本号」。
+     *
+     * 一旦写早了，一次偶然的失败会被永久记成「已迁移」，之后每次打开 App 都不再重试，
+     * 提醒就静默地再也不来了，而且从界面上完全看不出问题。
+     */
+    @Test fun `a migration that cannot reach WorkManager leaves the gate open for the next launch`() = runBlocking {
+        prefs.setWaterEnabled(true)
+        prefs.setWaterScheduleVersion(0)
+
+        assertFalse(app.container.migrateWaterScheduleIfNeeded())
+        assertEquals(0, prefs.waterScheduleVersion.first())
+    }
 }

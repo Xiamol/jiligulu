@@ -27,12 +27,37 @@ interface ChatMessageDao {
     @Query("UPDATE chat_messages SET draftPayload = :payload WHERE id = :id AND kind = 'DRAFT' AND status = 'EDITING'")
     suspend fun updateDraft(id: Long, payload: String): Int
 
-    @Query("UPDATE chat_messages SET status = 'DISMISSED' WHERE id = :id AND kind = 'DRAFT' AND status = 'EDITING'")
+    /**
+     * 作废一张还没提交的卡片（草稿卡或改账/删账指令卡）。
+     *
+     * 必须同时覆盖 COMMAND：指令卡被取消后如果状态还停在 EDITING，
+     * [com.jiligulu.app.data.repository.AiRepository.commitCommands] 就会照常执行——
+     * 用户明明点了「取消」，账却被改了。
+     */
+    @Query("UPDATE chat_messages SET status = 'DISMISSED' WHERE id = :id AND kind IN ('DRAFT', 'COMMAND') AND status = 'EDITING'")
     suspend fun dismissDraft(id: Long): Int
+
+    /** 指令卡的勾选状态也要能存下来。 */
+    @Query("UPDATE chat_messages SET draftPayload = :payload WHERE id = :id AND kind = 'COMMAND' AND status = 'EDITING'")
+    suspend fun updateCommand(id: Long, payload: String): Int
 
     @Query("UPDATE chat_messages SET status = 'CONFIRMED', savedCount = :count WHERE id = :id AND kind = 'DRAFT' AND status = 'EDITING'")
     suspend fun markConfirmed(id: Long, count: Int): Int
 
     @Query("UPDATE chat_messages SET status = 'INTERRUPTED', content = :message WHERE kind = 'ASSISTANT' AND status = 'PENDING'")
     suspend fun markPendingInterrupted(message: String): Int
+
+    // ---------- 待补充账（用户只说了金额，等下一句补名目） ----------
+
+    /** 挂起记录按时间倒序取一条。同一时刻只应该有一条。 */
+    @Query("SELECT * FROM chat_messages WHERE kind = 'PENDING_DRAFT' AND status = 'EDITING' ORDER BY id DESC LIMIT 1")
+    suspend fun latestPending(): ChatMessageEntity?
+
+    /** 清掉所有还挂着的待补充账。 */
+    @Query("UPDATE chat_messages SET status = 'DISMISSED' WHERE kind = 'PENDING_DRAFT' AND status = 'EDITING'")
+    suspend fun clearPendingPayload(): Int
+
+    /** 把某一条挂起记录标记成已补充。 */
+    @Query("UPDATE chat_messages SET status = 'DISMISSED' WHERE id = :id AND kind = 'PENDING_DRAFT' AND status = 'EDITING'")
+    suspend fun consumePending(id: Long): Int
 }

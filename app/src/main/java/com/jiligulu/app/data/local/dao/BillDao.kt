@@ -7,6 +7,13 @@ import androidx.room.Query
 import com.jiligulu.app.data.local.entity.BillEntity
 import kotlinx.coroutines.flow.Flow
 
+/**
+ * 账单表。
+ *
+ * **软删除约定**：`deletedAt IS NULL` 才是「活着的」账单。
+ * 凡是对外提供数据的查询（首页/统计/预算/日历/导出）都必须带这个条件；
+ * 只有回收站自己的查询反过来用 `deletedAt IS NOT NULL`。
+ */
 @Dao
 interface BillDao {
 
@@ -26,13 +33,63 @@ interface BillDao {
     @Query("UPDATE bills SET amountFen = :amountFen, detail = :detail, timestamp = :timestamp WHERE id = :id")
     suspend fun updateDetails(id: Long, amountFen: Long, detail: String, timestamp: Long): Int
 
+    /** AI 改账用：可同时改分类，且只在账单存活时生效。 */
+    @Query(
+        """
+        UPDATE bills SET amountFen = :amountFen, detail = :detail, timestamp = :timestamp,
+            categoryId = :categoryId, note = :note
+        WHERE id = :id AND deletedAt IS NULL
+        """
+    )
+    suspend fun updateFromAi(
+        id: Long, amountFen: Long, detail: String, timestamp: Long, categoryId: Long, note: String
+    ): Int
+
     @Query("DELETE FROM bills WHERE id = :id")
     suspend fun deleteById(id: Long): Int
 
     /** 时间范围内的账单，新的在前。日视图/月视图/预算周期都靠它，聚合在内存里做 */
-    @Query("SELECT * FROM bills WHERE timestamp >= :startMillis AND timestamp < :endMillis ORDER BY timestamp DESC")
+    @Query(
+        "SELECT * FROM bills WHERE deletedAt IS NULL AND timestamp >= :startMillis AND timestamp < :endMillis " +
+            "ORDER BY timestamp DESC"
+    )
     fun observeBetween(startMillis: Long, endMillis: Long): Flow<List<BillEntity>>
 
-    @Query("SELECT * FROM bills ORDER BY timestamp DESC")
+    @Query("SELECT * FROM bills WHERE deletedAt IS NULL ORDER BY timestamp DESC")
     fun observeAll(): Flow<List<BillEntity>>
+
+    @Query(
+        "SELECT * FROM bills WHERE deletedAt IS NULL AND timestamp >= :startMillis " +
+            "ORDER BY timestamp DESC LIMIT :limit"
+    )
+    suspend fun recentSince(startMillis: Long, limit: Int): List<BillEntity>
+
+    /** 上下文注入用：最近若干条活着的账单，新的在前。 */
+    @Query("SELECT * FROM bills WHERE deletedAt IS NULL ORDER BY timestamp DESC LIMIT :limit")
+    suspend fun recent(limit: Int): List<BillEntity>
+
+    // ---------- 回收站 ----------
+
+    /** 移入回收站（软删除）。已在回收站里的不会被重复打时间戳。 */
+    @Query("UPDATE bills SET deletedAt = :deletedAt WHERE id = :id AND deletedAt IS NULL")
+    suspend fun moveToTrash(id: Long, deletedAt: Long): Int
+
+    /** 从回收站恢复。 */
+    @Query("UPDATE bills SET deletedAt = NULL WHERE id = :id AND deletedAt IS NOT NULL")
+    suspend fun restore(id: Long): Int
+
+    /** 回收站列表：按删除时间倒序，最新删的在最上面。 */
+    @Query("SELECT * FROM bills WHERE deletedAt IS NOT NULL ORDER BY deletedAt DESC")
+    fun observeTrash(): Flow<List<BillEntity>>
+
+    @Query("SELECT * FROM bills WHERE deletedAt IS NOT NULL ORDER BY deletedAt DESC")
+    suspend fun getTrash(): List<BillEntity>
+
+    /** 彻底删除（仅回收站内的账单，避免误伤活账单）。 */
+    @Query("DELETE FROM bills WHERE id = :id AND deletedAt IS NOT NULL")
+    suspend fun purge(id: Long): Int
+
+    /** 清理超过保留期的回收站账单，返回清掉的数量。 */
+    @Query("DELETE FROM bills WHERE deletedAt IS NOT NULL AND deletedAt < :beforeMillis")
+    suspend fun purgeExpired(beforeMillis: Long): Int
 }
