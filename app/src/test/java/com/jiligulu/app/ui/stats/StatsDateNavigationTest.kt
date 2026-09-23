@@ -24,6 +24,7 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.After
 import org.junit.Test
 import java.time.LocalDate
@@ -73,6 +74,29 @@ class StatsDateNavigationTest {
     }
 
     @Test
+    fun `aggregate slice never shares a name with a real category`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        val store = ViewModelStore()
+        try {
+            val now = System.currentTimeMillis()
+            val names = listOf("其他", "其余", "其余（合并）", "其余（合并） 2", "吃饭", "饮品", "交通", "购物")
+            val cats = names.mapIndexed { i, name -> CategoryEntity(id = i + 1L, name = name,
+                colorHue = i * 40f, colorIndex = i) }
+            val bills = cats.mapIndexed { i, cat -> BillEntity(id = i + 1L, amountFen = (1000 - i * 10).toLong(),
+                type = BillType.EXPENSE, categoryId = cat.id, detail = cat.name, timestamp = now) }
+            val vm = model(bills, cats) { now }
+            store.put("stats", vm)
+            backgroundScope.launch { vm.dayDonut.collect {} }
+            runCurrent()
+            val slices = vm.dayDonut.value.slices
+            assertEquals(7, slices.size)
+            assertEquals(slices.size, slices.map { it.label }.toSet().size)
+            assertEquals("其余（合并） 3", slices.last().label)
+            assertTrue(slices.any { it.label == "其他" })
+        } finally { store.clear() }
+    }
+
+    @Test
     fun `calendar selects another month and its details without editing a bill`() = runTest {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
         val store = ViewModelStore()
@@ -101,7 +125,7 @@ class StatsDateNavigationTest {
 
     private fun LocalDate.millis(): Long = atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
 
-    private fun model(bills: List<BillEntity>, now: () -> Long): StatsViewModel {
+    private fun model(bills: List<BillEntity>, categories: List<CategoryEntity> = emptyList(), now: () -> Long): StatsViewModel {
         val billDao = object : BillDao {
             override fun observeBetween(startMillis: Long, endMillis: Long) = flowOf(
                 bills.filter { it.timestamp >= startMillis && it.timestamp < endMillis })
@@ -130,8 +154,8 @@ class StatsDateNavigationTest {
             override suspend fun purgeExpired(beforeMillis: Long): Int = error("unused")
         }
         val categoryDao = object : CategoryDao {
-            override fun observeAll(): Flow<List<CategoryEntity>> = flowOf(emptyList())
-            override suspend fun findAllOnce(): List<CategoryEntity> = emptyList()
+            override fun observeAll(): Flow<List<CategoryEntity>> = flowOf(categories)
+            override suspend fun findAllOnce(): List<CategoryEntity> = categories
             override suspend fun count(): Int = 0
             override suspend fun findByName(name: String): CategoryEntity? = null
             override suspend fun insert(category: CategoryEntity): Long = error("unused")

@@ -17,6 +17,18 @@ data class PendingWater(val id: Long = 0L, val text: String = "") {
     val isPending: Boolean get() = id > 0L
 }
 
+/** One DataStore emission keeps the scheduler from combining different settings revisions. */
+data class WaterReminderState(
+    val enabled: Boolean,
+    val intervalMinutes: Int,
+    val quietStartMinutes: Int,
+    val quietEndMinutes: Int,
+    val nextDueAt: Long,
+    val pending: PendingWater
+)
+
+data class WaterReminderAdvance(val nextDueAt: Long, val pendingToDeliver: PendingWater?)
+
 /**
  * 用户偏好：称呼、称呼后缀、自定义 API Key。
  * TODO(M5 前)：Key 迁移到 EncryptedSharedPreferences 加密封存（PRD §4）。
@@ -31,6 +43,7 @@ class UserPrefs(private val context: Context) {
         private val KEY_WATER_ENABLED = booleanPreferencesKey("water_enabled")
         private val KEY_WATER_INTERVAL = intPreferencesKey("water_interval_minutes")
         private val KEY_WATER_SCHEDULE_VERSION = intPreferencesKey("water_schedule_version")
+        private val KEY_WATER_NEXT_DUE = longPreferencesKey("water_next_due_at")
         private val KEY_QUIET_START = intPreferencesKey("quiet_start_minutes")
         private val KEY_QUIET_END = intPreferencesKey("quiet_end_minutes")
         private val KEY_LAST_GREET = stringPreferencesKey("last_greet_slot")
@@ -52,6 +65,8 @@ class UserPrefs(private val context: Context) {
 
         /** 喝水提醒默认值：60 分钟一次，免打扰 23:00-08:00（一天内分钟数） */
         const val DEFAULT_WATER_INTERVAL = 60
+        const val MIN_WATER_INTERVAL = 1
+        const val MAX_WATER_INTERVAL = 12 * 60 + 59
         const val DEFAULT_QUIET_START = 23 * 60
         const val DEFAULT_QUIET_END = 8 * 60
 
@@ -82,17 +97,30 @@ class UserPrefs(private val context: Context) {
 
     /** 喝水提醒间隔分钟数（默认 60） */
     val waterIntervalMinutes: Flow<Int> =
-        context.dataStore.data.map { it[KEY_WATER_INTERVAL] ?: DEFAULT_WATER_INTERVAL }
+        context.dataStore.data.map {
+            (it[KEY_WATER_INTERVAL] ?: DEFAULT_WATER_INTERVAL).coerceIn(MIN_WATER_INTERVAL, MAX_WATER_INTERVAL)
+        }
 
     /**
-     * 喝水提醒「调度实现」的版本号，0 表示还是 0.5.4 及以前的周期任务方案。
-     *
-     * 这个值只服务于一次性迁移：0.5.5 起把 PeriodicWorkRequest 换成 OneTimeWork 自链，
-     * 旧任务若不清理就会和新链并行、提醒翻倍。冷启动检查一次，迁移完就写上新版本号，
-     * 之后每次启动都是一次 DataStore 读后直接返回，不会重置提醒倒计时。
+     * 调度实现版本：0/1 为旧周期任务，2 为 A/B 自链，3 起为 AlarmManager。
+     * 迁移闸门只管理旧任务清理；每次启动按独立持久化的 nextDue 恢复系统闹钟。
      */
     val waterScheduleVersion: Flow<Int> =
         context.dataStore.data.map { it[KEY_WATER_SCHEDULE_VERSION] ?: 0 }
+
+    val waterNextDueAt: Flow<Long> = context.dataStore.data.map { it[KEY_WATER_NEXT_DUE] ?: 0L }
+
+    val waterReminderState: Flow<WaterReminderState> = context.dataStore.data.map {
+        WaterReminderState(
+            enabled = it[KEY_WATER_ENABLED] ?: false,
+            intervalMinutes = (it[KEY_WATER_INTERVAL] ?: DEFAULT_WATER_INTERVAL)
+                .coerceIn(MIN_WATER_INTERVAL, MAX_WATER_INTERVAL),
+            quietStartMinutes = it[KEY_QUIET_START] ?: DEFAULT_QUIET_START,
+            quietEndMinutes = it[KEY_QUIET_END] ?: DEFAULT_QUIET_END,
+            nextDueAt = it[KEY_WATER_NEXT_DUE] ?: 0L,
+            pending = PendingWater(it[KEY_PENDING_WATER] ?: 0L, it[KEY_PENDING_WATER_TEXT].orEmpty())
+        )
+    }
 
     /** 免打扰开始（一天内分钟数，默认 23:00） */
     val quietStartMinutes: Flow<Int> =
@@ -149,6 +177,36 @@ class UserPrefs(private val context: Context) {
         return pending
     }
 
+    /** The delivered cup and consumed deadline commit together, including after process death. */
+    suspend fun advanceWaterDeadline(
+        expectedDueAt: Long,
+        now: Long,
+        text: String?,
+        skipExistingCup: Boolean
+    ): WaterReminderAdvance? {
+        var advanced: WaterReminderAdvance? = null
+        context.dataStore.edit { values ->
+            if (values[KEY_WATER_ENABLED] != true || expectedDueAt <= 0L || now < expectedDueAt ||
+                values[KEY_WATER_NEXT_DUE] != expectedDueAt) return@edit
+            val existing = values[KEY_PENDING_WATER] ?: 0L
+            val pending = if (text != null && !(skipExistingCup && existing > 0L)) {
+                val id = if (existing > 0L) existing else maxOf(now, (values[KEY_LAST_WATER_ID] ?: 0L) + 1L)
+                if (existing <= 0L) {
+                    values[KEY_PENDING_WATER] = id
+                    values[KEY_LAST_WATER_ID] = id
+                    values[KEY_PENDING_WATER_TEXT] = text
+                }
+                PendingWater(id, values[KEY_PENDING_WATER_TEXT].orEmpty())
+            } else null
+            val interval = (values[KEY_WATER_INTERVAL] ?: DEFAULT_WATER_INTERVAL)
+                .coerceIn(MIN_WATER_INTERVAL, MAX_WATER_INTERVAL)
+            val nextDueAt = now + interval * 60_000L
+            values[KEY_WATER_NEXT_DUE] = nextDueAt
+            advanced = WaterReminderAdvance(nextDueAt, pending)
+        }
+        return advanced
+    }
+
     /** An old animation cannot acknowledge a newer reminder. */
     suspend fun completeWater(id: Long): Boolean {
         var completed = false
@@ -197,14 +255,75 @@ class UserPrefs(private val context: Context) {
     }
 
     suspend fun setWaterEnabled(value: Boolean) {
-        context.dataStore.edit {
-            it[KEY_WATER_ENABLED] = value
-            if (!value) { it.remove(KEY_PENDING_WATER); it.remove(KEY_PENDING_WATER_TEXT) }
-        }
+        setWaterSettings(enabled = value)
     }
 
     suspend fun setWaterIntervalMinutes(value: Int) {
-        context.dataStore.edit { it[KEY_WATER_INTERVAL] = value }
+        setWaterSettings(intervalMinutes = value)
+    }
+
+    /** Applies a confirmed settings card atomically, without temporary mixed quiet-hour ranges. */
+    suspend fun setWaterSettings(
+        enabled: Boolean? = null,
+        intervalMinutes: Int? = null,
+        quietEnabled: Boolean? = null,
+        quietStartMinutes: Int? = null,
+        quietEndMinutes: Int? = null
+    ) {
+        require(intervalMinutes == null || intervalMinutes in MIN_WATER_INTERVAL..MAX_WATER_INTERVAL)
+        require(quietStartMinutes == null || quietStartMinutes in 0 until 24 * 60)
+        require(quietEndMinutes == null || quietEndMinutes in 0 until 24 * 60)
+        context.dataStore.edit {
+            val previousEnabled = it[KEY_WATER_ENABLED] ?: false
+            val previousInterval = (it[KEY_WATER_INTERVAL] ?: DEFAULT_WATER_INTERVAL)
+                .coerceIn(MIN_WATER_INTERVAL, MAX_WATER_INTERVAL)
+            val scheduleChanged = (enabled != null && enabled != previousEnabled) ||
+                (intervalMinutes != null && intervalMinutes != previousInterval)
+            enabled?.let { value -> it[KEY_WATER_ENABLED] = value }
+            intervalMinutes?.let { value -> it[KEY_WATER_INTERVAL] = value }
+            var start = quietStartMinutes ?: it[KEY_QUIET_START] ?: DEFAULT_QUIET_START
+            var end = quietEndMinutes ?: it[KEY_QUIET_END] ?: DEFAULT_QUIET_END
+            if (quietEnabled == false) {
+                start = 0
+                end = 0
+            } else if (quietEnabled == true && start == end &&
+                quietStartMinutes == null && quietEndMinutes == null) {
+                start = DEFAULT_QUIET_START
+                end = DEFAULT_QUIET_END
+            }
+            if (quietEnabled != null || quietStartMinutes != null || quietEndMinutes != null) {
+                it[KEY_QUIET_START] = start
+                it[KEY_QUIET_END] = end
+            }
+            if (enabled == false) {
+                it.remove(KEY_PENDING_WATER)
+                it.remove(KEY_PENDING_WATER_TEXT)
+                it.remove(KEY_WATER_NEXT_DUE)
+            } else if (scheduleChanged) {
+                // Settings and their new deadline must survive together if the process exits before
+                // AlarmManager is reached. Replaying the same confirmed values keeps the deadline.
+                if (it[KEY_WATER_ENABLED] == true) {
+                    val minutes = intervalMinutes ?: previousInterval
+                    it[KEY_WATER_NEXT_DUE] = System.currentTimeMillis() + minutes * 60_000L
+                } else {
+                    it.remove(KEY_WATER_NEXT_DUE)
+                }
+            }
+        }
+    }
+
+    /** A disabled reminder cannot be resurrected by an alarm that was already in flight. */
+    suspend fun setWaterNextDueAtIfEnabled(dueAt: Long): Boolean {
+        var enabled = false
+        context.dataStore.edit {
+            enabled = it[KEY_WATER_ENABLED] == true
+            if (enabled) it[KEY_WATER_NEXT_DUE] = dueAt else it.remove(KEY_WATER_NEXT_DUE)
+        }
+        return enabled
+    }
+
+    suspend fun clearWaterNextDueAt() {
+        context.dataStore.edit { it.remove(KEY_WATER_NEXT_DUE) }
     }
 
     suspend fun setWaterScheduleVersion(value: Int) {
@@ -212,10 +331,7 @@ class UserPrefs(private val context: Context) {
     }
 
     suspend fun setQuietHours(startMinutes: Int, endMinutes: Int) {
-        context.dataStore.edit {
-            it[KEY_QUIET_START] = startMinutes
-            it[KEY_QUIET_END] = endMinutes
-        }
+        setWaterSettings(quietStartMinutes = startMinutes, quietEndMinutes = endMinutes)
     }
 
     suspend fun setLastGreetKey(value: String) {

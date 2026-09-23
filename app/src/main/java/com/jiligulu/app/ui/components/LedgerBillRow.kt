@@ -36,19 +36,15 @@ fun LedgerBillRow(
     isExpense: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    showDivider: Boolean = false
+    showDivider: Boolean = false,
+    categoryName: String = title
 ) {
     Column(modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface)) {
         Row(
             Modifier.fillMaxWidth().clickable(onClickLabel = "查看和编辑账单", onClick = onClick).padding(14.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Box(
-                Modifier.size(42.dp).background(
-                    GoldenAnglePalette.colorForHue(colorHue).copy(alpha = 0.12f),
-                    MaterialTheme.shapes.large
-                ), contentAlignment = Alignment.Center
-            ) { Text(icon, style = MaterialTheme.typography.titleLarge) }
+            CategoryBadge(categoryName, icon, size = 42.dp, tint = GoldenAnglePalette.colorForHue(colorHue))
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(title, style = MaterialTheme.typography.titleSmall,

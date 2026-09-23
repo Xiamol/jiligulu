@@ -30,7 +30,7 @@ interface BillDao {
     suspend fun getById(id: Long): BillEntity?
 
     /** Only user-editable columns change; attachments and original AI input remain intact. */
-    @Query("UPDATE bills SET amountFen = :amountFen, detail = :detail, timestamp = :timestamp WHERE id = :id")
+    @Query("UPDATE bills SET amountFen = :amountFen, detail = :detail, timestamp = :timestamp WHERE id = :id AND deletedAt IS NULL")
     suspend fun updateDetails(id: Long, amountFen: Long, detail: String, timestamp: Long): Int
 
     /** AI 改账用：可同时改分类，且只在账单存活时生效。 */

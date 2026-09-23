@@ -20,6 +20,11 @@ object ChatIntent {
     /** 整理「待定」：命中才注入 `{otherBills}`（R2-整理）。 */
     private val OTHER = Regex("整理|收纳|收拾|其他里|一类|归类")
 
+    /** Offline parsing can only add bills; mutation/settings requests must never become additions. */
+    private val ONLINE_ACTION = Regex("改|换成|换为|那笔|这笔|之前那|删|恢复|撤销|撤回|捞|还回|纠正|更正|记错|算错|清空|整理|归类|调整|开启|关闭|设置|提醒|免打扰|回收站|检查.{0,6}更新")
+
+    fun requiresOnlineAction(s: String) = ONLINE_ACTION.containsMatchIn(s)
+
     fun needsCandidates(s: String) = CANDIDATE.containsMatchIn(s)
 
     fun needsTrash(s: String) = RESTORE.containsMatchIn(s)

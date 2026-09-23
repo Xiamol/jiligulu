@@ -15,7 +15,7 @@ data class CommandItem(
     val billId: Long,
     val title: String,
     val categoryName: String = "",
-    val iconEmoji: String = "🧾",
+    val iconEmoji: String = "",
     val isExpense: Boolean = true,
     /** 改动前的一行摘要，如「9月21日 12:30 · 12 元 · 吃饭」。 */
     val before: String = "",

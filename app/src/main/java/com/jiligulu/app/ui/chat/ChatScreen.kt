@@ -50,6 +50,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -63,12 +64,16 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.jiligulu.app.data.local.entity.BillType
 import com.jiligulu.app.data.local.entity.CategoryEntity
 import com.jiligulu.app.ui.persona.GuluMascot
 import com.jiligulu.app.ui.components.BillDateTimeField
+import com.jiligulu.app.ui.components.CategoryBadge
+import com.jiligulu.app.domain.color.GoldenAnglePalette
+import com.jiligulu.app.domain.category.CategoryDefaults
 import com.jiligulu.app.ui.theme.ExpenseGreen
 import com.jiligulu.app.ui.theme.IncomeRed
 import com.jiligulu.app.ui.theme.GuluBrandFont
@@ -178,7 +183,12 @@ fun ChatScreen(
                             categories = categories,
                             onUpdate = { index, transform -> vm.updateDraft(item.id, index, transform) },
                             onConfirm = { vm.confirmCard(item.id) },
-                            onCancel = { vm.cancelCard(item.id) }
+                            onDelete = { vm.deleteDraft(item.id) }
+                        )
+                        is ChatItem.AppActionCard -> AppActionConfirmationCard(
+                            card = item,
+                            onConfirm = { vm.confirmAppAction(item.id) },
+                            onCancel = { vm.cancelAppAction(item.id) }
                         )
                         is ChatItem.CommandCard -> CommandCardView(
                             card = item,
@@ -333,17 +343,26 @@ private fun GuluBubble(msg: ChatItem.GuluMsg) {
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun DraftCardView(
+internal fun DraftCardView(
     card: ChatItem.DraftCard,
     categories: List<CategoryEntity>,
     onUpdate: (Int, (DraftUi) -> DraftUi) -> Unit,
     onConfirm: () -> Unit,
-    onCancel: () -> Unit
+    onDelete: () -> Unit
 ) {
     val editing = card.status == ChatItem.DraftCard.Status.EDITING
+    var expanded by remember(card.id) { mutableStateOf(false) }
+    var confirmDelete by remember(card.id) { mutableStateOf(false) }
+    if (card.status == ChatItem.DraftCard.Status.DELETED) {
+        Text("草稿已删除", Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)
+            .testTag("draft-deleted-${card.id}"), style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f))
+        return
+    }
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .testTag("draft-card-${card.id}")
             // 设计稿动效④：草稿卡展开/收起高度动画
             .animateContentSize()
             .background(MaterialTheme.colorScheme.surface, MaterialTheme.shapes.large)
@@ -353,8 +372,8 @@ private fun DraftCardView(
         Text(
             when (card.status) {
                 ChatItem.DraftCard.Status.CONFIRMED -> "✓ 已记入账本 · ${card.savedCount} 笔"
-                ChatItem.DraftCard.Status.CANCELLED -> "这张草稿已收起"
-                else -> "帮你整理好啦"
+                ChatItem.DraftCard.Status.SAVING -> "正在放进账本…"
+                else -> "整理好了 · ${card.drafts.size} 笔待确认"
             },
             style = MaterialTheme.typography.titleSmall,
             color = MaterialTheme.colorScheme.primary,
@@ -370,10 +389,14 @@ private fun DraftCardView(
         )
         Spacer(Modifier.height(8.dp))
 
-        if (card.status == ChatItem.DraftCard.Status.CONFIRMED || card.status == ChatItem.DraftCard.Status.CANCELLED) {
-            card.drafts.filter { it.checked }.forEach { draft ->
+        if (!expanded || card.status == ChatItem.DraftCard.Status.CONFIRMED) {
+            val visibleDrafts = if (card.status == ChatItem.DraftCard.Status.CONFIRMED)
+                card.drafts.filter { it.checked } else card.drafts
+            val summaryDrafts = if (card.status == ChatItem.DraftCard.Status.CONFIRMED) visibleDrafts else visibleDrafts.take(3)
+            summaryDrafts.forEach { draft ->
                 Row(Modifier.fillMaxWidth().padding(vertical = 7.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(draft.iconEmoji.ifBlank { "🧾" }, style = MaterialTheme.typography.titleLarge)
+                    val category = categories.firstOrNull { it.name.equals(draft.categoryName, true) }
+                    CategoryBadge(draft.categoryName, category?.iconValue ?: draft.iconEmoji, size = 32.dp)
                     Column(Modifier.weight(1f)) {
                         Text(draft.detail.ifBlank { draft.categoryName }, style = MaterialTheme.typography.bodyMedium)
                         draft.timestamp?.let { timestamp ->
@@ -388,6 +411,12 @@ private fun DraftCardView(
                         style = MaterialTheme.typography.titleSmall,
                         color = if (draft.type == BillType.EXPENSE) ExpenseGreen else IncomeRed)
                 }
+            }
+            if (visibleDrafts.size > summaryDrafts.size) Text("还有 ${visibleDrafts.size - summaryDrafts.size} 笔", style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (editing) {
+                TextButton(onClick = { expanded = true }, modifier = Modifier.align(Alignment.End)
+                    .testTag("draft-expand-${card.id}")) { Text("展开 · 编辑草稿") }
             }
             return@Column
         }
@@ -405,7 +434,7 @@ private fun DraftCardView(
                             onValueChange = { v ->
                                 onUpdate(index) { d -> d.copy(amountText = v.filter { c -> c.isDigit() || c == '.' }) }
                             },
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.weight(1f).testTag("draft-amount-${card.id}-$index"),
                             prefix = { Text("¥") },
                             placeholder = { Text("金额") },
                             singleLine = true,
@@ -423,7 +452,7 @@ private fun DraftCardView(
                     OutlinedTextField(
                         value = draft.detail,
                         onValueChange = { v -> onUpdate(index) { d -> d.copy(detail = v) } },
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().testTag("draft-detail-${card.id}-$index"),
                         placeholder = { Text("细则（如：牛肉面）") },
                         singleLine = true,
                         enabled = editing
@@ -447,8 +476,11 @@ private fun DraftCardView(
                         categories.forEach { c ->
                             FilterChip(
                                 selected = draft.categoryName.equals(c.name, true),
-                                onClick = { onUpdate(index) { d -> d.copy(categoryName = c.name, isNewCategory = false) } },
-                                label = { Text("${c.iconValue} ${c.name}", style = MaterialTheme.typography.labelMedium) },
+                                onClick = { onUpdate(index) { d -> d.copy(categoryName = c.name,
+                                    iconEmoji = c.iconValue, iconSvg = c.iconSvg, isNewCategory = false) } },
+                                leadingIcon = { CategoryBadge(c.name, c.iconValue, size = 22.dp,
+                                    tint = GoldenAnglePalette.colorForHue(c.colorHue)) },
+                                label = { Text(c.name, style = MaterialTheme.typography.labelMedium) },
                                 enabled = editing
                             )
                         }
@@ -456,7 +488,8 @@ private fun DraftCardView(
                             FilterChip(
                                 selected = true,
                                 onClick = {},
-                                label = { Text("${draft.iconEmoji.ifBlank { "🆕" }} ${draft.categoryName}·新", style = MaterialTheme.typography.labelMedium) },
+                                leadingIcon = { CategoryBadge(draft.categoryName, draft.iconEmoji, size = 22.dp) },
+                                label = { Text("${draft.categoryName}·新", style = MaterialTheme.typography.labelMedium) },
                                 enabled = editing
                             )
                         }
@@ -477,13 +510,17 @@ private fun DraftCardView(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    TextButton(onClick = onCancel) { Text("取消") }
+                    TextButton(onClick = { expanded = false }, modifier = Modifier.testTag("draft-collapse-${card.id}")) { Text("收起") }
+                    TextButton(onClick = { confirmDelete = true }, modifier = Modifier.testTag("draft-delete-${card.id}")) {
+                        Text("删除", color = MaterialTheme.colorScheme.error)
+                    }
                     Spacer(Modifier.weight(1f))
                     val selected = card.drafts.filter { it.checked }
                     val validCount = selected.size
                     Button(
                         onClick = onConfirm,
-                        enabled = validCount > 0 && selected.all { it.isValid }
+                        enabled = validCount > 0 && selected.all { it.isValid },
+                        modifier = Modifier.testTag("draft-confirm-${card.id}")
                     ) {
                         Text("确认记账（$validCount）")
                     }
@@ -504,6 +541,25 @@ private fun DraftCardView(
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            ChatItem.DraftCard.Status.DELETED -> Unit
+        }
+    }
+    if (confirmDelete && editing) {
+        Dialog(onDismissRequest = { confirmDelete = false }) {
+            Surface(shape = RoundedCornerShape(26.dp), color = MaterialTheme.colorScheme.surface,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
+                Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Text("这张草稿不要了吗？", style = MaterialTheme.typography.titleLarge,
+                        fontFamily = GuluBrandFont, color = MaterialTheme.colorScheme.primary)
+                    Text("删掉就找不回来了。已经记入账本的账单不会受影响。",
+                        style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        TextButton(onClick = { confirmDelete = false }) { Text("再留一会儿") }
+                        Button(onClick = { confirmDelete = false; onDelete() },
+                            modifier = Modifier.testTag("draft-delete-confirm-${card.id}")) { Text("删除草稿") }
+                    }
+                }
+            }
         }
     }
 }
@@ -525,6 +581,7 @@ private fun CommandCardView(
 ) {
     val editing = card.status == ChatItem.CommandCard.Status.EDITING
     val deleting = card.kind == CommandKind.DELETE
+    val restoring = card.kind == CommandKind.RESTORE
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -535,9 +592,17 @@ private fun CommandCardView(
     ) {
         Text(
             when (card.status) {
-                ChatItem.CommandCard.Status.DONE -> if (deleting) "✓ 已收进回收站 · ${card.appliedCount} 笔" else "✓ 已改好 · ${card.appliedCount} 笔"
+                ChatItem.CommandCard.Status.DONE -> when {
+                    deleting -> "✓ 已收进回收站 · ${card.appliedCount} 笔"
+                    restoring -> "✓ 已放回账本 · ${card.appliedCount} 笔"
+                    else -> "✓ 已改好 · ${card.appliedCount} 笔"
+                }
                 ChatItem.CommandCard.Status.CANCELLED -> "这次就算了"
-                else -> if (deleting) "要删掉这几笔吗" else "要这样改吗"
+                else -> when {
+                    deleting -> "要删掉这几笔吗"
+                    restoring -> "把这几笔放回账本吗"
+                    else -> "要这样改吗"
+                }
             },
             style = MaterialTheme.typography.titleSmall,
             color = MaterialTheme.colorScheme.primary,
@@ -545,7 +610,11 @@ private fun CommandCardView(
         )
         Spacer(Modifier.height(2.dp))
         Text(
-            if (deleting) "删掉只是先放进回收站，随时能捞回来" else "只改你提到的字段，其他保持原样",
+            when {
+                deleting -> "先放进回收站，在保留期内都能捞回来"
+                restoring -> "分类已删除的账单会收进「${CategoryDefaults.VACUUM_NAME}」，账单内容保留"
+                else -> "只改你提到的字段，其他保持原样"
+            },
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -582,16 +651,27 @@ private fun CommandCardView(
                     enabled = card.pendingCount > 0,
                     modifier = Modifier.testTag("command-confirm")
                 ) {
-                    Text(if (deleting) "确认删除（${card.pendingCount}）" else "确认修改（${card.pendingCount}）")
+                    Text(when {
+                        deleting -> "确认删除（${card.pendingCount}）"
+                        restoring -> "确认恢复（${card.pendingCount}）"
+                        else -> "确认修改（${card.pendingCount}）"
+                    })
                 }
             }
             ChatItem.CommandCard.Status.SAVING -> Row(verticalAlignment = Alignment.CenterVertically) {
                 CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                 Spacer(Modifier.width(8.dp))
-                Text(if (deleting) "正在收起来…" else "正在改…", style = MaterialTheme.typography.bodySmall)
+                Text(when { deleting -> "正在收起来…"; restoring -> "正在放回账本…"; else -> "正在改…" },
+                    style = MaterialTheme.typography.bodySmall)
             }
             ChatItem.CommandCard.Status.DONE -> Text(
-                if (deleting) "已进回收站，可以在「设置 → 数据管理 → 回收站」里恢复" else "已经按上面的样子改好了",
+                when {
+                    card.appliedCount < card.params.count { it.checked } ->
+                        "实际处理了 ${card.appliedCount} 笔。部分账单状态已变化，需要的话再让阿噜核对一次。"
+                    deleting -> "已进回收站，可以在「设置 → 数据管理 → 回收站」里恢复"
+                    restoring -> "回到账本里啦 ♡"
+                    else -> "已经按上面的样子改好了"
+                },
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -617,7 +697,7 @@ private fun CommandRow(item: CommandItem, deleting: Boolean, enabled: Boolean, o
             onCheckedChange = { onToggle() },
             enabled = enabled
         )
-        Text(item.iconEmoji, style = MaterialTheme.typography.titleMedium)
+        CategoryBadge(item.categoryName, item.iconEmoji, size = 30.dp)
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
             Text(item.title.ifBlank { item.categoryName }, style = MaterialTheme.typography.bodyMedium)

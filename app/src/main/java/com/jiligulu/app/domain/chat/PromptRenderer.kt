@@ -41,7 +41,9 @@ class PromptRenderer(
      */
     private val trashCandidates: List<BillEntity> = emptyList(),
     /** 「待定」分类下的活账单（整理用）。同样 T02b 才接数据源。 */
-    private val otherBills: List<BillEntity> = emptyList()
+    private val otherBills: List<BillEntity> = emptyList(),
+    /** A single local settings snapshot; never enters the immutable system or chat history. */
+    private val appSettings: String = ""
 ) {
     /** 账本候选：按「模型可能要改/删的范围」分组，每组各自截断。 */
     data class CandidateBills(
@@ -79,6 +81,7 @@ class PromptRenderer(
         .replace("{candidates}", if (ChatIntent.needsCandidates(input)) candidatesSection() else "")
         .replace("{trashCandidates}", if (ChatIntent.needsTrash(input)) trashSection() else "")
         .replace("{otherBills}", if (ChatIntent.needsOtherBills(input)) otherSection() else "")
+        .replace("{appSettings}", appSettings)
         .replace("{now}", context.now)
         .replace("{timezone}", zone.id)
         .replace("{input}", input)

@@ -24,7 +24,7 @@ interface ChatMessageDao {
     @Update
     suspend fun update(message: ChatMessageEntity)
 
-    @Query("UPDATE chat_messages SET draftPayload = :payload WHERE id = :id AND kind = 'DRAFT' AND status = 'EDITING'")
+    @Query("UPDATE chat_messages SET draftPayload = :payload WHERE id = :id AND kind = 'DRAFT' AND status IN ('EDITING', 'DISMISSED')")
     suspend fun updateDraft(id: Long, payload: String): Int
 
     /**
@@ -41,7 +41,7 @@ interface ChatMessageDao {
     @Query("UPDATE chat_messages SET draftPayload = :payload WHERE id = :id AND kind = 'COMMAND' AND status = 'EDITING'")
     suspend fun updateCommand(id: Long, payload: String): Int
 
-    @Query("UPDATE chat_messages SET status = 'CONFIRMED', savedCount = :count WHERE id = :id AND kind = 'DRAFT' AND status = 'EDITING'")
+    @Query("UPDATE chat_messages SET status = 'CONFIRMED', savedCount = :count WHERE id = :id AND kind = 'DRAFT' AND status IN ('EDITING', 'DISMISSED')")
     suspend fun markConfirmed(id: Long, count: Int): Int
 
     // ---------- 草稿生命周期（v0.6 R3） ----------
@@ -70,8 +70,15 @@ interface ChatMessageDao {
      * 对话正文（USER / ASSISTANT）**不走这里**——那是历史，只追加、不回改；
      * 卡片本身也从不进 AI 上下文（见 `AiRepository.chatTurnsFor`），所以删它不影响任何 prompt。
      */
-    @Query("DELETE FROM chat_messages WHERE id = :id")
+    @Query("DELETE FROM chat_messages WHERE id = :id AND kind = 'ACTION'")
     suspend fun deleteById(id: Long): Int
+
+    @Query("SELECT EXISTS(SELECT 1 FROM chat_messages WHERE kind = 'ASSISTANT' AND status = 'PENDING')")
+    suspend fun hasPendingResponse(): Boolean
+
+    /** Explicit user-requested reset. Unconfirmed drafts remain available for later bookkeeping. */
+    @Query("DELETE FROM chat_messages WHERE NOT (kind = 'DRAFT' AND status IN ('EDITING', 'DISMISSED'))")
+    suspend fun clearConversationKeepingDrafts(): Int
 
     @Query("UPDATE chat_messages SET status = 'INTERRUPTED', content = :message WHERE kind = 'ASSISTANT' AND status = 'PENDING'")
     suspend fun markPendingInterrupted(message: String): Int

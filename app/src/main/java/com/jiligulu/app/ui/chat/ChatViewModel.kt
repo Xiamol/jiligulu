@@ -23,6 +23,7 @@ import com.jiligulu.app.data.repository.CategoryRepository
 import com.jiligulu.app.data.repository.ChatHistoryRepository
 import com.jiligulu.app.data.repository.ConfirmItem
 import com.jiligulu.app.domain.chat.PromptRenderer
+import com.jiligulu.app.domain.chat.ChatIntent
 import com.jiligulu.app.domain.category.CategoryEngine
 import com.jiligulu.app.domain.persona.PersonaEngine
 import com.jiligulu.app.domain.persona.QuipLibrary
@@ -34,6 +35,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -69,7 +71,7 @@ sealed interface ChatItem {
         val status: Status = Status.EDITING,
         val savedCount: Int = 0
     ) : ChatItem {
-        enum class Status { EDITING, SAVING, CONFIRMED, CANCELLED }
+        enum class Status { EDITING, SAVING, CONFIRMED, CANCELLED, DELETED }
     }
 
     /**
@@ -84,6 +86,14 @@ sealed interface ChatItem {
         val text: String,
         val options: List<AiOption>
     ) : ChatItem
+
+    data class AppActionCard(
+        override val id: Long,
+        val payload: AppActionPayload,
+        val status: Status = Status.EDITING
+    ) : ChatItem {
+        enum class Status { EDITING, SAVING, DONE, CANCELLED, NEEDS_RETRY }
+    }
 
     /**
      * 改账 / 删账确认卡。
@@ -127,7 +137,18 @@ class ChatViewModel(
     private val _pending = MutableStateFlow<PendingDraft?>(null)
     val pending: StateFlow<PendingDraft?> = _pending
 
-    init { loadHistory() }
+    init {
+        loadHistory()
+        viewModelScope.launch {
+            history.conversationGeneration.drop(1).collect {
+                writes.withLock {
+                    _pending.value = null
+                    _items.value = history.getAll().map { it.toUi() }
+                    if (_items.value.isEmpty()) appendReply("新的一页，阿噜继续陪你记账 ♡")
+                }
+            }
+        }
+    }
 
     fun loadHistory() {
         if (_ready.value || loadingHistory) return
@@ -136,14 +157,8 @@ class ChatViewModel(
             try {
                 writes.withLock {
                     history.markPendingInterrupted()
-                    // 已删掉的草稿不再回到聊天流里——删了就该干净地消失。
-                    // （代码/数据仍在库里，status='DELETED'，只是不参与渲染。）
-                    // 这也顺手修掉一个真 bug：DELETED 曾被映射成 EDITING，
-                    // 于是已删草稿看起来还能点「记录」，一点就撞上
-                    // `check(status == "EDITING")` 抛红错。
-                    _items.value = history.getAll()
-                        .filterNot { it.kind == "DRAFT" && it.status == "DELETED" }
-                        .map { it.toUi() }
+                    // Deleted drafts are immutable tombstones; they never become editable again.
+                    _items.value = history.getAll().map { it.toUi() }
                     _pending.value = PromptRenderer.pendingOf(history.latestPending())
                     if (_items.value.isEmpty()) {
                         val name = aiRepository.nicknameWithSuffix()
@@ -187,7 +202,7 @@ class ChatViewModel(
                 } else {
                     localTurn(parsed, input, requestMillis, zone)
                 }
-                writes.withLock { finishRequest(pendingMsg!!, input, turn, parsed.reply, requestMillis) }
+                writes.withLock { history.withConversationLock { finishRequest(pendingMsg!!, input, turn, parsed.reply, requestMillis) } }
             } catch (cancelled: CancellationException) {
                 // Durable PENDING rows become INTERRUPTED on the next visit.
                 throw cancelled
@@ -250,10 +265,7 @@ class ChatViewModel(
     }
 
     private fun localParse(input: String, cause: Throwable? = null): AiParseResult {
-        val drafts = LocalBillParser.parse(input).map { draft ->
-            draft.copy(category = CategoryEngine.suggest(draft.detail, categories.value)?.name ?: "未分类")
-        }
-        return AiParseResult(bills = drafts, reply = fallbackReply(drafts.isEmpty(), cause))
+        return offlineResult(input, cause, categories.value)
     }
 
     // 降级文案的实现见 companion：纯函数，单测可直接断言「每种失败都有专属说法」。
@@ -272,6 +284,15 @@ class ChatViewModel(
         requestMillis: Long
     ) {
         when (turn) {
+            is AiTurn.AppAction -> {
+                val card = pendingMsg.copy(kind = "APP_ACTION", content = "", rawInput = input,
+                    draftPayload = AppActionCodec.encode(turn.payload), status = "EDITING")
+                history.update(card)
+                replace(card.toUi())
+                appendReply("阿噜把操作列在卡片里了，点确认后才会执行～")
+                clearPending()
+                return
+            }
             is AiTurn.Pending -> {
                 // 追问本身就是模型给的 reply，直接原样显示，同时把挂起态落库。
                 val text = turn.reply.ifBlank { "这笔多少钱是花在哪儿啦？阿噜先记着～" }
@@ -350,7 +371,7 @@ class ChatViewModel(
     /** 挂起账离场。它已经完成使命（被补全 / 被放弃 / 被指令或闲聊取代）。 */
     private suspend fun clearPending() {
         if (_pending.value == null) return
-        runCatching { history.clearPending() }
+        history.clearPending()
         _pending.value = null
     }
 
@@ -377,6 +398,7 @@ class ChatViewModel(
         // Synchronous guard closes the double-tap window before the coroutine starts.
         replace(card.copy(status = ChatItem.DraftCard.Status.SAVING))
         val confirmedAt = System.currentTimeMillis()
+        val generation = history.conversationGeneration.value
         val finalCard = card.copy(drafts = card.drafts.map {
             if (it.checked && it.timestamp == null) it.copy(timestamp = confirmedAt, timeHint = "按确认入账的时间记录") else it
         })
@@ -388,9 +410,13 @@ class ChatViewModel(
                 }
                 replace(finalCard.copy(status = ChatItem.DraftCard.Status.CONFIRMED, savedCount = saved))
                 writes.withLock {
-                    appendReply("记好了，$saved 笔账已放进账本 ♡")
-                    val name = aiRepository.nicknameWithSuffix()
-                    personaEngine.nextSaveQuip(System.currentTimeMillis(), name)?.let { appendReply(it) }
+                    history.withConversationLock {
+                        if (history.conversationGeneration.value == generation) {
+                            appendReply("记好了，$saved 笔账已放进账本 ♡")
+                            val name = aiRepository.nicknameWithSuffix()
+                            personaEngine.nextSaveQuip(System.currentTimeMillis(), name)?.let { appendReply(it) }
+                        }
+                    }
                 }
             } catch (cancelled: CancellationException) { throw cancelled
             } catch (_: Exception) {
@@ -435,6 +461,75 @@ class ChatViewModel(
         }
     }
 
+    fun deleteDraft(cardId: Long) {
+        val card = findCard(cardId)?.takeIf { it.status == ChatItem.DraftCard.Status.EDITING } ?: return
+        replace(card.copy(status = ChatItem.DraftCard.Status.SAVING))
+        val generation = history.conversationGeneration.value
+        viewModelScope.launch {
+            try {
+                writes.withLock {
+                    check(history.deleteDraft(cardId) == 1) { "草稿状态已变化" }
+                    replace(card.copy(status = ChatItem.DraftCard.Status.DELETED))
+                    history.withConversationLock {
+                        if (history.conversationGeneration.value == generation) appendReply("这张草稿已经删除，没有记入账本。")
+                    }
+                }
+            } catch (cancelled: CancellationException) { throw cancelled
+            } catch (_: Exception) {
+                val stored = try { history.getById(cardId) } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { null }
+                replace(stored?.toUi() ?: card)
+                _error.value = if (stored?.status == "DELETED") "草稿已删除，回应稍后再补。" else "草稿没有删成功，请再试一次。"
+            }
+        }
+    }
+
+    fun confirmAppAction(cardId: Long) {
+        val card = (_items.value.find { it.id == cardId } as? ChatItem.AppActionCard)
+            ?.takeIf { it.status == ChatItem.AppActionCard.Status.EDITING || it.status == ChatItem.AppActionCard.Status.NEEDS_RETRY } ?: return
+        replace(card.copy(status = ChatItem.AppActionCard.Status.SAVING))
+        val generation = history.conversationGeneration.value
+        viewModelScope.launch {
+            try {
+                writes.withLock {
+                    val reply = aiRepository.commitAppAction(cardId)
+                    history.withConversationLock {
+                        if (history.conversationGeneration.value == generation) {
+                            history.getById(cardId)?.toUi()?.let(::replace)
+                            appendReply(reply)
+                        }
+                    }
+                }
+            } catch (cancelled: CancellationException) { throw cancelled
+            } catch (_: Exception) {
+                val saved = try { history.getById(cardId) } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { null }
+                replace(saved?.toUi() ?: card)
+                _error.value = when (saved?.status) {
+                    "CONFIRMED" -> "操作已经完成，回应稍后再补。"
+                    "APPLYING" -> "上次操作还没完成核实，设置可能已经保存，请点卡片继续完成。"
+                    else -> "暂时没能完成操作，请稍后重试。"
+                }
+            }
+        }
+    }
+
+    fun cancelAppAction(cardId: Long) {
+        val card = (_items.value.find { it.id == cardId } as? ChatItem.AppActionCard)
+            ?.takeIf { it.status == ChatItem.AppActionCard.Status.EDITING } ?: return
+        replace(card.copy(status = ChatItem.AppActionCard.Status.SAVING))
+        viewModelScope.launch {
+            try {
+                writes.withLock {
+                    history.withConversationLock {
+                        val stored = checkNotNull(history.getById(cardId))
+                        if (stored.status == "EDITING") history.update(stored.copy(status = "DISMISSED"))
+                        history.getById(cardId)?.toUi()?.let(::replace)
+                    }
+                }
+            } catch (cancelled: CancellationException) { throw cancelled
+            } catch (_: Exception) { replace(card); _error.value = "取消没有保存成功，请重试。" }
+        }
+    }
+
     // ---------- 改账 / 删账确认卡 ----------
 
     fun toggleCommandItem(cardId: Long, billId: Long) {
@@ -456,6 +551,7 @@ class ChatViewModel(
         val card = findCommandCard(cardId)?.takeIf { it.status == ChatItem.CommandCard.Status.EDITING } ?: return
         if (card.pendingCount <= 0) return
         replace(card.copy(status = ChatItem.CommandCard.Status.SAVING))
+        val generation = history.conversationGeneration.value
         _error.value = null
         viewModelScope.launch {
             try {
@@ -480,7 +576,9 @@ class ChatViewModel(
                     return@launch
                 }
                 writes.withLock {
-                    appendReply(commandResultLine(card.kind, applied))
+                    history.withConversationLock {
+                        if (history.conversationGeneration.value == generation) appendReply(commandResultLine(card.kind, applied))
+                    }
                 }
             } catch (cancelled: CancellationException) { throw cancelled
             } catch (_: Exception) {
@@ -544,11 +642,9 @@ class ChatViewModel(
         "DRAFT" -> try {
             ChatItem.DraftCard(id, rawInput, DraftHistoryCodec.decode(draftPayload), when (status) {
                 "CONFIRMED" -> ChatItem.DraftCard.Status.CONFIRMED
-                "DISMISSED" -> ChatItem.DraftCard.Status.CANCELLED
-                // 兜底：已删草稿正常走不到这里（loadHistory 已过滤），
-                // 但万一漏过来也必须落成「不可交互」——绝不能当成活跃草稿，
-                // 否则用户点「记录」只会吃一个红色报错（这个 bug 真实发生过）。
-                "DELETED" -> ChatItem.DraftCard.Status.CANCELLED
+                "DISMISSED" -> ChatItem.DraftCard.Status.EDITING
+                // A deleted draft is a non-interactive tombstone.
+                "DELETED" -> ChatItem.DraftCard.Status.DELETED
                 else -> ChatItem.DraftCard.Status.EDITING
             }, savedCount)
         } catch (_: Exception) {
@@ -558,17 +654,29 @@ class ChatViewModel(
         // 一次性跳转卡：正文 + 可点选项（点过即整条销毁，见 consumeActionCard）。
         "ACTION" -> ChatItem.ActionCard(id, content, ActionCardCodec.decode(draftPayload))
 
+        "APP_ACTION" -> AppActionCodec.decode(draftPayload)?.let { payload ->
+            ChatItem.AppActionCard(id, payload, when (status) {
+                "CONFIRMED" -> ChatItem.AppActionCard.Status.DONE
+                "APPLYING" -> ChatItem.AppActionCard.Status.NEEDS_RETRY
+                "DISMISSED", "DELETED" -> ChatItem.AppActionCard.Status.CANCELLED
+                else -> ChatItem.AppActionCard.Status.EDITING
+            })
+        } ?: ChatItem.GuluMsg(id, "这张操作卡已无法读取，请重新告诉阿噜要做什么。")
+
         "COMMAND" -> {
             val payload = CommandCardCodec.decode(draftPayload)
-            if (payload == null || payload.items.isEmpty()) {
+            val commandKind = payload?.let { p -> CommandKind.entries.firstOrNull { it.name.equals(p.kind, true) } }
+            if (payload == null || payload.items.isEmpty() || commandKind == null) {
                 ChatItem.GuluMsg(id, "这张旧变更卡暂时无法展示。原话：$rawInput")
             } else {
-                val kind = CommandKind.entries.firstOrNull { it.name.equals(payload.kind, true) }
-                    ?: CommandKind.UPDATE
-                val done = CommandCardCodec.pendingCount(payload) <= 0
+                val done = status == "CONFIRMED" || CommandCardCodec.pendingCount(payload) <= 0
                 ChatItem.CommandCard(
-                    id = id, kind = kind, params = payload.items,
-                    status = if (done) ChatItem.CommandCard.Status.DONE else ChatItem.CommandCard.Status.EDITING,
+                    id = id, kind = commandKind, params = payload.items,
+                    status = when {
+                        status == "DISMISSED" || status == "DELETED" -> ChatItem.CommandCard.Status.CANCELLED
+                        done -> ChatItem.CommandCard.Status.DONE
+                        else -> ChatItem.CommandCard.Status.EDITING
+                    },
                     appliedCount = payload.alreadyApplied
                 )
             }
@@ -600,8 +708,18 @@ class ChatViewModel(
     private fun trimAmount(value: Double) = java.math.BigDecimal.valueOf(value).stripTrailingZeros().toPlainString()
 
     companion object {
+        internal fun offlineResult(input: String, cause: Throwable? = null, categories: List<CategoryEntity> = emptyList()): AiParseResult {
+            if (ChatIntent.requiresOnlineAction(input)) return AiParseResult(
+                reply = fallbackReply(true, cause) + "\n修改账单和设置需要在线处理，请在 AI 服务恢复后重试；这次没有新增或改动账单。"
+            )
+            val drafts = LocalBillParser.parse(input).map { draft ->
+                draft.copy(category = CategoryEngine.suggest(draft.detail, categories)?.name ?: "未分类")
+            }
+            return AiParseResult(bills = drafts, reply = fallbackReply(drafts.isEmpty(), cause))
+        }
+
         private val NAV_TARGETS = setOf(
-            NavTargets.TRASH, NavTargets.TRASH_DRAFT, NavTargets.SETTINGS, NavTargets.ADD_BILL
+            NavTargets.TRASH, NavTargets.TRASH_DRAFT, NavTargets.SETTINGS, NavTargets.ADD_BILL, NavTargets.CHECK_UPDATE
         )
 
         /**

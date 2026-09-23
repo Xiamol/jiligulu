@@ -18,7 +18,8 @@ data class BillDetailState(
     val isLoading: Boolean = true,
     val bill: BillEntity? = null,
     val categoryName: String = "未分类",
-    val icon: String = "🧾",
+    val icon: String = "",
+    val colorHue: Float = 0f,
     val isSaving: Boolean = false,
     val isComplete: Boolean = false,
     val error: String? = null
@@ -41,7 +42,7 @@ class BillDetailViewModel(
                 }.collect { (bill, category) ->
                     _state.update { it.copy(isLoading = false, bill = bill,
                         categoryName = CategoryLabels.displayName(category?.name ?: "未分类"),
-                        icon = category?.iconValue?.ifBlank { "🧾" } ?: "🧾") }
+                        icon = category?.iconValue.orEmpty(), colorHue = category?.colorHue ?: 0f) }
                 }
             } catch (error: CancellationException) {
                 throw error

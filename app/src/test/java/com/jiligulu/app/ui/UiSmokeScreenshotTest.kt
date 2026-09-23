@@ -23,17 +23,23 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.printToString
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.test.core.app.ActivityScenario
 import androidx.test.platform.app.InstrumentationRegistry
-import com.jiligulu.app.data.reminder.WaterReminderWorker
+import com.jiligulu.app.data.reminder.WaterReminderNotifications
 import com.jiligulu.app.ui.startup.StartupScreen
 import com.jiligulu.app.ui.theme.GuluTheme
 import com.jiligulu.app.JiliguluApp
 import com.jiligulu.app.MainActivity
 import com.jiligulu.app.data.local.entity.BillType
 import com.jiligulu.app.data.local.entity.ChatMessageEntity
+import com.jiligulu.app.ui.chat.DraftHistoryCodec
+import com.jiligulu.app.ui.chat.DraftUi
+import com.jiligulu.app.core.ai.AiAppAction
+import com.jiligulu.app.ui.chat.AppActionCodec
+import com.jiligulu.app.ui.chat.AppActionPayload
 import com.jiligulu.app.data.prefs.UserPrefs
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -147,6 +153,13 @@ class UiSmokeScreenshotTest {
             compose.onNodeWithContentDescription("设置").performClick()
             awaitText("保存设置")
             capture("settings-light")
+            scrollSettingsTo("阿噜使用手册")
+            compose.onNodeWithText("阿噜使用手册").performClick()
+            awaitText("阿噜使用手册 ♡")
+            awaitText("见面啦，我是阿噜")
+            capture("handbook-light", dialog = true)
+            compose.onNodeWithText("知道啦").performClick()
+            compose.onNodeWithText("阿噜使用手册 ♡").assertDoesNotExist()
             compose.onNodeWithContentDescription("返回").performClick()
             compose.onNodeWithText("账本").performClick()
             compose.onNode(hasScrollToIndexAction()).performScrollToIndex(0)
@@ -178,7 +191,7 @@ class UiSmokeScreenshotTest {
             compose.runOnIdle {
                 InstrumentationRegistry.getInstrumentation().callActivityOnNewIntent(activity,
                     // Preserve ActivityScenario's tracking marker while supplying the real notification extra.
-                    Intent(activity.intent).putExtra(WaterReminderWorker.EXTRA_WATER_REMINDER, cup.id))
+                    Intent(activity.intent).putExtra(WaterReminderNotifications.EXTRA_WATER_REMINDER, cup.id))
             }
             awaitWaterCup()
             capture("water-waiting")
@@ -222,6 +235,28 @@ class UiSmokeScreenshotTest {
             compose.onNodeWithText("检查更新").assertIsEnabled()
             capture("update-settings")
 
+            scrollSettingsTo("历史对话", towardTop = true)
+            val history = app.container.chatHistoryRepository
+            val keptBills = runBlocking { app.container.billRepository.recent(30) }
+            compose.onNodeWithTag("clear-history-entry").performClick()
+            awaitText("给聊天腾个小空位？")
+            capture("clear-history-dialog", dialog = true)
+            compose.onNodeWithText("先留着").performClick()
+            assertTrue(runBlocking { history.getAll().any { it.content == "历史记录验收" } })
+            compose.onNodeWithTag("clear-history-entry").performClick()
+            compose.onNodeWithText("清空对话").performClick()
+            awaitText("聊天已清空，账单和未入账草稿都还在。")
+            runBlocking {
+                assertEquals(keptBills, app.container.billRepository.recent(30))
+                assertTrue(history.getAll().none { it.content == "历史记录验收" })
+            }
+            compose.onNodeWithContentDescription("返回").performClick()
+            awaitText("对话记账")
+            compose.onNodeWithText("对话记账").performClick()
+            awaitText("今天花了什么？补记也可以说", substring = true)
+            compose.onNodeWithText("历史记录验收").assertDoesNotExist()
+            compose.onNodeWithText("小小的账本，也装得下大大的生活。阿噜 ♡").assertDoesNotExist()
+
             // Render the real entry component separately; coordinator timing and lifecycle leases
             // are covered by StartupViewModelTest without ActivityScenario's paused-loop deadlock.
             compose.runOnIdle {
@@ -234,7 +269,121 @@ class UiSmokeScreenshotTest {
         }
     }
 
-    private fun awaitText(text: String) {
+    @Test(timeout = 120_000)
+    fun oldDismissedDraftCanBeCollapsedEditedReopenedAndConfirmedOnce() {
+        val app = RuntimeEnvironment.getApplication() as JiliguluApp
+        val history = app.container.chatHistoryRepository
+        val draftId = runBlocking {
+            app.container.userPrefs.setNickname("路陌")
+            app.container.userPrefs.setWaterEnabled(false)
+            app.container.userPrefs.setUpdateRepository("")
+            history.insert(ChatMessageEntity(kind = "DRAFT", status = "DISMISSED",
+                rawInput = "12块补记午饭", createdAt = System.currentTimeMillis(),
+                draftPayload = DraftHistoryCodec.encode(listOf(DraftUi(amountText = "12", categoryName = "吃饭",
+                    detail = "补记午饭", timestamp = System.currentTimeMillis())))))
+        }
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { activity = it }
+            awaitText("对话记账")
+            compose.onNodeWithText("对话记账").performClick()
+            awaitText("展开 · 编辑草稿")
+            compose.onNodeWithTag("draft-amount-$draftId-0").assertDoesNotExist()
+            capture("draft-collapsed")
+            compose.onNodeWithTag("draft-expand-$draftId").performClick()
+            compose.onNodeWithTag("draft-amount-$draftId-0").performTextReplacement("15.50")
+            capture("draft-expanded")
+            compose.onNodeWithTag("draft-collapse-$draftId").performClick()
+            compose.onNodeWithTag("draft-amount-$draftId-0").assertDoesNotExist()
+            runBlocking {
+                withTimeout(5_000) {
+                    history.observeAll().first { messages ->
+                        messages.firstOrNull { it.id == draftId }?.let {
+                            DraftHistoryCodec.decode(it.draftPayload).single().amountText == "15.50"
+                        } == true
+                    }
+                }
+                assertEquals("DISMISSED", history.getById(draftId)!!.status)
+            }
+            compose.onNodeWithContentDescription("返回").performClick()
+            awaitText("对话记账")
+            compose.onNodeWithText("对话记账").performClick()
+            awaitText("展开 · 编辑草稿")
+            compose.onNodeWithText("−¥15.50").assertIsDisplayed()
+            compose.onNodeWithTag("draft-amount-$draftId-0").assertDoesNotExist()
+            compose.onNodeWithTag("draft-expand-$draftId").performClick()
+            compose.onNodeWithTag("draft-confirm-$draftId").performClick()
+            awaitText("记好了，1 笔账已放进账本 ♡")
+            runBlocking {
+                assertEquals("CONFIRMED", history.getById(draftId)!!.status)
+                val bills = app.container.billRepository.recent(30).filter { it.detail == "补记午饭" }
+                assertEquals(1, bills.size)
+                assertEquals(1550L, bills.single().amountFen)
+            }
+            compose.onNodeWithTag("draft-confirm-$draftId").assertDoesNotExist()
+            compose.onNodeWithTag("draft-expand-$draftId").assertDoesNotExist()
+            compose.onNodeWithContentDescription("返回").performClick()
+            awaitText("对话记账")
+            val deletedDraftId = runBlocking {
+                history.insert(ChatMessageEntity(kind = "DRAFT", status = "EDITING", rawInput = "不要的草稿",
+                    createdAt = System.currentTimeMillis(), draftPayload = DraftHistoryCodec.encode(
+                        listOf(DraftUi(amountText = "8", categoryName = "吃饭", detail = "这笔不入账")))))
+            }
+            compose.onNodeWithText("对话记账").performClick()
+            awaitText("展开 · 编辑草稿")
+            compose.onNodeWithTag("draft-expand-$deletedDraftId").performClick()
+            compose.onNodeWithTag("draft-delete-$deletedDraftId").performClick()
+            awaitText("这张草稿不要了吗？")
+            compose.onNodeWithText("再留一会儿").performClick()
+            assertEquals("EDITING", runBlocking { history.getById(deletedDraftId)!!.status })
+            compose.onNodeWithTag("draft-delete-$deletedDraftId").performClick()
+            compose.onNodeWithTag("draft-delete-confirm-$deletedDraftId").performClick()
+            awaitText("草稿已删除")
+            compose.onNodeWithTag("draft-expand-$deletedDraftId").assertDoesNotExist()
+            compose.onNodeWithTag("draft-confirm-$deletedDraftId").assertDoesNotExist()
+            assertEquals("DELETED", runBlocking { history.getById(deletedDraftId)!!.status })
+            assertTrue(runBlocking { app.container.billRepository.recent(30).none { it.detail == "这笔不入账" } })
+            capture("draft-deleted")
+        }
+    }
+
+    @Test(timeout = 120_000)
+    fun appSettingsCardShowsTheProposalAndCancellationPreservesSettings() {
+        val app = RuntimeEnvironment.getApplication() as JiliguluApp
+        val prefs = app.container.userPrefs
+        val history = app.container.chatHistoryRepository
+        val cardId = runBlocking {
+            prefs.setNickname("路陌")
+            prefs.setWaterSettings(enabled = false, intervalMinutes = 60)
+            prefs.setUpdateRepository("")
+            history.insert(ChatMessageEntity(kind = "APP_ACTION", status = "EDITING",
+                rawInput = "打开提醒，每15分钟喝水", createdAt = System.currentTimeMillis(),
+                draftPayload = AppActionCodec.encode(AppActionPayload(
+                    action = AiAppAction(kind = AiAppAction.WATER_SETTINGS, enabled = true, intervalMinutes = 15),
+                    summary = "喝水提醒：开启\n提醒间隔：60 → 15 分钟"))))
+        }
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { activity = it }
+            awaitText("对话记账")
+            compose.onNodeWithText("对话记账").performClick()
+            awaitText("确认调整")
+            compose.onNodeWithText("喝水提醒：开启\n提醒间隔：60 → 15 分钟").assertIsDisplayed()
+            runBlocking {
+                assertEquals(false, prefs.waterEnabled.first())
+                assertEquals(60, prefs.waterIntervalMinutes.first())
+            }
+            capture("app-action-confirmation")
+            compose.onNodeWithTag("app-action-cancel").performClick()
+            awaitText("已取消，没有执行这次操作")
+            runBlocking {
+                assertEquals("DISMISSED", history.getById(cardId)!!.status)
+                assertEquals(false, prefs.waterEnabled.first())
+                assertEquals(60, prefs.waterIntervalMinutes.first())
+            }
+            compose.onNodeWithTag("app-action-confirm").assertDoesNotExist()
+        }
+    }
+
+    private fun awaitText(text: String, substring: Boolean = false) {
         try {
             compose.waitUntil(15_000) {
                 // DataStore resumes on Android's Handler/Choreographer, independently of the
@@ -242,7 +391,7 @@ class UiSmokeScreenshotTest {
                 // can publish its next frame instead of leaving the first loading composition.
                 shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(16))
                 compose.onAllNodesWithTag("startup-animation").fetchSemanticsNodes().isEmpty() &&
-                    compose.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty()
+                    compose.onAllNodesWithText(text, substring = substring).fetchSemanticsNodes().isNotEmpty()
             }
         } catch (failure: Throwable) {
             runCatching { capture("failure-screen") }
@@ -255,7 +404,8 @@ class UiSmokeScreenshotTest {
                 }
             } }.getOrElse { "Preference read failed: $it" }
             File("build/reports/ui/failure-semantics.txt").apply { parentFile?.mkdirs() }
-                .writeText("Waiting for '$text'\n$flowState\n$tree\n$failure")
+                .writeText("Waiting for '$text'\n$flowState\n$tree\n$failure\n" +
+                    org.robolectric.shadows.ShadowLog.getLogsForTag("ConversationHistory").joinToString("\n") { it.throwable?.stackTraceToString().orEmpty() })
             throw AssertionError("Waiting for '$text': $flowState\n$tree", failure)
         }
         compose.waitForIdle()
@@ -279,12 +429,12 @@ class UiSmokeScreenshotTest {
         compose.waitForIdle()
     }
 
-    private fun scrollSettingsTo(text: String) {
+    private fun scrollSettingsTo(text: String, towardTop: Boolean = false) {
         // A bounded single action + a frame avoids Compose 1.7's synchronous search-scroll loop.
         repeat(12) {
             if (runCatching { compose.onNodeWithText(text).assertIsDisplayed() }.isSuccess) return
             compose.onNodeWithTag("settings-list").performSemanticsAction(SemanticsActions.ScrollBy) {
-                it(0f, 400f)
+                it(0f, if (towardTop) -400f else 400f)
             }
             compose.mainClock.advanceTimeBy(250)
             shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(16))
@@ -326,7 +476,8 @@ class UiSmokeScreenshotTest {
         val output = File("build/reports/ui/$name.png")
         checkNotNull(output.parentFile).mkdirs()
         output.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
-        assertTrue("Screenshot must have phone-sized bounds", bitmap.width >= 411 && bitmap.height >= 800)
+        // Dialogs intentionally wrap a short confirmation; only full screens need phone height.
+        assertTrue("Screenshot must have visible bounds", bitmap.width >= 411 && bitmap.height >= if (dialog) 160 else 800)
         val colors = mutableSetOf<Int>()
         for (x in 0 until bitmap.width step 31) {
             for (y in 0 until bitmap.height step 31) colors += bitmap.getPixel(x, y)

@@ -292,18 +292,18 @@ class DatabaseUpgradeTest {
     }
 
     @Test
-    fun dismissedDraftCannotBeConfirmedOrEdited() = runBlocking {
-        val repo = ChatHistoryRepository(open("dismissed.db"))
+    fun deletedDraftCannotBeConfirmedOrEdited() = runBlocking {
+        val repo = ChatHistoryRepository(open("deleted.db"))
         val id = repo.insert(ChatMessageEntity(kind = "DRAFT", status = "EDITING"))
-        assertEquals(1, repo.dismissDraft(id))
+        assertEquals(1, repo.deleteDraft(id))
         assertEquals(0, repo.updateDraft(id, "stale edits"))
         var callbackInvoked = false
         try {
             repo.confirmDraftAtomically(id) { callbackInvoked = true; 1 }
-            fail("Cancelled draft must reject confirmation")
+            fail("Deleted draft must reject confirmation")
         } catch (_: IllegalStateException) { }
         assertFalse(callbackInvoked)
-        assertEquals("DISMISSED", repo.getById(id)?.status)
+        assertEquals("DELETED", repo.getById(id)?.status)
     }
 
     @Test

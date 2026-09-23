@@ -143,7 +143,7 @@ private fun HomeContent(
                         bottomStart = if (index == day.bills.lastIndex) 16.dp else 0.dp
                     )
                     LedgerBillRow(
-                        icon = bill.icon, colorHue = bill.colorHue, title = bill.title,
+                        icon = bill.icon, colorHue = bill.colorHue, title = bill.title, categoryName = bill.categoryName,
                         subtitle = bill.subtitle, amountText = bill.amountText, isExpense = bill.isExpense,
                         onClick = { onBillClick(bill.id) },
                         modifier = Modifier.animateItem().clip(shape),

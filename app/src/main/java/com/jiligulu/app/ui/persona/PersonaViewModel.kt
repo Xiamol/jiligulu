@@ -10,7 +10,7 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import com.jiligulu.app.JiliguluApp
 import com.jiligulu.app.data.prefs.UserPrefs
 import com.jiligulu.app.data.prefs.PendingWater
-import com.jiligulu.app.data.reminder.WaterReminderWorker
+import com.jiligulu.app.data.reminder.WaterReminderNotifications
 import com.jiligulu.app.domain.persona.PersonaEngine
 import com.jiligulu.app.domain.persona.PersonaEventBus
 import com.jiligulu.app.domain.persona.QuipLibrary
@@ -152,7 +152,7 @@ class PersonaViewModel(
         finishingWater = true
         viewModelScope.launch {
             try {
-                if (prefs.completeWater(id)) WaterReminderWorker.cancelNotification(app, id)
+                if (prefs.completeWater(id)) WaterReminderNotifications.cancel(app, id)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {

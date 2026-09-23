@@ -52,6 +52,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.jiligulu.app.ui.theme.ExpenseGreen
+import com.jiligulu.app.ui.components.CategoryBadge
+import com.jiligulu.app.domain.color.GoldenAnglePalette
 import com.jiligulu.app.ui.theme.GuluBrandFont
 import com.jiligulu.app.ui.theme.IncomeRed
 import java.text.SimpleDateFormat
@@ -333,7 +335,7 @@ private fun TrashBillCard(
                 onCheckedChange = { onClick() },
                 enabled = enabled
             )
-            Text(item.icon, style = MaterialTheme.typography.titleLarge)
+            CategoryBadge(item.categoryName, item.icon, tint = GoldenAnglePalette.colorForHue(item.colorHue))
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Text(

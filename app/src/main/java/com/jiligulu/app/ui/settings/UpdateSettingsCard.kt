@@ -13,6 +13,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -42,7 +43,7 @@ private fun briefNotes(notes: String): String {
 }
 
 @Composable
-fun UpdateSettingsCard() {
+fun UpdateSettingsCard(checkOnOpen: Boolean = false) {
     val app = LocalContext.current.applicationContext as JiliguluApp
     val automatic by app.container.userPrefs.autoCheckUpdates.collectAsStateWithLifecycle(true)
     val checkedAt by app.container.userPrefs.updateCheckedAt.collectAsStateWithLifecycle(0L)
@@ -50,6 +51,13 @@ fun UpdateSettingsCard() {
     val scope = rememberCoroutineScope()
     val uri = LocalUriHandler.current
     var error by remember { mutableStateOf<String?>(null) }
+    var requestedOnOpen by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(checkOnOpen) {
+        if (checkOnOpen && !requestedOnOpen) {
+            requestedOnOpen = true
+            app.container.updates.check()
+        }
+    }
     LedgerCard {
         Text("应用更新", style = MaterialTheme.typography.titleMedium)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {

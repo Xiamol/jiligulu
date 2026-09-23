@@ -27,7 +27,8 @@ data class BillUi(
     val subtitle: String,
     val amountText: String,
     val isExpense: Boolean,
-    val entity: BillEntity
+    val entity: BillEntity,
+    val categoryName: String = "未分类"
 )
 
 data class DayGroupUi(
@@ -103,7 +104,8 @@ class HomeViewModel(
         val sign = if (isExpense) "-" else "+"
         return BillUi(
             id = id,
-            icon = category?.iconValue?.ifBlank { "❓" } ?: "❓",
+            icon = category?.iconValue.orEmpty(),
+            categoryName = CategoryLabels.displayName(category?.name.orEmpty()),
             colorHue = category?.colorHue ?: 0f,
             colorIndex = category?.colorIndex ?: 0,
             title = detail.ifBlank { CategoryLabels.displayName(category?.name.orEmpty()) },

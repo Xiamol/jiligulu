@@ -4,9 +4,31 @@ import androidx.room.withTransaction
 import com.jiligulu.app.data.local.AppDatabase
 import com.jiligulu.app.data.local.entity.ChatMessageEntity
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 class ChatHistoryRepository(private val database: AppDatabase) {
     private val dao = database.chatMessageDao()
+    private val generation = MutableStateFlow(0L)
+    private val conversationLock = Mutex()
+    val conversationGeneration = generation.asStateFlow()
+
+    /** Serializes settings actions (DataStore + card state) with an explicit history reset. */
+    suspend fun <T> withConversationLock(block: suspend () -> T): T = conversationLock.withLock { block() }
+
+    /** The settings confirmation is the only caller. Never erase a response still in flight. */
+    suspend fun clearConversation(): Boolean = withConversationLock {
+        val cleared = database.withTransaction {
+            if (dao.hasPendingResponse()) return@withTransaction false
+            dao.clearConversationKeepingDrafts()
+            true
+        }
+        if (cleared) generation.update { it + 1 }
+        cleared
+    }
 
     fun observeAll(): Flow<List<ChatMessageEntity>> = dao.observeAll()
     suspend fun getAll(): List<ChatMessageEntity> = dao.getAll()
@@ -112,7 +134,7 @@ class ChatHistoryRepository(private val database: AppDatabase) {
             val draft = checkNotNull(dao.getById(messageId)) { "账单草稿不存在" }
             check(draft.kind == "DRAFT") { "这条消息不是账单草稿" }
             if (draft.status == "CONFIRMED") return@withTransaction draft.savedCount
-            check(draft.status == "EDITING") { "这条账单草稿已经取消" }
+            check(draft.status in setOf("EDITING", "DISMISSED")) { "这条账单草稿已不可编辑" }
             if (finalPayload != null) check(dao.updateDraft(messageId, finalPayload) == 1)
             val count = insertBills()
             check(count > 0) { "请至少选择一笔有效账单" }

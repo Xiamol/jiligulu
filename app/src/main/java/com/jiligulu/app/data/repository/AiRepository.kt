@@ -2,11 +2,13 @@ package com.jiligulu.app.data.repository
 
 import android.content.Context
 import com.jiligulu.app.core.ai.AiConfig
+import com.jiligulu.app.core.ai.AiAppAction
 import com.jiligulu.app.core.ai.AiOption
 import com.jiligulu.app.core.ai.AiParseResult
 import com.jiligulu.app.core.ai.ChatTurn
 import com.jiligulu.app.core.ai.DeepSeekClient
 import com.jiligulu.app.core.ai.SvgIconValidator
+import com.jiligulu.app.core.ai.NavTargets
 import com.jiligulu.app.core.util.Formatters
 import com.jiligulu.app.data.local.entity.BillEntity
 import com.jiligulu.app.data.local.entity.BillType
@@ -15,6 +17,7 @@ import com.jiligulu.app.data.local.entity.ChatMessageEntity
 import com.jiligulu.app.data.local.entity.CreatedBy
 import com.jiligulu.app.data.local.entity.IconType
 import com.jiligulu.app.data.prefs.UserPrefs
+import com.jiligulu.app.data.reminder.WaterReminderScheduler
 import com.jiligulu.app.domain.category.CategoryLabels
 import com.jiligulu.app.domain.chat.ChatContext
 import com.jiligulu.app.domain.chat.ChatContextBuilder
@@ -25,6 +28,12 @@ import com.jiligulu.app.ui.chat.CommandCardPayload
 import com.jiligulu.app.ui.chat.CommandItem
 import com.jiligulu.app.ui.chat.CommandKind
 import com.jiligulu.app.ui.chat.PendingDraft
+import com.jiligulu.app.ui.chat.AppActionCodec
+import com.jiligulu.app.ui.chat.AppActionPayload
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.flow.first
 import java.time.Instant
 import java.time.ZoneId
@@ -71,6 +80,7 @@ sealed interface AiTurn {
      * 或问「回收站在哪」时出现；选项的跳转/追问渲染归 T04，这里只携带归一化后的选项。
      */
     data class Choices(val reply: String, val options: List<AiOption>) : AiTurn
+    data class AppAction(val payload: AppActionPayload) : AiTurn
 }
 
 /**
@@ -85,7 +95,12 @@ class AiRepository(
     private val userPrefs: UserPrefs,
     private val chatHistoryRepository: ChatHistoryRepository,
     /** R4：恢复时解析内置「待定」兜底分类（CategoryAdminRepository.vacuumId）。 */
-    private val categoryAdminRepository: CategoryAdminRepository
+    private val categoryAdminRepository: CategoryAdminRepository,
+    /** Isolated platform side effect, after the durable settings commit; replaceable in failure tests. */
+    private val synchronizeWaterReminder: suspend (AiAppAction) -> Unit = { _ ->
+        if (!userPrefs.waterEnabled.first()) WaterReminderScheduler.cancel(context)
+        else WaterReminderScheduler.restore(context)
+    }
 ) {
     /** R9：逐字不变的固定 system 段；版本随 App 走，解析契约全在这一个资源里。 */
     private val systemPromptTemplate: String by lazy {
@@ -131,6 +146,10 @@ class AiRepository(
         )
         // R4：回收站候选（情况六 restore 的 target_id 来源）。是否注入由 ChatIntent.needsTrash 决定。
         val trashCandidates = billRepository.trashCandidates(BillRepository.TRASH_CANDIDATE_LIMIT)
+        val water = userPrefs.waterReminderState.first()
+        fun clock(minutes: Int) = "%02d:%02d".format(Locale.ROOT, minutes / 60, minutes % 60)
+        val appSettings = "【当前提醒设置】\n喝水提醒：${if (water.enabled) "开启" else "关闭"}；间隔：${water.intervalMinutes} 分钟；" +
+            "免打扰：${if (water.quietStartMinutes == water.quietEndMinutes) "关闭" else "${clock(water.quietStartMinutes)}—${clock(water.quietEndMinutes)}"}。"
         // R9：system 段逐字不变（缓存地基），动态内容全部走 context 段。
         val renderer = PromptRenderer(
             systemTemplate = systemPromptTemplate,
@@ -142,7 +161,8 @@ class AiRepository(
             candidates = candidates,
             pending = pending,
             zone = zone,
-            trashCandidates = trashCandidates
+            trashCandidates = trashCandidates,
+            appSettings = appSettings
         )
         val system = renderer.renderSystem()
         val contextBlock = renderer.renderContext(input)
@@ -165,6 +185,28 @@ class AiRepository(
         zone: ZoneId,
         pending: PendingDraft?
     ): AiTurn {
+        parsed.appAction?.let { action ->
+            if (!action.isValid || parsed.bills.isNotEmpty()) {
+                return AiTurn.Chat("这次操作还不够明确，阿噜先不动设置。请分开说要改什么～")
+            }
+            return when (action.kind) {
+                AiAppAction.WATER_SETTINGS -> {
+                    val normalized = freezeQuietSettings(action)
+                    AiTurn.AppAction(AppActionPayload(action = normalized, summary = waterActionSummary(normalized)))
+                }
+                AiAppAction.EMPTY_TRASH -> {
+                    val trash = billRepository.trash()
+                    val ids = trash.map { it.id }
+                    if (ids.isEmpty()) AiTurn.Chat("回收站里的账单已经空啦，草稿还好好留着 ♡")
+                    else AiTurn.AppAction(AppActionPayload(action = action, summary = buildString {
+                        append("彻底删除回收站现有的 ${ids.size} 笔账单")
+                        trash.take(8).forEach { append("\n${dayTime(it.timestamp, zone)} · ${it.detail.ifBlank { "账单" }} · ${Formatters.fenToYuanText(it.amountFen)} 元") }
+                        if (ids.size > 8) append("\n还有 ${ids.size - 8} 笔；需要逐笔核对可先去回收站查看。")
+                    }, trashIds = ids, trashDeletedAt = trash.associate { it.id to checkNotNull(it.deletedAt) }))
+                }
+                else -> AiTurn.Chat("阿噜还不会执行这个操作，可以到设置里看看～")
+            }
+        }
         val categories = categoryRepository.getAll()
         val candidates = PromptRenderer.candidatesFrom(
             billRepository.recent(BillRepository.CANDIDATE_SCAN_LIMIT), requestMillis, zone
@@ -180,12 +222,21 @@ class AiRepository(
         if (updates.isNotEmpty()) {
             val items = updates.mapNotNull { draft ->
                 val bill = byId[draft.targetId] ?: return@mapNotNull null
-                val newAmount = draft.amountYuan.takeIf { it.isFinite() && it > 0 }
+                val timeExpression = updateTimeExpression(input)
+                val hasOtherChange = draft.detail.isNotBlank() || draft.category.isNotBlank() || draft.note.isNotBlank() || timeExpression.isNotBlank()
+                val explicitlyZero = Regex("(?:金额|改成|改为|调到|改到)\\s*[¥￥]?\\s*(?:0(?:\\.0+)?|零)(?:\\s*[元块]|\\s*$)").containsMatchIn(input)
+                val newAmount = when {
+                    draft.amountYuan.isFinite() && draft.amountYuan > 0 -> draft.amountYuan
+                    draft.amountYuan == 0.0 && hasOtherChange && !explicitlyZero -> bill.amountFen / 100.0
+                    else -> null
+                }
                 if (newAmount == null) {
                     // 「改成 0」——这更像删账，让用户自己说清楚，别偷偷把账单改成 0。
                     return AiTurn.Chat(parsed.reply.ifBlank { "把金额改成 0 是想删掉它吗？说一声「删掉」阿噜就帮你收起来～" })
                 }
-                buildUpdateItem(bill, draft, newAmount, categoryNames, zone)
+                val resolved = BillTimeResolver.resolve(timeExpression, requestMillis = requestMillis, zone = zone)
+                if (resolved.needsReview) return AiTurn.Chat("这次要改的日期还不够具体，请告诉阿噜哪一天、几点～")
+                buildUpdateItem(bill, draft, newAmount, categoryNames, zone, resolved.timestamp ?: bill.timestamp)
             }
             if (items.isNotEmpty()) return AiTurn.Commands(parsed.reply.ifBlank { "这些要改的账，确认一下～" }, CommandKind.UPDATE, items)
             return AiTurn.Chat(parsed.reply.ifBlank { "阿噜没找到你说的那笔账，能说得再具体点儿吗？" })
@@ -216,10 +267,13 @@ class AiRepository(
                 parsed.navigate?.takeIf { it.isNotBlank() }?.let { listOf(AiOption(label = "", action = it)) }
                     ?: emptyList()
             }
-            if (choices.isNotEmpty()) return AiTurn.Choices(parsed.reply.ifBlank { "阿噜给你指条路～" }, choices)
+            if (choices.isNotEmpty()) return AiTurn.Choices(
+                if (choices.any { it.action.removePrefix("navigate:") == NavTargets.CHECK_UPDATE }) "点下面的卡片开始检查更新，结果会显示在设置页～"
+                else parsed.reply.ifBlank { "阿噜给你指条路～" }, choices
+            )
         }
 
-        val adds = parsed.bills.filter { it.isAdd || (!it.isUpdate && !it.isDelete && !it.isRestore) }
+        val adds = parsed.bills.filter { it.isAdd }
         // 模型报了「话没说完」；或者它这轮只回了一句话、又确实有挂着的账，就沿用挂起态。
         val carried = pending?.takeIf { adds.isEmpty() }
         val modelPending = parsed.pending?.takeIf { it.amountYuan > 0 }
@@ -267,27 +321,24 @@ class AiRepository(
         draft: com.jiligulu.app.core.ai.AiBillDraft,
         newAmount: Double,
         categoryNames: Map<Long, String>,
-        zone: ZoneId
+        zone: ZoneId,
+        timestamp: Long
     ): CommandItem {
         // 未提及的字段一律沿用原值——这是「不许自己编值」的落点。
         val detail = draft.detail.ifBlank { bill.detail }
-        val type = when {
-            draft.type.equals("INCOME", true) -> BillType.INCOME
-            draft.type.equals("EXPENSE", true) -> BillType.EXPENSE
-            else -> bill.type
-        }
+        // The update DAO does not change bill type. Never advertise a type change it cannot apply.
+        val type = bill.type
         val categoryName = draft.category.ifBlank { categoryNames[bill.categoryId].orEmpty() }
         val note = draft.note.ifBlank { bill.note }
-        val timestamp = bill.timestamp
         return CommandItem(
             billId = bill.id,
             title = detail.ifBlank { categoryName },
             categoryName = CategoryLabels.displayName(categoryName),
-            iconEmoji = draft.iconEmoji.ifBlank { "🧾" },
+            iconEmoji = draft.iconEmoji,
             isExpense = type == BillType.EXPENSE,
             before = summary(bill, categoryNames, zone),
             after = "%s · %s · %s 元 · %s".format(
-                dayTime(timestamp, zone), CategoryLabels.displayName(categoryName),
+                dayTime(timestamp, zone), detail.ifBlank { CategoryLabels.displayName(categoryName) },
                 trimAmount(newAmount), if (type == BillType.EXPENSE) "支出" else "收入"
             ) + if (note.isNotBlank()) " · $note" else "",
             checked = true,
@@ -341,12 +392,19 @@ class AiRepository(
     private fun summary(bill: BillEntity, categoryNames: Map<Long, String>, zone: ZoneId): String {
         val category = CategoryLabels.displayName(categoryNames[bill.categoryId].orEmpty())
         val extra = if (bill.note.isNotBlank()) " · ${bill.note}" else ""
-        return "${dayTime(bill.timestamp, zone)} · ${Formatters.fenToYuanText(bill.amountFen)} 元 · " +
+        return "${dayTime(bill.timestamp, zone)} · ${bill.detail.ifBlank { category }} · ${Formatters.fenToYuanText(bill.amountFen)} 元 · " +
             "${if (bill.type == BillType.EXPENSE) "支出" else "收入"}$extra"
     }
 
     private fun dayTime(millis: Long, zone: ZoneId): String =
         Instant.ofEpochMilli(millis).atZone(zone).format(DateTimeFormatter.ofPattern("M月d日 HH:mm", Locale.CHINA))
+
+    /** Date words identifying an existing bill are not a request to change its time. */
+    private fun updateTimeExpression(input: String): String {
+        val target = Regex("(?:改成|改为|改到|调到|更正为|实际是|应该是)\\s*(.+)")
+            .find(input)?.groupValues?.get(1).orEmpty()
+        return target.takeIf { BillTimeResolver.hasTimeExpression(it) }.orEmpty()
+    }
 
     // ---------- 上下文 ----------
 
@@ -360,10 +418,11 @@ class AiRepository(
         categories: List<CategoryEntity>,
         requestMillis: Long,
         zone: ZoneId
-    ): ChatContext = runCatching {
+    ): ChatContext = try {
         val bills = billRepository.recent(ChatContextBuilder.MAX_BILLS)
         ChatContextBuilder.build(bills, categories, requestMillis, zone)
-    }.getOrElse { ChatContext("", zone.id, emptyList()) }
+    } catch (cancelled: CancellationException) { throw cancelled
+    } catch (_: Exception) { ChatContextBuilder.build(emptyList(), categories, requestMillis, zone) }
 
     /**
      * 带回模型的多轮消息：只取真正的对话（USER / ASSISTANT 原文），草稿卡/指令卡一律不进上下文。
@@ -371,9 +430,10 @@ class AiRepository(
      * R9 之后历史改走 messages 数组，本轮输入则改由 `renderContext` 的 `用户这轮说：` 承载；
      * 因此这里必须把「本轮刚落库的那条 USER」剔掉，否则模型会把同一句话看到两遍（见 [chatTurnsFor]）。
      */
-    private suspend fun recentTurns(requestMillis: Long): List<ChatTurn> = runCatching {
+    private suspend fun recentTurns(requestMillis: Long): List<ChatTurn> = try {
         chatTurnsFor(chatHistoryRepository.getAll(), requestMillis)
-    }.getOrElse { emptyList() }
+    } catch (cancelled: CancellationException) { throw cancelled
+    } catch (_: Exception) { emptyList() }
 
     companion object {
         /**
@@ -427,7 +487,9 @@ class AiRepository(
             val confirmedAt = System.currentTimeMillis()
             valid.forEach { (item, fen) ->
                 val categoryName = item.categoryName.ifBlank { "未分类" }.lowercase()
-                val categoryId = existing[categoryName] ?: createCategoryFromDraft(item).also { existing[categoryName] = it }
+                val categoryId = existing[categoryName] ?: (
+                    if (item.isNewCategory) createCategoryFromDraft(item) else categoryAdminRepository.vacuumId()
+                ).also { existing[categoryName] = it }
                 billRepository.addFromAi(
                     amountFen = fen,
                     type = item.type,
@@ -454,17 +516,21 @@ class AiRepository(
         appliedAt: Long = System.currentTimeMillis()
     ): Int = chatHistoryRepository.withTransaction {
         val stored = checkNotNull(chatHistoryRepository.getById(cardId)) { "这张卡片不存在" }
-        val existing = CommandCardCodec.decode(stored.draftPayload) ?: payload
+        check(stored.kind == "COMMAND") { "这条消息不是账单变更卡" }
+        val existing = checkNotNull(CommandCardCodec.decode(stored.draftPayload)) { "变更卡内容无法读取" }
         val pending = CommandCardCodec.pendingCount(existing)
         if (pending <= 0) return@withTransaction 0
         if (stored.status != "EDITING") return@withTransaction 0
+        // Legacy payloads only recorded a count, not applied IDs. Replaying a guessed prefix is unsafe.
+        if (existing.alreadyApplied > 0) {
+            chatHistoryRepository.update(stored.copy(status = "CONFIRMED"))
+            return@withTransaction 0
+        }
 
         val selected = existing.items.filter { it.checked }.take(pending)
         // 三种动作都要认全：早先是 DELETE / 其余归 UPDATE 的二分法，
         // R4 加了 RESTORE 后若仍这么写，「恢复」会被当成「改账」执行（灾难）。
-        // 未知值仍容错为 UPDATE，保持既有行为。
-        val kind = CommandKind.entries.firstOrNull { it.name.equals(existing.kind, true) }
-            ?: CommandKind.UPDATE
+        val kind = requireNotNull(CommandKind.entries.firstOrNull { it.name.equals(existing.kind, true) }) { "不支持的账单操作" }
         val categoryIds = categoryRepository.getAll().associate { it.name.lowercase() to it.id }.toMutableMap()
         var applied = 0
 
@@ -498,9 +564,74 @@ class AiRepository(
 
         val updated = existing.copy(alreadyApplied = existing.alreadyApplied + applied, confirmFailed = false)
         chatHistoryRepository.update(
-            stored.copy(draftPayload = CommandCardCodec.encode(updated))
+            stored.copy(draftPayload = CommandCardCodec.encode(updated), status = "CONFIRMED")
         )
         applied
+    }
+
+    private suspend fun freezeQuietSettings(action: AiAppAction): AiAppAction {
+        if (action.quietEnabled == false || (action.quietEnabled == null && action.quietStartMinutes == null && action.quietEndMinutes == null)) return action
+        val settings = userPrefs.waterReminderState.first()
+        val start = settings.quietStartMinutes
+        val end = settings.quietEndMinutes
+        return action.copy(
+            quietStartMinutes = action.quietStartMinutes ?: if (action.quietEnabled == true && start == end) UserPrefs.DEFAULT_QUIET_START else start,
+            quietEndMinutes = action.quietEndMinutes ?: if (action.quietEnabled == true && start == end) UserPrefs.DEFAULT_QUIET_END else end
+        )
+    }
+
+    private suspend fun waterActionSummary(action: AiAppAction): String = buildList {
+        action.enabled?.let { add("喝水提醒：${if (it) "开启" else "关闭"}") }
+        action.intervalMinutes?.let { add("提醒间隔：${userPrefs.waterIntervalMinutes.first()} → $it 分钟") }
+        if (action.quietEnabled != null || action.quietStartMinutes != null || action.quietEndMinutes != null) {
+            val currentStart = userPrefs.quietStartMinutes.first()
+            val currentEnd = userPrefs.quietEndMinutes.first()
+            val start = action.quietStartMinutes ?: if (action.quietEnabled == true && currentStart == currentEnd) UserPrefs.DEFAULT_QUIET_START else currentStart
+            val end = action.quietEndMinutes ?: if (action.quietEnabled == true && currentStart == currentEnd) UserPrefs.DEFAULT_QUIET_END else currentEnd
+            fun clock(minutes: Int) = "%02d:%02d".format(Locale.ROOT, minutes / 60, minutes % 60)
+            add(if (action.quietEnabled == false || start == end) "免打扰：关闭" else "免打扰：${clock(start)}—${clock(end)}")
+        }
+    }.joinToString("\n")
+
+    /** Persisted cards are the source of truth. Nothing is executed while parsing an AI reply. */
+    suspend fun commitAppAction(cardId: Long): String = chatHistoryRepository.withConversationLock {
+        val stored = checkNotNull(chatHistoryRepository.getById(cardId)) { "这张卡片不存在" }
+        check(stored.kind == "APP_ACTION")
+        val payload = checkNotNull(AppActionCodec.decode(stored.draftPayload)) { "操作参数无法读取" }
+        if (stored.status !in setOf("EDITING", "APPLYING")) return@withConversationLock "这张卡片已经处理过啦。"
+        if (payload.action.kind == AiAppAction.EMPTY_TRASH) {
+            require(payload.trashIds.isNotEmpty() && payload.trashIds.all { it in payload.trashDeletedAt }) {
+                "这张旧清空卡缺少账单快照，请重新让阿噜生成清空卡。"
+            }
+            val count = chatHistoryRepository.withTransaction {
+                val current = checkNotNull(chatHistoryRepository.getById(cardId))
+                if (current.status != "EDITING") return@withTransaction 0
+                val ids = payload.trashIds.toSet()
+                val targets = billRepository.trash().filter { it.id in ids && it.deletedAt == payload.trashDeletedAt[it.id] }
+                targets.forEach { billRepository.purge(it.id) }
+                chatHistoryRepository.update(current.copy(status = "CONFIRMED", draftPayload = AppActionCodec.encode(payload.copy(appliedCount = targets.size))))
+                targets.size
+            }
+            return@withConversationLock "回收站里 $count 笔账单已彻底删除，草稿保留着 ♡"
+        }
+        // This small local commit must finish even when its screen leaves. APPLYING survives a process
+        // death or a Room write failure: it can be retried, but can never pretend to cancel saved settings.
+        withContext(NonCancellable) {
+            val applying = stored.copy(status = "APPLYING")
+            chatHistoryRepository.update(applying)
+            val action = payload.action
+            userPrefs.setWaterSettings(action.enabled, action.intervalMinutes, action.quietEnabled, action.quietStartMinutes, action.quietEndMinutes)
+            chatHistoryRepository.update(applying.copy(status = "CONFIRMED"))
+            val scheduled = try {
+                withTimeout(5_000) { synchronizeWaterReminder(action) }
+                true
+            } catch (_: Exception) {
+                // Preferences are already committed. Startup restores the persisted reminder state.
+                false
+            }
+            if (scheduled) "喝水提醒已按卡片调整好啦，阿噜 ♡"
+            else "设置已经保存；提醒调度暂时没接上，下次打开软件会再尝试恢复。"
+        }
     }
 
     /**
@@ -521,7 +652,7 @@ class AiRepository(
     private suspend fun createCategoryFromDraft(item: ConfirmItem): Long = createCategory(
         name = item.categoryName.ifBlank { "未分类" },
         iconType = if (item.isNewCategory && SvgIconValidator.isValid(item.iconSvg)) IconType.SVG else IconType.EMOJI,
-        iconValue = item.iconEmoji.ifBlank { "🫧" },
+        iconValue = item.iconEmoji,
         iconSvg = if (item.isNewCategory && SvgIconValidator.isValid(item.iconSvg)) item.iconSvg else "",
         keywords = item.keywords
     )
@@ -530,7 +661,7 @@ class AiRepository(
         name: String,
         keywords: String = "",
         iconType: IconType = IconType.EMOJI,
-        iconValue: String = "🫧",
+        iconValue: String = "",
         iconSvg: String = ""
     ): Long = categoryRepository.createCategory(
         name = name.ifBlank { "未分类" },

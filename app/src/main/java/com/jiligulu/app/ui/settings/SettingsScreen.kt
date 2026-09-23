@@ -28,7 +28,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -67,6 +66,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.jiligulu.app.data.prefs.UserPrefs
 import com.jiligulu.app.BuildConfig
 import com.jiligulu.app.ui.components.PaperNote
+import com.jiligulu.app.ui.components.GuluDialog
 import com.jiligulu.app.ui.components.TimePickerDialog
 import com.jiligulu.app.ui.components.TimePickerField
 import com.jiligulu.app.ui.persona.GuluMascot
@@ -78,6 +78,7 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onPreviewWelcome: () -> Unit = {},
     onOpenTrash: () -> Unit = {},
+    checkUpdatesOnOpen: Boolean = false,
     vm: SettingsViewModel = viewModel(factory = SettingsViewModel.Factory)
 ) {
     val state by vm.uiState.collectAsStateWithLifecycle()
@@ -96,10 +97,17 @@ fun SettingsScreen(
     ) { /* The in-app reminder still works when notification permission is declined. */ }
     val editable = state.isLoaded && !state.isSaving
     var showFontLicense by rememberSaveable { mutableStateOf(false) }
+    var showHandbook by rememberSaveable { mutableStateOf(false) }
     // 时间设置一律走「点击输入框 → 弹窗滚轮 → 确认」，不做页面内常驻滚轮。
     var showIntervalPicker by rememberSaveable { mutableStateOf(false) }
     var showQuietStart by rememberSaveable { mutableStateOf(false) }
     var showQuietEnd by rememberSaveable { mutableStateOf(false) }
+    val settingsScroll = rememberScrollState()
+    LaunchedEffect(checkUpdatesOnOpen, settingsScroll.maxValue) {
+        if (checkUpdatesOnOpen && settingsScroll.maxValue in 1 until Int.MAX_VALUE) {
+            settingsScroll.scrollTo(settingsScroll.maxValue)
+        }
+    }
 
     if (showIntervalPicker) {
         val total = state.waterInterval
@@ -186,7 +194,7 @@ fun SettingsScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(padding)
-                    .verticalScroll(rememberScrollState())
+                    .verticalScroll(settingsScroll)
                     .testTag("settings-list")
                     .padding(horizontal = 20.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(20.dp)
@@ -296,10 +304,11 @@ fun SettingsScreen(
                                 onClick = { showQuietEnd = true }
                             )
                             Text(
-                                "支持跨午夜。账本和统计页由桌宠提醒，其他页面及后台通过通知提醒。",
+                                "支持跨午夜；开始和结束相同则不免打扰。账本和统计页由桌宠提醒，其他页面及后台通过通知提醒。",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                            ReminderPermissionHint()
                         }
                     }
 
@@ -336,6 +345,7 @@ fun SettingsScreen(
                                 Text("去看看")
                             }
                         }
+                        ConversationSettingsCard(vm)
                     }
 
                     SettingsSection("关于叽里咕噜", "小小的账本，大大的生活", "🌱") {
@@ -357,10 +367,10 @@ fun SettingsScreen(
                             value = "路陌",
                             brand = true
                         )
-                        AboutLine(title = "AI 助手", value = "DeepSeek V4.1-Flash")
-                        AboutLine(title = "数据去向", value = "只存在这台手机里，不上传任何服务器")
-                        AboutLine(title = "对话内容", value = "记账时会发给 DeepSeek 用于理解，不用于训练")
-                        AboutLine(title = "免登录", value = "没有账号，没有同步，也就没有泄露")
+                        AboutLine(title = "AI 助手", value = "DeepSeek")
+                        AboutLine(title = "本地保存", value = "账单、对话和设置保存在这台手机")
+                        AboutLine(title = "AI 对话", value = "消息、最近对话及部分账本上下文会发送给 DeepSeek，用于理解请求")
+                        AboutLine(title = "账号同步", value = "无需登录，暂不支持云同步或应用内备份")
 
                         Text(
                             "阿噜想说的话：谢谢你愿意把每天的花销交给我。我不会评判你买了什么，" +
@@ -370,12 +380,13 @@ fun SettingsScreen(
                             lineHeight = MaterialTheme.typography.bodySmall.lineHeight
                         )
 
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            TextButton(onClick = { showHandbook = true }) { Text("阿噜使用手册") }
                             TextButton(onClick = { showFontLicense = true }) { Text("字体与开源许可") }
                         }
                     }
                     TypingSoundSettingsCard(onPreviewWelcome)
-                    UpdateSettingsCard()
+                    UpdateSettingsCard(checkOnOpen = checkUpdatesOnOpen)
                     Text("慢慢记，日子也会慢慢发光 ♡", modifier = Modifier.align(Alignment.CenterHorizontally).padding(bottom = 8.dp),
                         style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
@@ -383,21 +394,18 @@ fun SettingsScreen(
         }
     }
 
+    if (showHandbook) HandbookDialog(onDismiss = { showHandbook = false })
     if (showFontLicense) {
-        AlertDialog(
-            onDismissRequest = { showFontLicense = false },
-            title = { Text("字体与开源许可") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                    Text("Noto Sans SC\nCopyright 2014–2021 Adobe", style = MaterialTheme.typography.bodyMedium)
-                    Text("ZCOOL KuaiLe（站酷快乐体）\nCopyright 2018 The ZCOOL KuaiLe Project Authors",
-                        style = MaterialTheme.typography.bodyMedium)
-                    Text("以上字体使用 SIL Open Font License 1.1。完整版权声明与许可证已随应用内置。",
-                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            },
-            confirmButton = { TextButton(onClick = { showFontLicense = false }) { Text("知道啦") } }
-        )
+        GuluDialog(
+            onDismiss = { showFontLicense = false },
+            title = "字体与开源许可"
+        ) {
+            Text("Noto Sans SC\nCopyright 2014–2021 Adobe", style = MaterialTheme.typography.bodyMedium)
+            Text("ZCOOL KuaiLe（站酷快乐体）\nCopyright 2018 The ZCOOL KuaiLe Project Authors",
+                style = MaterialTheme.typography.bodyMedium)
+            Text("以上字体使用 SIL Open Font License 1.1。完整版权声明与许可证已随应用内置。",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
 }
 

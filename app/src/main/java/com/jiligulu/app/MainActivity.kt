@@ -33,7 +33,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.jiligulu.app.core.ai.NavTargets
 import com.jiligulu.app.data.prefs.UserPrefs
-import com.jiligulu.app.data.reminder.WaterReminderWorker
+import com.jiligulu.app.data.reminder.WaterReminderNotifications
 import com.jiligulu.app.ui.add.AddBillScreen
 import com.jiligulu.app.ui.chat.ChatScreen
 import com.jiligulu.app.ui.main.MainScreen
@@ -54,6 +54,7 @@ object Routes {
     const val ADD_BILL = "add_bill"
     const val CHAT = "chat"
     const val SETTINGS = "settings"
+    const val CHECK_UPDATE = "check_update"
     const val ONBOARDING = "onboarding"
     const val WELCOME_PREVIEW = "welcome_preview"
     const val TRASH = "trash"
@@ -90,9 +91,9 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleWaterIntent(intent: Intent?) {
-        if ((intent?.getLongExtra(WaterReminderWorker.EXTRA_WATER_REMINDER, 0L) ?: 0L) > 0L) {
+        if ((intent?.getLongExtra(WaterReminderNotifications.EXTRA_WATER_REMINDER, 0L) ?: 0L) > 0L) {
             waterRequests.value += 1
-            intent?.removeExtra(WaterReminderWorker.EXTRA_WATER_REMINDER)
+            intent?.removeExtra(WaterReminderNotifications.EXTRA_WATER_REMINDER)
         }
     }
 }
@@ -179,6 +180,7 @@ private fun JiliguluRoot(waterRequest: Int) {
                                 NavTargets.TRASH -> Routes.TRASH
                                 NavTargets.TRASH_DRAFT -> Routes.TRASH_DRAFT
                                 NavTargets.SETTINGS -> Routes.SETTINGS
+                                NavTargets.CHECK_UPDATE -> Routes.CHECK_UPDATE
                                 NavTargets.ADD_BILL -> Routes.ADD_BILL
                                 else -> null
                             }
@@ -190,6 +192,12 @@ private fun JiliguluRoot(waterRequest: Int) {
                     SettingsScreen(onBack = { navController.popBackStack() },
                         onPreviewWelcome = { navController.navigate(Routes.WELCOME_PREVIEW) },
                         onOpenTrash = { navController.navigate(Routes.TRASH) })
+                }
+                composable(Routes.CHECK_UPDATE) {
+                    SettingsScreen(onBack = { navController.popBackStack() },
+                        onPreviewWelcome = { navController.navigate(Routes.WELCOME_PREVIEW) },
+                        onOpenTrash = { navController.navigate(Routes.TRASH) },
+                        checkUpdatesOnOpen = true)
                 }
                 composable(Routes.TRASH) { TrashScreen(onBack = { navController.popBackStack() }) }
                 composable(Routes.TRASH_DRAFT) {

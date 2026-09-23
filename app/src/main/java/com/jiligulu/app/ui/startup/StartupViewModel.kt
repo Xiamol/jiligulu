@@ -12,6 +12,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.withTimeoutOrNull
 
 data class StartupState(val nickname: String? = null, val prepared: Boolean = false,
     val ready: Boolean = false, val error: String? = null)
@@ -26,12 +30,23 @@ class StartupViewModel(
             val nickname = container.userPrefs.nickname.first()
             container.preloadLedger()
             container.userPrefs.pendingWater.first()
-            // 顺手清掉过期的回收站账单。不是时间敏感的事，冷启动扫一遍就够，
-            // 不值得为它单独养一个 WorkManager 任务。失败不影响启动。
-            TrashCleaner.purgeExpired(container.billRepository, container.userPrefs)
-            // 一次性把喝水提醒换成自链调度（含清理 0.5.4 遗留的周期任务）。
-            // 内部有版本号闸门，迁移过就是一次 DataStore 读，不会重置提醒倒计时。
-            container.migrateWaterScheduleIfNeeded()
+            // 可选维护并行且各有上限，系统调度/清理变慢不能挡住已经准备好的账本。
+            // withTimeoutOrNull 仅吞自己的超时；Activity 销毁造成的取消继续向上传播。
+            coroutineScope {
+                awaitAll(
+                    async {
+                        withTimeoutOrNull(1_000L) {
+                            TrashCleaner.purgeExpired(container.billRepository, container.userPrefs)
+                        }
+                    },
+                    async {
+                        withTimeoutOrNull(1_000L) {
+                            container.migrateWaterScheduleIfNeeded()
+                            container.catchUpWaterReminder()
+                        }
+                    }
+                )
+            }
             nickname
         },
         onStartupFinished = { container.startupCompleted = true }

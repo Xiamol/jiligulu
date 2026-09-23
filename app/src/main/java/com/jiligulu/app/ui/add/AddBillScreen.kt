@@ -77,6 +77,8 @@ import com.jiligulu.app.domain.category.CategoryEngine
 import com.jiligulu.app.domain.category.CategoryLabels
 import com.jiligulu.app.ui.components.BillDateTimeField
 import com.jiligulu.app.ui.components.LedgerCard
+import com.jiligulu.app.ui.components.CategoryBadge
+import com.jiligulu.app.domain.color.GoldenAnglePalette
 import com.jiligulu.app.ui.components.PaperNote
 import com.jiligulu.app.ui.theme.GuluBrandFont
 import kotlinx.coroutines.delay
@@ -209,7 +211,7 @@ fun AddBillScreen(onBack: () -> Unit, vm: AddBillViewModel = viewModel(factory =
                                 // 自绘 chip 而不是 FilterChip：FilterChip 自带 onClick，外层再套
                                 // combinedClickable 会抢手势（长按不触发 / 单击被吞），两个手势必须落在同一层。
                                 CategoryChip(
-                                    label = "${category.iconValue} ${CategoryLabels.displayName(category.name)}".trim(),
+                                    category = category,
                                     selected = effectiveCategoryId == category.id,
                                     enabled = editable,
                                     modifier = Modifier.weight(1f),
@@ -381,7 +383,7 @@ private fun TipButton(
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun CategoryChip(
-    label: String,
+    category: com.jiligulu.app.data.local.entity.CategoryEntity,
     selected: Boolean,
     enabled: Boolean,
     modifier: Modifier = Modifier,
@@ -407,14 +409,12 @@ private fun CategoryChip(
             .padding(horizontal = 10.dp, vertical = 11.dp),
         contentAlignment = Alignment.Center
     ) {
-        Text(
-            label,
-            style = MaterialTheme.typography.labelLarge,
-            color = content,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.Center
-        )
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+            CategoryBadge(category.name, category.iconValue, size = 24.dp,
+                tint = GoldenAnglePalette.colorForHue(category.colorHue))
+            Text(CategoryLabels.displayName(category.name), style = MaterialTheme.typography.labelLarge,
+                color = content, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+        }
     }
 }
 

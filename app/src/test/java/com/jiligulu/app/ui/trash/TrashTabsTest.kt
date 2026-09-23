@@ -6,6 +6,7 @@ import com.jiligulu.app.data.local.AppDatabase
 import com.jiligulu.app.data.local.entity.BillEntity
 import com.jiligulu.app.data.local.entity.BillType
 import com.jiligulu.app.data.local.entity.ChatMessageEntity
+import com.jiligulu.app.data.local.entity.CategoryEntity
 import com.jiligulu.app.data.prefs.UserPrefs
 import com.jiligulu.app.data.repository.BillRepository
 import com.jiligulu.app.data.repository.CategoryRepository
@@ -154,6 +155,30 @@ class TrashTabsTest {
 
         assertEquals("只剩一张活跃草稿", 1, vm.uiState.value.draftItems.size)
         assertEquals(kept, vm.uiState.value.draftItems.single().id)
+    }
+
+    @Test
+    fun `manual restore moves orphan categories into catchall and preserves existing categories`() = runBlocking {
+        Dispatchers.setMain(Dispatchers.Unconfined)
+        val db = db("trash-restore-orphan.db")
+        val fallback = db.categoryDao().findAllOnce().first { !it.deletable }.id
+        val liveCategory = db.categoryDao().findAllOnce().first { it.deletable }.id
+        val removedCategory = db.categoryDao().insert(CategoryEntity(name = "旧分类", colorHue = 100f, colorIndex = 9))
+        val orphan = db.billDao().insert(BillEntity(amountFen = 1234, type = BillType.EXPENSE,
+            categoryId = removedCategory, detail = "保持账单内容", timestamp = 1_000, deletedAt = 2_000))
+        val existing = db.billDao().insert(BillEntity(amountFen = 500, type = BillType.EXPENSE,
+            categoryId = liveCategory, detail = "原分类仍在", timestamp = 1_000, deletedAt = 2_000))
+        db.categoryDao().deleteById(removedCategory)
+        val vm = model(db)
+        vm.await { it.items.size == 2 }
+        vm.toggle(orphan)
+        vm.toggle(existing)
+        vm.restoreSelected()
+        vm.await { !it.isWorking && it.message != null }
+        assertEquals(fallback, db.billDao().getById(orphan)!!.categoryId)
+        assertEquals(liveCategory, db.billDao().getById(existing)!!.categoryId)
+        assertEquals(null, db.billDao().getById(orphan)!!.deletedAt)
+        assertEquals(1234L, db.billDao().getById(orphan)!!.amountFen)
     }
 
     @Test

@@ -48,6 +48,8 @@ import com.jiligulu.app.data.local.entity.BillSource
 import com.jiligulu.app.data.local.entity.BillType
 import com.jiligulu.app.ui.components.BillDateTimeField
 import com.jiligulu.app.ui.components.LedgerCard
+import com.jiligulu.app.ui.components.CategoryBadge
+import com.jiligulu.app.domain.color.GoldenAnglePalette
 
 /** The ledger and statistics both open this entry point so their details and editing stay identical. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -101,8 +103,11 @@ fun BillDetailSheet(billId: Long, onDismiss: () -> Unit) {
                 Text(state.error ?: "这条账单已不存在。", color = MaterialTheme.colorScheme.onSurfaceVariant)
             } else if (bill != null) {
                 LedgerCard {
-                    Text("${state.icon}  ${state.categoryName} · ${if (bill.type == BillType.EXPENSE) "支出" else "收入"}",
-                        style = MaterialTheme.typography.titleMedium)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CategoryBadge(state.categoryName, state.icon, tint = GoldenAnglePalette.colorForHue(state.colorHue))
+                        Text("  ${state.categoryName} · ${if (bill.type == BillType.EXPENSE) "支出" else "收入"}",
+                            style = MaterialTheme.typography.titleMedium)
+                    }
                     Spacer(Modifier.height(8.dp))
                     Text(when (bill.source) {
                         BillSource.MANUAL -> "手动记账"

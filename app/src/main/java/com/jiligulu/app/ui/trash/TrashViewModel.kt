@@ -38,7 +38,9 @@ data class TrashItemUi(
     val subtitle: String,
     val amountText: String,
     val isExpense: Boolean,
-    val deletedAt: Long
+    val deletedAt: Long,
+    val categoryName: String = "未分类",
+    val colorHue: Float = 0f
 )
 
 /** 草稿页签里的一张草稿卡。 */
@@ -88,7 +90,7 @@ data class TrashUiState(
  */
 class TrashViewModel(
     private val billRepository: BillRepository,
-    categoryRepository: CategoryRepository,
+    private val categoryRepository: CategoryRepository,
     private val prefs: UserPrefs,
     private val history: ChatHistoryRepository
 ) : ViewModel() {
@@ -189,7 +191,8 @@ class TrashViewModel(
     fun restoreSelected() = runBatch(
         emptyMessage = "先勾选要恢复的账单呀"
     ) { ids ->
-        val count = billRepository.restore(ids)
+        val fallback = categoryRepository.getAll().first { !it.deletable }.id
+        val count = ids.count { billRepository.restoreToLive(it, fallback) }
         "已恢复 $count 笔账单 ♡"
     }
 
@@ -267,7 +270,9 @@ class TrashViewModel(
 
     private fun BillEntity.toUi(category: CategoryEntity?) = TrashItemUi(
         id = id,
-        icon = category?.iconValue?.ifBlank { "🧾" } ?: "🧾",
+        icon = category?.iconValue.orEmpty(),
+        categoryName = CategoryLabels.displayName(category?.name.orEmpty()),
+        colorHue = category?.colorHue ?: 0f,
         title = detail.ifBlank { CategoryLabels.displayName(category?.name.orEmpty()) },
         subtitle = CategoryLabels.displayName(category?.name.orEmpty()) + " · " +
             Formatters.timeLabel(timestamp) +

@@ -1,8 +1,8 @@
 # 叽里咕噜
 
-Android 本地记账应用，Kotlin + Jetpack Compose + Room。当前版本：`0.5.1`，奶油手账与糯云团桌宠。
+Android 本地记账应用，Kotlin + Jetpack Compose + Room。当前版本保持 `0.5.5`（versionCode 8），奶油手账与糯云团桌宠。
 
-[下载安装包](https://github.com/Xiamol/jiligulu/releases/latest) · [本版变更、升级与验收路径](docs/RELEASE_0_5_1.md) · [远程更新配置](docs/UPDATES.md)
+[已发布安装包](https://github.com/Xiamol/jiligulu/releases/latest) · [本轮审计与验收](docs/AUDIT_2026_09_23.md) · [远程更新配置](docs/UPDATES.md)
 
 ## 构建
 
@@ -28,6 +28,7 @@ Lint 报告：`app/build/reports/lint-results-debug.html`。
 - `ui/persona/PersonaViewModel.kt`：始终有值的文案状态、可见时的刷新计时、点击互动。
 - `ui/startup`：入场动画与数据准备协调，旧 Activity 的暂停不能取消新 Activity 的加载。
 - `data/update`：公开 GitHub Releases 版本检查，未配置源时不联网。
+- `data/reminder`：AlarmManager 单一提醒源，权限不足时使用非精确闹钟；保存到期时间，开机、覆盖安装、冷启动时恢复。
 - `domain/persona/PersonaEngine.kt`：台词选择、展示间隔与提醒优先级；纯逻辑测试在 `app/src/test`。
 - `ui/components/LedgerCard.kt` / `ui/theme`：共享卡片、颜色与排版。
 - `ui/settings/SettingsViewModel.kt`：设置草稿、加载、保存和提醒调度；界面仅发用户事件。
@@ -43,15 +44,17 @@ Lint 报告：`app/build/reports/lint-results-debug.html`。
 6. 手动记账打开键盘：表单可滚动，保存操作始终可达；保存中禁止重复提交。
 7. 检查小屏、大字体、长金额及长分类名。统计页在窄屏或大字体下将图表与图例上下排列。
 
-## 0.5.0 的数据行为
+## 当前数据行为
 
 - 账本和统计使用同一个账单详情面板，可改金额、名称和日期时间。手动新增也支持补记。
 - 对话未明确时间时默认确认入账的此刻；明确“昨天中午”等时间则按发送时的设备时区解析并显示在草稿中。模糊或无效时间需确认，不静默改成今天。
-- 聊天消息、编辑中的草稿、已确认/取消状态保存在 Room，退出后可以继续查看。旧版本未落盘的对话无法从新版本恢复。
+- 聊天消息、草稿与确认卡保存在 Room。草稿默认收起，可展开编辑；旧版 DISMISSED 草稿也可继续入账。删除的草稿保留墓碑，不能再次入账。
+- AI 改喝水设置、彻底清空回收站需点击确认卡。检查更新卡跳转设置并发起真实检查；模型文字不会直接改变设置。
+- 设置支持《阿噜使用手册》与清空历史对话。清空保留账单、分类、预算、回收站账单和未入账草稿；正在回复时拒绝清空。
 - 批量确认和草稿状态同事务，失败回滚，重复确认不重复入账。
-- v1/v2/v3 到 v4 迁移保留旧账、分类与预算，详见 [升级说明](docs/DATABASE_UPGRADES.md)。
+- Room schema 为 v6，v1 至 v6 的迁移链保留账单、分类、预算与对话，详见 [升级说明](docs/DATABASE_UPGRADES.md)。
 - 正文和品牌字体内置，许可证包含在 assets/licenses 中；角色资源位于 res/drawable-nodpi。
 
-月份查询已支持恢复订阅和跨月更新；预算周期的独立时间刷新、跨设备备份及 API Key 存储加固仍可单独完善。
+账单、对话与设置保存在本机；调用 AI 时，会发送消息、近期对话及部分账本上下文。独立备份、跨设备同步与 SVG 真正渲染仍不在本轮实现范围。
 
 当前为本地开发版本；打包结果与真机交互、视觉验收分别记录，不用构建成功代替设备验证。

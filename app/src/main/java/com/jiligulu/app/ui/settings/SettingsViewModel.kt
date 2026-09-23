@@ -8,6 +8,7 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.jiligulu.app.JiliguluApp
 import com.jiligulu.app.data.prefs.UserPrefs
+import com.jiligulu.app.data.repository.ChatHistoryRepository
 import com.jiligulu.app.data.reminder.WaterReminderScheduler
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.Channel
@@ -32,6 +33,8 @@ data class SettingsUiState(
     val waterInterval: Int = UserPrefs.DEFAULT_WATER_INTERVAL,
     val quietStartText: String = "",
     val quietEndText: String = "",
+    val isClearingHistory: Boolean = false,
+    val historyMessage: String? = null,
     val error: String? = null
 ) {
     val quietStartInvalid: Boolean get() = isLoaded && textToMinutes(quietStartText) == null
@@ -41,7 +44,8 @@ data class SettingsUiState(
 /** Owns the editable draft and persistence; the screen only renders state and requests permissions. */
 class SettingsViewModel(
     private val app: Application,
-    private val prefs: UserPrefs
+    private val prefs: UserPrefs,
+    private val history: ChatHistoryRepository
 ) : ViewModel() {
     private val _uiState = MutableStateFlow(SettingsUiState())
     val uiState = _uiState.asStateFlow()
@@ -85,6 +89,27 @@ class SettingsViewModel(
     fun setSuffix(value: String) = editDraft { it.copy(suffix = value) }
     fun setApiKey(value: String) = editDraft { it.copy(apiKey = value) }
 
+    /** Persistence runs in the ViewModel scope, independently of Compose's frame/effect context. */
+    fun clearHistory() {
+        if (_uiState.value.isClearingHistory) return
+        _uiState.update { it.copy(isClearingHistory = true, historyMessage = null) }
+        viewModelScope.launch {
+            try {
+                val cleared = history.clearConversation()
+                _uiState.update { it.copy(historyMessage = if (cleared)
+                    "聊天已清空，账单和未入账草稿都还在。"
+                else "阿噜还在回复，请等这次对话结束后再清空。") }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                android.util.Log.w("ConversationHistory", "Could not clear conversation", failure)
+                _uiState.update { it.copy(historyMessage = "这次没有清空成功，请稍后重试。") }
+            } finally {
+                _uiState.update { it.copy(isClearingHistory = false) }
+            }
+        }
+    }
+
     fun setThemeMode(mode: String) {
         if (mode !in listOf(UserPrefs.THEME_SYSTEM, UserPrefs.THEME_LIGHT, UserPrefs.THEME_DARK)) return
         writePreference {
@@ -96,11 +121,7 @@ class SettingsViewModel(
     fun setWaterEnabled(enabled: Boolean) {
         writePreference {
             prefs.setWaterEnabled(enabled)
-            if (enabled) {
-                WaterReminderScheduler.schedule(app, prefs.waterIntervalMinutes.first())
-            } else {
-                WaterReminderScheduler.cancel(app)
-            }
+            WaterReminderScheduler.restore(app)
             _uiState.update { it.copy(waterEnabled = enabled) }
         }
     }
@@ -109,12 +130,10 @@ class SettingsViewModel(
         // 不再用白名单卡死取值：1 分钟到 12 小时 59 分随意选。
         // （原实现只放行 [15,30,45,60,90,120]，其余值静默 return，
         //   表现为「选了时间点确认完全没反应」。）
-        if (minutes < MIN_WATER_INTERVAL) return
+        if (minutes !in MIN_WATER_INTERVAL..MAX_WATER_INTERVAL) return
         writePreference {
             prefs.setWaterIntervalMinutes(minutes)
-            if (prefs.waterEnabled.first()) {
-                WaterReminderScheduler.schedule(app, minutes)
-            }
+            WaterReminderScheduler.restore(app)
             _uiState.update { it.copy(waterInterval = minutes) }
         }
     }
@@ -183,14 +202,14 @@ class SettingsViewModel(
     }
 
     companion object {
-        /** 下界取 1 分钟：WorkManager 的周期任务实际最小间隔由系统决定，这里只管业务下限。 */
+        /** 实际投放仍受系统省电与权限影响；这里只限制可设置的间隔。 */
         const val MIN_WATER_INTERVAL = 1
         const val MAX_WATER_INTERVAL = 12 * 60 + 59
 
         val Factory = viewModelFactory {
             initializer {
                 val app = this[APPLICATION_KEY] as JiliguluApp
-                SettingsViewModel(app, app.container.userPrefs)
+                SettingsViewModel(app, app.container.userPrefs, app.container.chatHistoryRepository)
             }
         }
     }

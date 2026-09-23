@@ -12,6 +12,7 @@ object NavTargets {
     const val TRASH_DRAFT = "trash_draft"
     const val SETTINGS = "settings"
     const val ADD_BILL = "add_bill"
+    const val CHECK_UPDATE = "check_update"
 }
 
 /**

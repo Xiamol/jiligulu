@@ -80,6 +80,16 @@ private data class Quad(
     val sort: DetailSort
 )
 
+/** The aggregate is not a real category, even if a user has named one 「其余」. */
+internal fun mergedCategoryLabel(categoryNames: Set<String>): String {
+    if ("其余" !in categoryNames) return "其余"
+    val base = "其余（合并）"
+    if (base !in categoryNames) return base
+    var suffix = 2
+    while ("$base $suffix" in categoryNames) suffix++
+    return "$base $suffix"
+}
+
 /** 明细排序变更不触发数据库查询（内存排序） */
 class StatsViewModel(
     private val billRepository: BillRepository,
@@ -176,7 +186,8 @@ class StatsViewModel(
                 val cat = catMap[catId]
                 DonutSlice(
                     key = catId,
-                    label = if (catId == OTHER_KEY) "其他" else CategoryLabels.displayName(cat?.name ?: "未分类"),
+                    label = if (catId == OTHER_KEY) mergedCategoryLabel(cats.map { CategoryLabels.displayName(it.name) }.toSet())
+                        else CategoryLabels.displayName(cat?.name ?: "未分类"),
                     valueFen = fen,
                     color = if (catId == OTHER_KEY) OTHER_COLOR
                     else GoldenAnglePalette.colorForHue(cat?.colorHue ?: 0f)
@@ -216,7 +227,7 @@ class StatsViewModel(
                     val cat = catMap[b.categoryId]
                     DayDetailUi(
                         id = b.id,
-                        icon = cat?.iconValue?.ifBlank { "❓" } ?: "❓",
+                        icon = cat?.iconValue.orEmpty(),
                         colorHue = cat?.colorHue ?: 0f,
                         categoryName = CategoryLabels.displayName(cat?.name ?: "未分类"),
                         detail = b.detail,

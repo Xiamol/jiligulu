@@ -35,7 +35,7 @@ import kotlin.coroutines.resumeWithException
 data class AiBillDraft(
     /**
      * 动作类型：add（新增）/ update（改已有）/ delete（删已有）/ restore（从回收站恢复）。
-     * 未知值一律按 add 处理，保证老格式的返回仍可用。
+     * 缺省兼容老格式的新增；明确给出的未知动作不会执行。
      */
     val action: String = "add",
     /** update / delete 时指向目标账单 id；add 时为 0。 */
@@ -96,7 +96,9 @@ data class AiParseResult(
     /** R5：单目标跳转指令（NavTargets 取值）；不需要跳转时为 null。老响应缺此字段，默认兼容。 */
     val navigate: String? = null,
     /** R4：多选项卡，非空时优先于 navigate；不需要时为 []。老响应缺此字段，默认兼容。 */
-    val options: List<AiOption> = emptyList()
+    val options: List<AiOption> = emptyList(),
+    /** App settings / trash operations only create a local confirmation card. */
+    @SerialName("app_action") val appAction: AiAppAction? = null
 )
 
 /**

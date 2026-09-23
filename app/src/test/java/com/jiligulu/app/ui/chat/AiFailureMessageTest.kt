@@ -32,6 +32,24 @@ import java.io.IOException
 class AiFailureMessageTest {
 
     @Test
+    fun `offline mutation and app requests never turn amounts into new bill drafts`() {
+        listOf("把那笔改成9块", "删掉昨天9元的奶茶", "恢复12元的午饭", "清空回收站里的9块账单", "提醒改成30分钟").forEach { input ->
+            val result = ChatViewModel.offlineResult(input, IOException("offline"))
+            assertTrue(input, result.bills.isEmpty())
+            assertTrue(result.reply.contains("在线处理"))
+            assertTrue(result.reply.contains("没有新增"))
+        }
+    }
+
+    @Test
+    fun `ordinary new bills still work through the offline fallback`() {
+        listOf("昨天中午吃饭花了9块", "星期一早餐9元", "早餐 9").forEach { input ->
+            val result = ChatViewModel.offlineResult(input, IOException("offline"))
+            assertTrue(input, result.bills.single().amountYuan == 9.0)
+        }
+    }
+
+    @Test
     fun `a rejected request says so instead of blaming the network`() {
         val message = ChatViewModel.fallbackReply(
             nothingParsed = true, cause = DeepSeekHttpException(400, "bad request")

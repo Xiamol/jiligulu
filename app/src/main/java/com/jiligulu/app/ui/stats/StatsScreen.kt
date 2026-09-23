@@ -239,7 +239,7 @@ fun StatsScreen(
                     }
                     Spacer(Modifier.height(8.dp))
                     dayDetails.forEachIndexed { index, d ->
-                        LedgerBillRow(icon = d.icon, colorHue = d.colorHue,
+                        LedgerBillRow(icon = d.icon, colorHue = d.colorHue, categoryName = d.categoryName,
                             title = d.detail.ifBlank { d.categoryName }, subtitle = d.timeLabel,
                             amountText = d.amountText, isExpense = d.isExpense,
                             onClick = { selectedBillId = d.id }, showDivider = index < dayDetails.lastIndex)
