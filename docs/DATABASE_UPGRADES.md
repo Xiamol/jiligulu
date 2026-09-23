@@ -1,6 +1,6 @@
 # 数据库升级与保数据验证
 
-当前数据库为 Room v6，文件名仍是 `jiligulu.db`，包名仍是 `com.jiligulu.app`。本轮按用户要求保持 versionName 0.5.5 / versionCode 8，不增加 schema 版本。
+当前数据库为 Room v6，文件名仍是 `jiligulu.db`，包名仍是 `com.jiligulu.app`。正式发布版本为 versionName 0.5.6 / versionCode 9，沿用验收包的 schema，不增加数据库版本。
 
 ## 当前迁移
 

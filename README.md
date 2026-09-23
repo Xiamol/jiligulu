@@ -1,6 +1,6 @@
 # 叽里咕噜
 
-Android 本地记账应用，Kotlin + Jetpack Compose + Room。当前版本保持 `0.5.5`（versionCode 8），奶油手账与糯云团桌宠。
+Android 本地记账应用，Kotlin + Jetpack Compose + Room。当前版本 `0.5.6`（versionCode 9），奶油手账与糯云团桌宠。
 
 [已发布安装包](https://github.com/Xiamol/jiligulu/releases/latest) · [架构审计](docs/AUDIT_2026_09_23.md) · [在线聊天与更新修复](docs/CHAT_PROTOCOL_2026_09_23.md) · [远程更新配置](docs/UPDATES.md)
 
