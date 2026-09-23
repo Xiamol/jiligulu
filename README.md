@@ -4,6 +4,8 @@ Android 本地记账应用，Kotlin + Jetpack Compose + Room。当前版本 `0.5
 
 [已发布安装包](https://github.com/Xiamol/jiligulu/releases/latest) · [架构审计](docs/AUDIT_2026_09_23.md) · [在线聊天与更新修复](docs/CHAT_PROTOCOL_2026_09_23.md) · [远程更新配置](docs/UPDATES.md)
 
+后续接手与功能讨论先看 [当前路线图与用户决策](docs/ROADMAP.md)；旧交接中的优先级可能已被这里的最新反馈替代。
+
 ## 构建
 
 使用 Android SDK 35、JDK 17 或 21。`local.properties` 中配置本机 `sdk.dir`，命令行的 `JAVA_HOME` 指向 JDK。Gradle Wrapper 已随项目提供并固定为 8.11.1，无需单独安装 Gradle。
