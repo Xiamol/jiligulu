@@ -2,7 +2,7 @@
 
 Android 本地记账应用，Kotlin + Jetpack Compose + Room。当前版本保持 `0.5.5`（versionCode 8），奶油手账与糯云团桌宠。
 
-[已发布安装包](https://github.com/Xiamol/jiligulu/releases/latest) · [本轮审计与验收](docs/AUDIT_2026_09_23.md) · [远程更新配置](docs/UPDATES.md)
+[已发布安装包](https://github.com/Xiamol/jiligulu/releases/latest) · [架构审计](docs/AUDIT_2026_09_23.md) · [在线聊天与更新修复](docs/CHAT_PROTOCOL_2026_09_23.md) · [远程更新配置](docs/UPDATES.md)
 
 ## 构建
 
@@ -50,6 +50,8 @@ Lint 报告：`app/build/reports/lint-results-debug.html`。
 - 对话未明确时间时默认确认入账的此刻；明确“昨天中午”等时间则按发送时的设备时区解析并显示在草稿中。模糊或无效时间需确认，不静默改成今天。
 - 聊天消息、草稿与确认卡保存在 Room。新草稿首次展开，主动收起或离开聊天再返回后折叠；确认成功才发一条结果回复。旧版 DISMISSED 草稿也可继续入账。删除的草稿保留墓碑，不能再次入账。
 - AI 改喝水设置、彻底清空回收站需点击确认卡。检查更新卡跳转设置并发起真实检查；模型文字不会直接改变设置。
+- 多轮 AI 请求将 assistant 原文封装为确定的 JSON reply，与强制 JSON 输出格式保持一致；不改写数据库中的聊天历史。本轮末尾附加输出协议，避免重新混入纯文本示例。请保留此约定及对应真实接口复现工具。
+- 自动更新在首次进入和从后台返回时实际检查，成功后统一记录完成时间；失败保留上次成功时间，不再按 6 小时跳过。
 - 设置支持《阿噜使用手册》与清空历史对话。清空保留账单、分类、预算、回收站账单和未入账草稿；正在回复时拒绝清空。
 - 批量确认和草稿状态同事务，失败回滚，重复确认不重复入账。
 - Room schema 为 v6，v1 至 v6 的迁移链保留账单、分类、预算与对话，详见 [升级说明](docs/DATABASE_UPGRADES.md)。

@@ -36,6 +36,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.jiligulu.app.core.ai.NavTargets
 import com.jiligulu.app.data.prefs.UserPrefs
+import com.jiligulu.app.data.update.checkUpdatesOnForeground
 import com.jiligulu.app.data.reminder.WaterReminderNotifications
 import com.jiligulu.app.ui.add.AddBillScreen
 import com.jiligulu.app.ui.chat.ChatScreen
@@ -124,7 +125,7 @@ private fun JiliguluRoot(waterRequest: Int) {
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             // 进程内已完成过一次完整启动就直接进主界面，不再播放入场动画
             // （切窗口/旋转/内存回收导致的 Activity 重建不应触发预载动画）。
-            if (app.container.startupCompleted) {
+            if (app.container.startupCompleted && startup.state.value.prepared) {
                 mainReady = true
                 return@repeatOnLifecycle
             }
@@ -140,9 +141,12 @@ private fun JiliguluRoot(waterRequest: Int) {
         kotlinx.coroutines.delay(2500)
         mainReady = true
     }
-    LaunchedEffect(state.ready, mainReady) {
-        // 只要进了主界面就尝试一次；节流由仓库层按「版本 + 6 小时」把关。
-        if (state.ready && mainReady) app.container.updates.check(automatic = true)
+    LaunchedEffect(state.ready, mainReady, lifecycleOwner) {
+        if (state.ready && mainReady) {
+            lifecycleOwner.lifecycle.checkUpdatesOnForeground {
+                app.container.updates.check(automatic = true)
+            }
+        }
     }
     Box(Modifier.fillMaxSize()) {
         state.nickname?.takeIf { state.prepared }?.let { nickname ->

@@ -523,7 +523,9 @@ class R9WireFormatTest {
             "user", messages[1].jsonObject["role"]!!.jsonPrimitive.content)
         assertEquals("早上好", messages[1].jsonObject["content"]!!.jsonPrimitive.content)
         assertEquals("末条必须是本轮 user 输入",
-            "USER-CONTEXT", messages.last().jsonObject["content"]!!.jsonPrimitive.content)
+            "USER-CONTEXT" + DeepSeekClient.OUTPUT_CONTRACT, messages.last().jsonObject["content"]!!.jsonPrimitive.content)
+        val assistantWire = messages[2].jsonObject["content"]!!.jsonPrimitive.content
+        assertEquals("好呀", Json.parseToJsonElement(assistantWire).jsonObject["reply"]!!.jsonPrimitive.content)
     }
 
     @Test
@@ -548,5 +550,16 @@ class R9WireFormatTest {
     fun `a response without a usage block still parses`() {
         val (_, ok) = invoke(emptyList(), noUsageBody)
         assertTrue("缺 usage 不该影响解析", ok)
+    }
+
+    @Test fun `assistant JSON envelope preserves every character and stable history prefix`() {
+        val original = ChatTurn("assistant", "你好\n\"阿噜\"，账单未确认 ♡")
+        val before = DeepSeekClient.historyContent(original)
+        val decoded = Json.parseToJsonElement(before).jsonObject
+        assertEquals(original.content, decoded["reply"]!!.jsonPrimitive.content)
+        assertTrue(decoded["bills"]!!.jsonArray.isEmpty())
+        assertEquals(before, DeepSeekClient.historyContent(original.copy()))
+        assertEquals("你好\n\"阿噜\"，账单未确认 ♡", original.content)
+        assertEquals("原始用户话", DeepSeekClient.historyContent(ChatTurn("user", "原始用户话")))
     }
 }

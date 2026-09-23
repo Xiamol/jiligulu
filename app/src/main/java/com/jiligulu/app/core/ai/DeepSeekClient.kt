@@ -188,12 +188,12 @@ class DeepSeekClient(private val apiKey: String, private val client: OkHttpClien
                 history.dropWhile { it.role.equals("assistant", ignoreCase = true) }.forEach { turn ->
                     addJsonObject {
                         put("role", turn.role)
-                        put("content", turn.content)
+                        put("content", historyContent(turn))
                     }
                 }
                 addJsonObject {
                     put("role", "user")
-                    put("content", userInput)
+                    put("content", userInput + OUTPUT_CONTRACT)
                 }
             })
         }.toString()
@@ -232,6 +232,15 @@ class DeepSeekClient(private val apiKey: String, private val client: OkHttpClien
     }
 
     companion object {
+        // JSON output and plain-text assistant exemplars conflict in multi-turn conversations.
+        // Only the wire representation changes; persisted history is never rewritten or dropped.
+        internal fun historyContent(turn: ChatTurn): String =
+            if (turn.role.equals("assistant", ignoreCase = true)) buildJsonObject {
+                put("bills", buildJsonArray { })
+                put("reply", turn.content)
+            }.toString() else turn.content
+
+        internal const val OUTPUT_CONTRACT = "\n请只返回符合应用协议的 JSON 对象；闲聊示例：{\"bills\":[],\"reply\":\"在呀，阿噜在听。\"}。不要返回空白、代码或协议说明。"
         private const val TAG = "DeepSeekClient"
 
         /** 首次 + 重试 1 次。移动网络下这一次重发就能救回绝大多数「偶发连不上」。 */

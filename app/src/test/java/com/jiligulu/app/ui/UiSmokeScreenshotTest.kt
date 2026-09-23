@@ -487,6 +487,25 @@ class UiSmokeScreenshotTest {
         }
     }
 
+    @Test(timeout = 120_000)
+    fun reopeningActivityInAnAlreadyStartedProcessStillLoadsItsScreen() {
+        val app = RuntimeEnvironment.getApplication() as JiliguluApp
+        runBlocking {
+            app.container.userPrefs.setNickname("验收")
+            app.container.userPrefs.setWaterEnabled(false)
+            app.container.userPrefs.setUpdateRepository("")
+        }
+        repeat(2) {
+            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                scenario.onActivity { activity = it }
+                awaitText("对话记账")
+                assertTrue(app.container.startupCompleted)
+                compose.onNodeWithContentDescription("设置").assertIsDisplayed()
+                compose.runOnIdle { activity.setContent {} }
+            }
+        }
+    }
+
     private fun awaitTag(tag: String, present: Boolean = true) {
         compose.waitUntil(10_000) {
             shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(16))

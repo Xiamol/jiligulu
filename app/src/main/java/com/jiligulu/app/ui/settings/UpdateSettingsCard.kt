@@ -61,7 +61,7 @@ fun UpdateSettingsCard(checkOnOpen: Boolean = false) {
     LedgerCard {
         Text("应用更新", style = MaterialTheme.typography.titleMedium)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("启动时自动检查", modifier = Modifier.padding(top = 14.dp))
+            Text("进入应用时自动检查", modifier = Modifier.padding(top = 14.dp))
             Switch(checked = automatic, onCheckedChange = { value ->
                 scope.launch {
                     try { app.container.userPrefs.setAutoCheckUpdates(value) }
@@ -78,9 +78,9 @@ fun UpdateSettingsCard(checkOnOpen: Boolean = false) {
             else -> "打开应用时会自动看看有没有新版本。"
         }
         Text(status, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        if (!state.checking && state.available == null && checkedAt > 0L) {
+        if (!state.checking && checkedAt > 0L) {
             Text(
-                "上次检查：" + lastCheckedText(checkedAt),
+                "上次成功检查：" + lastCheckedText(checkedAt),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

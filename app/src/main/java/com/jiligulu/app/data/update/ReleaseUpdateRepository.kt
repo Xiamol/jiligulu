@@ -161,24 +161,15 @@ class ReleaseUpdateRepository(
                 val repository = prefs.updateRepository.first()
                 if (repository.isBlank()) return@withLock
                 require(GithubReleases.normalizeRepository(repository) == repository) { "更新源格式不正确，请重新设置。" }
-                val now = System.currentTimeMillis()
-                // 节流只在「同一版本、6 小时内、已得出过结论」时生效。
-                // 覆盖安装换了版本就必须重查，否则用户升完级反而看不到下一次更新。
-                val throttled = automatic && (
-                    !prefs.autoCheckUpdates.first() ||
-                        (prefs.updateCheckedVersion.first() == BuildConfig.VERSION_NAME &&
-                            now - prefs.updateCheckedAt.first() in 0 until TimeUnit.HOURS.toMillis(6))
-                    )
-                if (throttled) return@withLock
+                if (automatic && !prefs.autoCheckUpdates.first()) return@withLock
                 _state.value = UpdateState(checking = true)
                 val release = GithubReleases.parseRelease(repository, fetch(repository))
                 val current = requireNotNull(ReleaseVersion.parse(BuildConfig.VERSION_NAME))
                 val remote = requireNotNull(ReleaseVersion.parse(release.version))
                 val available = release.takeIf { remote > current }
+                // Completion time, for automatic and manual requests and whether a new release exists.
+                prefs.setUpdateCheckedAt(System.currentTimeMillis(), BuildConfig.VERSION_NAME)
                 _state.value = UpdateState(checked = true, available = available)
-                // 只有「已是最新」才记检查时间。发现新版本则不记，让用户重启后还能再收到提示，
-                // 避免「点下载 → 下载失败退出 → 6 小时内重开不再提示」的情况。
-                if (available == null) prefs.setUpdateCheckedAt(now, BuildConfig.VERSION_NAME)
             } catch (cancelled: CancellationException) {
                 _state.value = _state.value.copy(checking = false)
                 throw cancelled
@@ -192,10 +183,7 @@ class ReleaseUpdateRepository(
                     is IllegalArgumentException -> failure.message ?: "版本信息暂时无法识别。"
                     else -> "暂时连不上更新服务，请稍后再试。"
                 })
-                // Back off failed automatic checks as well; a manual check always remains possible.
-                try { prefs.setUpdateCheckedAt(System.currentTimeMillis(), BuildConfig.VERSION_NAME) }
-                catch (cancelled: CancellationException) { throw cancelled }
-                catch (_: Exception) { /* A failed preference write must not claim the check succeeded. */ }
+                // A failed/cancelled request must not masquerade as a successful check "just now".
             }
         }
     }
