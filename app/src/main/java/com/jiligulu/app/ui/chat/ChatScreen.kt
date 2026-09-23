@@ -48,6 +48,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -99,6 +103,18 @@ fun ChatScreen(
     val sending by vm.sending.collectAsStateWithLifecycle()
     val error by vm.error.collectAsStateWithLifecycle()
     val pending by vm.pending.collectAsStateWithLifecycle()
+    val expandedDrafts by vm.expandedDrafts.collectAsStateWithLifecycle()
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(vm, lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) vm.collapseDrafts()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            vm.collapseDrafts()
+        }
+    }
     val listState = rememberLazyListState()
     var input by rememberSaveable { mutableStateOf("") }
     val scope = rememberCoroutineScope()
@@ -121,13 +137,10 @@ fun ChatScreen(
     // 每次进入都停在最新一条（微信/QQ 的惯例）：瞬时定位，不播动画。
     LaunchedEffect(Unit) { listState.scrollToItem(0) }
 
-    // reverseLayout 下 index 0 就是最新一条：一进页面天然停在底部，
-    // 不再需要「从顶部一路动画滚到底」——那既卡又难看（用户报过）。
-    // 只在自己已经在底部时跟随新消息；正在翻历史时不打断视线。
-    LaunchedEffect(items.size) {
-        val atBottom = listState.firstVisibleItemIndex == 0 &&
-            listState.firstVisibleItemScrollOffset == 0
-        if (atBottom) listState.animateScrollToItem(0)
+    // A pending bubble is replaced in place: list size alone misses the actual reply/card.
+    // Follow each new message or last-message replacement, even after a taller card changes anchors.
+    LaunchedEffect(items.size, items.lastOrNull()?.messageArrivalKey()) {
+        listState.animateScrollToItem(0)
     }
 
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
@@ -168,7 +181,7 @@ fun ChatScreen(
             reverseLayout = true,
             modifier = Modifier
                 .weight(1f)
-                .fillMaxWidth(),
+                .fillMaxWidth().testTag("chat-messages"),
             contentPadding = PaddingValues(horizontal = 18.dp, vertical = 14.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
@@ -183,7 +196,9 @@ fun ChatScreen(
                             categories = categories,
                             onUpdate = { index, transform -> vm.updateDraft(item.id, index, transform) },
                             onConfirm = { vm.confirmCard(item.id) },
-                            onDelete = { vm.deleteDraft(item.id) }
+                            onDelete = { vm.deleteDraft(item.id) },
+                            expanded = item.id in expandedDrafts,
+                            onExpandedChange = { vm.setDraftExpanded(item.id, it) }
                         )
                         is ChatItem.AppActionCard -> AppActionConfirmationCard(
                             card = item,
@@ -261,7 +276,7 @@ fun ChatScreen(
             OutlinedTextField(
                 value = input,
                 onValueChange = { input = it },
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f).testTag("chat-input"),
                 placeholder = {
                     Text(
                         if (sending) "咕噜正在整理这笔账…" else "比如：昨天中午吃饭 9 元",
@@ -348,10 +363,11 @@ internal fun DraftCardView(
     categories: List<CategoryEntity>,
     onUpdate: (Int, (DraftUi) -> DraftUi) -> Unit,
     onConfirm: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    expanded: Boolean,
+    onExpandedChange: (Boolean) -> Unit
 ) {
     val editing = card.status == ChatItem.DraftCard.Status.EDITING
-    var expanded by remember(card.id) { mutableStateOf(false) }
     var confirmDelete by remember(card.id) { mutableStateOf(false) }
     if (card.status == ChatItem.DraftCard.Status.DELETED) {
         Text("草稿已删除", Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)
@@ -415,7 +431,7 @@ internal fun DraftCardView(
             if (visibleDrafts.size > summaryDrafts.size) Text("还有 ${visibleDrafts.size - summaryDrafts.size} 笔", style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (editing) {
-                TextButton(onClick = { expanded = true }, modifier = Modifier.align(Alignment.End)
+                TextButton(onClick = { onExpandedChange(true) }, modifier = Modifier.align(Alignment.End)
                     .testTag("draft-expand-${card.id}")) { Text("展开 · 编辑草稿") }
             }
             return@Column
@@ -510,7 +526,7 @@ internal fun DraftCardView(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    TextButton(onClick = { expanded = false }, modifier = Modifier.testTag("draft-collapse-${card.id}")) { Text("收起") }
+                    TextButton(onClick = { onExpandedChange(false) }, modifier = Modifier.testTag("draft-collapse-${card.id}")) { Text("收起") }
                     TextButton(onClick = { confirmDelete = true }, modifier = Modifier.testTag("draft-delete-${card.id}")) {
                         Text("删除", color = MaterialTheme.colorScheme.error)
                     }
@@ -562,6 +578,16 @@ internal fun DraftCardView(
             }
         }
     }
+}
+
+/** Editing an amount is not an arriving message; do not fight the keyboard or the user's scroll. */
+internal fun ChatItem.messageArrivalKey(): String = when (this) {
+    is ChatItem.GuluMsg -> "$id:reply:$loading:$text"
+    is ChatItem.DraftCard -> "$id:draft:$status"
+    is ChatItem.UserMsg -> "$id:user"
+    is ChatItem.CommandCard -> "$id:command:$status"
+    is ChatItem.AppActionCard -> "$id:app-action:$status"
+    is ChatItem.ActionCard -> "$id:navigate"
 }
 
 /**

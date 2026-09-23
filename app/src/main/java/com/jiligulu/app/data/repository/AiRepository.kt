@@ -100,7 +100,8 @@ class AiRepository(
     private val synchronizeWaterReminder: suspend (AiAppAction) -> Unit = { _ ->
         if (!userPrefs.waterEnabled.first()) WaterReminderScheduler.cancel(context)
         else WaterReminderScheduler.restore(context)
-    }
+    },
+    private val clientFactory: (String) -> DeepSeekClient = { DeepSeekClient(it) }
 ) {
     /** R9：逐字不变的固定 system 段；版本随 App 走，解析契约全在这一个资源里。 */
     private val systemPromptTemplate: String by lazy {
@@ -166,7 +167,7 @@ class AiRepository(
         )
         val system = renderer.renderSystem()
         val contextBlock = renderer.renderContext(input)
-        return DeepSeekClient(effectiveApiKey())
+        return clientFactory(effectiveApiKey())
             .parseBill(system, contextBlock, history = recentTurns(requestMillis))
     }
 

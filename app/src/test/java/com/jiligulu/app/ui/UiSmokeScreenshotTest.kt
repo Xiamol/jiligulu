@@ -37,6 +37,21 @@ import com.jiligulu.app.data.local.entity.BillType
 import com.jiligulu.app.data.local.entity.ChatMessageEntity
 import com.jiligulu.app.ui.chat.DraftHistoryCodec
 import com.jiligulu.app.ui.chat.DraftUi
+import com.jiligulu.app.ui.chat.ChatScreen
+import com.jiligulu.app.ui.chat.ChatViewModel
+import com.jiligulu.app.ui.chat.ChatItem
+import com.jiligulu.app.data.repository.AiRepository
+import com.jiligulu.app.core.ai.DeepSeekClient
+import com.jiligulu.app.domain.persona.PersonaEngine
+import com.jiligulu.app.domain.persona.QuipLibrary
+import androidx.lifecycle.ViewModelStore
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.ViewModel
+import okhttp3.OkHttpClient
+import okhttp3.Response
+import okhttp3.Protocol
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.ResponseBody.Companion.toResponseBody
 import com.jiligulu.app.core.ai.AiAppAction
 import com.jiligulu.app.ui.chat.AppActionCodec
 import com.jiligulu.app.ui.chat.AppActionPayload
@@ -290,9 +305,11 @@ class UiSmokeScreenshotTest {
             compose.onNodeWithTag("draft-amount-$draftId-0").assertDoesNotExist()
             capture("draft-collapsed")
             compose.onNodeWithTag("draft-expand-$draftId").performClick()
+            awaitTag("draft-amount-$draftId-0")
             compose.onNodeWithTag("draft-amount-$draftId-0").performTextReplacement("15.50")
             capture("draft-expanded")
             compose.onNodeWithTag("draft-collapse-$draftId").performClick()
+            awaitTag("draft-amount-$draftId-0", present = false)
             compose.onNodeWithTag("draft-amount-$draftId-0").assertDoesNotExist()
             runBlocking {
                 withTimeout(5_000) {
@@ -311,8 +328,9 @@ class UiSmokeScreenshotTest {
             compose.onNodeWithText("−¥15.50").assertIsDisplayed()
             compose.onNodeWithTag("draft-amount-$draftId-0").assertDoesNotExist()
             compose.onNodeWithTag("draft-expand-$draftId").performClick()
+            awaitTag("draft-confirm-$draftId")
             compose.onNodeWithTag("draft-confirm-$draftId").performClick()
-            awaitText("记好了，1 笔账已放进账本 ♡")
+            awaitText("记好了，1 笔账已放进账本 ♡", substring = true)
             runBlocking {
                 assertEquals("CONFIRMED", history.getById(draftId)!!.status)
                 val bills = app.container.billRepository.recent(30).filter { it.detail == "补记午饭" }
@@ -331,6 +349,7 @@ class UiSmokeScreenshotTest {
             compose.onNodeWithText("对话记账").performClick()
             awaitText("展开 · 编辑草稿")
             compose.onNodeWithTag("draft-expand-$deletedDraftId").performClick()
+            awaitTag("draft-delete-$deletedDraftId")
             compose.onNodeWithTag("draft-delete-$deletedDraftId").performClick()
             awaitText("这张草稿不要了吗？")
             compose.onNodeWithText("再留一会儿").performClick()
@@ -381,6 +400,99 @@ class UiSmokeScreenshotTest {
             }
             compose.onNodeWithTag("app-action-confirm").assertDoesNotExist()
         }
+    }
+
+    @Test(timeout = 120_000)
+    fun newDraftExpandsWithoutPrematureReplyAndNewMessagesFollowTheBottom() {
+        val app = RuntimeEnvironment.getApplication() as JiliguluApp
+        val container = app.container
+        val history = container.chatHistoryRepository
+        val gate = java.util.concurrent.CountDownLatch(1)
+        val http = OkHttpClient.Builder().addInterceptor { chain ->
+            check(gate.await(20, java.util.concurrent.TimeUnit.SECONDS))
+            val content = """{"bills":[{"amount_yuan":3,"type":"EXPENSE","category":"饮品","detail":"验收水"}],"reply":"3块的水记上啦"}"""
+            val body = org.json.JSONObject().put("choices", org.json.JSONArray().put(org.json.JSONObject()
+                .put("finish_reason", "stop").put("message", org.json.JSONObject().put("content", content)))).toString()
+            Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200)
+                .message("fixture").body(body.toResponseBody("application/json".toMediaType())).build()
+        }.build()
+        val before = runBlocking {
+            container.userPrefs.setNickname("验收")
+            container.userPrefs.setApiKeyOverride("test-only")
+            container.userPrefs.setWaterEnabled(false)
+            container.userPrefs.setUpdateRepository("")
+            repeat(20) { i ->
+                history.insert(ChatMessageEntity(kind = "USER", content = "旧消息$i"))
+                history.insert(ChatMessageEntity(kind = "ASSISTANT", content = "以前的回复$i"))
+            }
+            history.getAll().count { it.kind == "ASSISTANT" }
+        }
+        val ai = AiRepository(app, container.categoryRepository, container.billRepository, container.userPrefs,
+            history, container.categoryAdminRepository, clientFactory = { DeepSeekClient("test-only", http) })
+        val store = ViewModelStore()
+        val model = ViewModelProvider(store, object : ViewModelProvider.Factory {
+            @Suppress("UNCHECKED_CAST")
+            override fun <T : ViewModel> create(modelClass: Class<T>): T =
+                ChatViewModel(ai, container.categoryRepository, PersonaEngine(QuipLibrary.get(app)), history) as T
+        })[ChatViewModel::class.java]
+        val visible = androidx.compose.runtime.mutableStateOf(true)
+        try {
+            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                scenario.onActivity {
+                    activity = it
+                    it.setContent {
+                        GuluTheme {
+                            if (visible.value) ChatScreen(vm = model, onBack = { visible.value = false })
+                            else androidx.compose.material3.TextButton(onClick = { visible.value = true }) {
+                                androidx.compose.material3.Text("重新进入聊天")
+                            }
+                        }
+                    }
+                }
+                awaitText("以前的回复19")
+                compose.onNodeWithTag("chat-input").performTextReplacement("水，3")
+                compose.onNodeWithContentDescription("发送").performClick()
+                compose.waitUntil(10_000) {
+                    shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(16))
+                    (model.items.value.lastOrNull() as? ChatItem.GuluMsg)?.loading == true
+                }
+                compose.onNodeWithTag("chat-messages").performScrollToIndex(15)
+                gate.countDown()
+                awaitText("确认记账（1）")
+                val card = model.items.value.filterIsInstance<ChatItem.DraftCard>().last()
+                compose.onNodeWithTag("draft-confirm-${card.id}").assertIsDisplayed()
+                compose.onNodeWithTag("draft-amount-${card.id}-0").assertIsDisplayed()
+                compose.onNodeWithText("3块的水记上啦").assertDoesNotExist()
+                assertEquals(before, runBlocking { history.getAll().count { it.kind == "ASSISTANT" } })
+                assertTrue(runBlocking { container.billRepository.recent(50).none { it.detail == "验收水" } })
+                capture("fresh-draft-expanded")
+                compose.onNodeWithContentDescription("返回").performClick()
+                awaitText("重新进入聊天")
+                compose.onNodeWithText("重新进入聊天").performClick()
+                awaitText("展开 · 编辑草稿")
+                compose.onNodeWithTag("draft-amount-${card.id}-0").assertDoesNotExist()
+                compose.onNodeWithTag("draft-expand-${card.id}").performClick()
+                awaitTag("draft-confirm-${card.id}")
+                compose.onNodeWithTag("draft-confirm-${card.id}").performClick()
+                awaitText("笔账已放进账本", substring = true)
+                assertEquals(before + 1, runBlocking { history.getAll().count { it.kind == "ASSISTANT" } })
+                assertEquals(1, runBlocking { container.billRepository.recent(50).count { it.detail == "验收水" } })
+                compose.onNodeWithText("3块的水记上啦").assertDoesNotExist()
+                capture("draft-confirmed-single-reply")
+                compose.runOnIdle { activity.setContent {} }
+            }
+        } finally {
+            gate.countDown()
+            store.clear()
+        }
+    }
+
+    private fun awaitTag(tag: String, present: Boolean = true) {
+        compose.waitUntil(10_000) {
+            shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(16))
+            compose.onAllNodesWithTag(tag).fetchSemanticsNodes().isNotEmpty() == present
+        }
+        compose.waitForIdle()
     }
 
     private fun awaitText(text: String, substring: Boolean = false) {

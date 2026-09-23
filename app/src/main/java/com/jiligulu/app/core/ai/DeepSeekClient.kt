@@ -111,14 +111,13 @@ class DeepSeekHttpException(val status: Int, val detail: String) : IOException("
 /**
  * 服务端返回了 200，但没有给出任何内容。
  *
- * 实测场景：请求里含「变个女朋友」「变一百万」这类内容时，DeepSeek 会直接结束生成
- * （`finish_reason = content_filter`），`content` 为空。**这不是网络故障**——
- * 把它说成「没连上」会让用户一直重试同一句话，方向完全错了。
- *
- * 刻意不继承 [IOException]：它重试没有意义，也不该被网络类文案吃掉。
+ * Empty content also occurs with finish_reason=stop during ordinary greetings.
+ * The reason alone does not establish censorship, unsupported intent, or a Wi-Fi problem.
  */
 class DeepSeekEmptyResponseException(val finishReason: String?) :
     IllegalStateException("DeepSeek 返回空内容（finish_reason=${finishReason ?: "未知"}）")
+
+class DeepSeekMalformedResponseException : IllegalStateException("AI 返回的内容格式不正确")
 
 /** 一轮已有对话。[role] 只能是 "user" 或 "assistant"。 */
 data class ChatTurn(val role: String, val content: String)
@@ -219,16 +218,15 @@ class DeepSeekClient(private val apiKey: String, private val client: OkHttpClien
             val finishReason = choice?.get("finish_reason")?.jsonPrimitive?.contentOrNull
             val content = choice?.get("message")?.jsonObject?.get("content")?.jsonPrimitive?.contentOrNull
             if (content.isNullOrBlank()) {
-                Log.w(TAG, "响应没有内容：finish_reason=$finishReason body=${body.take(300)}")
+                Log.w(TAG, "响应没有内容：finish_reason=$finishReason")
                 throw DeepSeekEmptyResponseException(finishReason)
             }
             try {
                 json.decodeFromString(AiParseResult.serializer(), unwrapJsonFence(content))
             } catch (parseFailure: Exception) {
-                // 模型偶尔会吐出畸形 JSON（典型是 reply 里带了未转义的引号）。
-                // 把原文打进日志——否则这个异常到了 UI 只剩「没连上」，永远查不出真因。
-                Log.w(TAG, "解析失败（${parseFailure.message}）原文=${content.take(500)}")
-                throw parseFailure
+                // Never retain conversation/ledger text in device logs. A format failure can be retried.
+                Log.w(TAG, "回复格式校验失败：${parseFailure.javaClass.simpleName}，长度=${content.length}")
+                throw DeepSeekMalformedResponseException()
             }
         }
     }
@@ -258,6 +256,7 @@ class DeepSeekClient(private val apiKey: String, private val client: OkHttpClien
         internal fun isRetryable(failure: Exception): Boolean = when (failure) {
             is DeepSeekHttpException -> failure.status == 429 || failure.status >= 500
             is DeepSeekEmptyResponseException -> true
+            is DeepSeekMalformedResponseException -> true
             is IOException -> true
             else -> false
         }

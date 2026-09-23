@@ -10,6 +10,7 @@ import com.jiligulu.app.JiliguluApp
 import com.jiligulu.app.core.ai.AiOption
 import com.jiligulu.app.core.ai.AiParseResult
 import com.jiligulu.app.core.ai.DeepSeekEmptyResponseException
+import com.jiligulu.app.core.ai.DeepSeekMalformedResponseException
 import com.jiligulu.app.core.ai.DeepSeekHttpException
 import com.jiligulu.app.core.ai.IntentActions
 import com.jiligulu.app.core.ai.LocalBillParser
@@ -132,6 +133,15 @@ class ChatViewModel(
     val error: StateFlow<String?> = _error
     val categories: StateFlow<List<CategoryEntity>> = categoryRepository.categories
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    private val _expandedDrafts = MutableStateFlow<Set<Long>>(emptySet())
+    val expandedDrafts: StateFlow<Set<Long>> = _expandedDrafts
+
+    fun setDraftExpanded(id: Long, expanded: Boolean) {
+        _expandedDrafts.value = if (expanded) _expandedDrafts.value + id else _expandedDrafts.value - id
+    }
+
+    /** Presentation state only: leaving chat never deletes or dismisses a draft. */
+    fun collapseDrafts() { _expandedDrafts.value = emptySet() }
 
     /** 当前挂起中的「待补充」账。不为空时输入栏上方会出现一条提示气泡。 */
     private val _pending = MutableStateFlow<PendingDraft?>(null)
@@ -143,6 +153,7 @@ class ChatViewModel(
             history.conversationGeneration.drop(1).collect {
                 writes.withLock {
                     _pending.value = null
+                    collapseDrafts()
                     _items.value = history.getAll().map { it.toUi() }
                     if (_items.value.isEmpty()) appendReply("新的一页，阿噜继续陪你记账 ♡")
                 }
@@ -362,7 +373,8 @@ class ChatViewModel(
                 )
                 history.update(card)
                 replace(card.toUi())
-                appendReply(turn.reply.ifBlank { "草稿整理好了，确认一下就记入账本，阿噜～" })
+                setDraftExpanded(card.id, true)
+                // A model reply is not proof of a commit. Show only the draft until the user acts.
                 clearPending()
             }
         }
@@ -412,9 +424,9 @@ class ChatViewModel(
                 writes.withLock {
                     history.withConversationLock {
                         if (history.conversationGeneration.value == generation) {
-                            appendReply("记好了，$saved 笔账已放进账本 ♡")
                             val name = aiRepository.nicknameWithSuffix()
-                            personaEngine.nextSaveQuip(System.currentTimeMillis(), name)?.let { appendReply(it) }
+                            val quip = personaEngine.nextSaveQuip(System.currentTimeMillis(), name)
+                            appendReply(listOfNotNull("记好了，$saved 笔账已放进账本 ♡", quip?.takeIf { it.isNotBlank() }).joinToString("\n"))
                         }
                     }
                 }
@@ -451,14 +463,7 @@ class ChatViewModel(
     }
 
     fun cancelCard(cardId: Long) {
-        val card = findCard(cardId)?.takeIf { it.status == ChatItem.DraftCard.Status.EDITING } ?: return
-        replace(card.copy(status = ChatItem.DraftCard.Status.CANCELLED))
-        viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
-            withContext(NonCancellable) {
-                try { writes.withLock { history.dismissDraft(cardId) } }
-                catch (_: Exception) { replace(card); _error.value = "取消没有保存成功，请重试。" }
-            }
-        }
+        setDraftExpanded(cardId, false)
     }
 
     fun deleteDraft(cardId: Long) {
@@ -709,6 +714,9 @@ class ChatViewModel(
 
     companion object {
         internal fun offlineResult(input: String, cause: Throwable? = null, categories: List<CategoryEntity> = emptyList()): AiParseResult {
+            localGreeting(input)?.let { greeting ->
+                return AiParseResult(reply = "$greeting\n（在线回复暂时没接上，这是阿噜的本地问候。）")
+            }
             if (ChatIntent.requiresOnlineAction(input)) return AiParseResult(
                 reply = fallbackReply(true, cause) + "\n修改账单和设置需要在线处理，请在 AI 服务恢复后重试；这次没有新增或改动账单。"
             )
@@ -716,6 +724,18 @@ class ChatViewModel(
                 draft.copy(category = CategoryEngine.suggest(draft.detail, categories)?.name ?: "未分类")
             }
             return AiParseResult(bills = drafts, reply = fallbackReply(drafts.isEmpty(), cause))
+        }
+
+        internal fun localGreeting(input: String): String? {
+            val greeting = input.lowercase(java.util.Locale.ROOT)
+                .replace(Regex("[\\s，,。.!！?？~～]+"), "")
+                .removePrefix("阿噜").removeSuffix("阿噜")
+            return when (greeting) {
+                "hi", "hello", "hey", "嗨", "你好", "哈喽", "在吗", "在不在" -> "在呀，阿噜在这儿，陪你聊会儿 ♡"
+                "早", "早安", "早上好" -> "早呀，记得吃早餐，阿噜 ♡"
+                "晚上好", "晚安" -> "晚上好呀，今天也辛苦啦，阿噜 ♡"
+                else -> null
+            }
         }
 
         private val NAV_TARGETS = setOf(
@@ -780,13 +800,15 @@ class ChatViewModel(
                 httpStatus == 429 ->
                     "请求太频繁了，缓一会儿再跟我说～"
                 httpStatus == 400 ->
-                    "这句话阿噜接不住，换个说法嘛～ 记账、唠嗑、问功能，阿噜都在行 ♡"
+                    "AI 服务没有接受这次请求，请稍后重试（400）。"
                 httpStatus != null && httpStatus >= 500 ->
                     "DeepSeek 那边暂时有点忙，稍后再试一次。"
                 httpStatus != null ->
                     "阿噜这边出了点小状况（DeepSeek 返回 $httpStatus），稍后再试试～"
                 cause is DeepSeekEmptyResponseException ->
-                    "这个阿噜变不出来呀，换个话题嘛 ♡ 记账、唠嗑、问功能都行～"
+                    "AI 服务这次返回了空内容，阿噜没接到回复，请稍后再试。"
+                cause is DeepSeekMalformedResponseException ->
+                    "AI 服务这次返回的内容格式不正确，请稍后重试；没有改动账单。"
                 cause is IOException ->
                     "网络好像不太稳，阿噜没接上话，你再说一遍试试～"
                 nothingParsed ->

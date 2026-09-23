@@ -3,6 +3,8 @@ package com.jiligulu.app.ui.chat
 import android.app.Application
 import com.jiligulu.app.core.ai.DeepSeekClient
 import com.jiligulu.app.core.ai.DeepSeekEmptyResponseException
+import com.jiligulu.app.core.ai.DeepSeekMalformedResponseException
+import java.util.concurrent.atomic.AtomicInteger
 import com.jiligulu.app.core.ai.DeepSeekHttpException
 import kotlinx.coroutines.runBlocking
 import okhttp3.MediaType.Companion.toMediaType
@@ -56,7 +58,7 @@ class AiFailureMessageTest {
         )
         assertFalse("400 不该被说成没连上：$message", message.contains("没连上"))
         assertFalse("400 不该被说成网络问题：$message", message.contains("网络"))
-        assertTrue("要说清是「接不住」：$message", message.contains("接不住"))
+        assertTrue("说明请求未被接受而非用户内容不支持", message.contains("没有接受"))
     }
 
     @Test
@@ -66,7 +68,8 @@ class AiFailureMessageTest {
         )
         assertFalse("内容审核拦截不该被说成没连上：$message", message.contains("没连上"))
         assertFalse("也不该说网络不稳：$message", message.contains("网络"))
-        assertTrue("要说清是「变不出来」：$message", message.contains("变不出"))
+        assertTrue("只说明实际为空，不归因用户意图", message.contains("空内容"))
+        assertFalse(message.contains("变不出"))
     }
 
     @Test
@@ -185,4 +188,32 @@ class AiFailureMessageTest {
                 .body(body.toResponseBody("application/json".toMediaType()))
                 .build()
         }.build()
+
+    @Test fun `ordinary greetings still receive an honest local reply after empty responses`() {
+        for (input in listOf("hi", "Hi!", "在吗阿噜?", "阿噜在吗？", "早", "晚上好")) {
+            val parsed = ChatViewModel.offlineResult(input, DeepSeekEmptyResponseException("stop"))
+            assertTrue(parsed.bills.isEmpty())
+            assertTrue(parsed.reply.contains("本地问候"))
+            assertFalse(parsed.reply.contains("变不出"))
+        }
+        assertTrue(ChatViewModel.localGreeting("水，3") == null)
+        assertTrue(ChatViewModel.localGreeting("早饭9元") == null)
+    }
+
+    @Test fun `malformed model output retries once and can recover without touching the ledger`() = runBlocking {
+        val calls = AtomicInteger()
+        val http = OkHttpClient.Builder().addInterceptor { chain ->
+            val content = if (calls.incrementAndGet() == 1) "[not valid JSON]" else "{\"bills\":[],\"reply\":\"在呀\"}"
+            val body = org.json.JSONObject().put("choices", org.json.JSONArray().put(
+                org.json.JSONObject().put("finish_reason", "stop").put("message", org.json.JSONObject().put("content", content))
+            )).toString()
+            Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200)
+                .message("stub").body(body.toResponseBody("application/json".toMediaType())).build()
+        }.build()
+        val result = DeepSeekClient("test-only", http).parseBill("system", "hi")
+        assertTrue(result.isSuccess)
+        assertTrue(result.getOrThrow().reply == "在呀")
+        assertTrue(calls.get() == 2)
+        assertTrue(DeepSeekClient.isRetryable(DeepSeekMalformedResponseException()))
+    }
 }

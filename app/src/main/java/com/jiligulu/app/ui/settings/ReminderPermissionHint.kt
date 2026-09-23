@@ -5,6 +5,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.provider.Settings
+import android.net.Uri
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -59,5 +60,13 @@ fun ReminderPermissionHint() {
     }
     Text("息屏省电和后台限制可能延迟提醒。可在手机系统设置中允许自启动与后台运行；强行停止应用后，需要重新打开才能恢复。",
         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    if (Build.MANUFACTURER.equals("vivo", ignoreCase = true) || Build.BRAND.equals("iQOO", ignoreCase = true)) {
+        Text("vivo / iQOO：系统设置中搜索「后台高耗电」或「后台耗电管理」，允许叽里咕噜后台运行；同时开启自启动。仅开启通知和准时提醒权限仍可能被系统冻结。",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+    TextButton(onClick = {
+        try { context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))) }
+        catch (_: Exception) { error = "请在系统设置中找到叽里咕噜的应用信息。" }
+    }) { Text("打开系统应用设置") }
     error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
 }

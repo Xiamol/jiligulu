@@ -25,6 +25,9 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
+import com.jiligulu.app.data.reminder.recoverRemindersWhileVisible
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
@@ -69,6 +72,15 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         handleWaterIntent(intent)
+        lifecycleScope.launch {
+            lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                // A vendor may remove alarms while keeping this process alive. Cold-start-only
+                // recovery misses that case, so returning to any screen restores the saved deadline.
+                recoverRemindersWhileVisible {
+                    (application as JiliguluApp).container.catchUpWaterReminder()
+                }
+            }
+        }
         enableEdgeToEdge()
         setContent {
             val app = LocalContext.current.applicationContext as JiliguluApp
