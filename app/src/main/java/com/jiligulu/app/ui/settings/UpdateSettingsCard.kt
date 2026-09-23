@@ -110,7 +110,7 @@ private fun lastCheckedText(checkedAt: Long): String {
 }
 
 @Composable
-fun UpdatePromptHost(enabled: Boolean) {
+fun UpdatePromptHost(enabled: Boolean, onDismissed: () -> Unit = {}) {
     val app = LocalContext.current.applicationContext as JiliguluApp
     val state by app.container.updates.state.collectAsStateWithLifecycle()
     val uri = LocalUriHandler.current
@@ -123,7 +123,7 @@ fun UpdatePromptHost(enabled: Boolean) {
     // 弹窗里只放几条要点，全文留给「完整说明」。
     val brief = remember(release.notes, release.version) { briefNotes(release.notes) }
     AlertDialog(
-        onDismissRequest = { dismissed = key },
+        onDismissRequest = { dismissed = key; onDismissed() },
         title = { Text("咕噜有新版本啦 · ${release.version}") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -138,14 +138,14 @@ fun UpdatePromptHost(enabled: Boolean) {
         },
         confirmButton = {
             TextButton(onClick = {
-                try { uri.openUri(release.downloadUrl); dismissed = key }
+                try { uri.openUri(release.downloadUrl); dismissed = key; onDismissed() }
                 catch (_: Exception) { openError = "没有找到可用的浏览器，请稍后再试。" }
             }) { Text("下载新版") }
         },
         dismissButton = {
             Row {
                 TextButton(onClick = { showFullNotes = true }) { Text("完整说明") }
-                TextButton(onClick = { dismissed = key }) { Text("稍后再说") }
+                TextButton(onClick = { dismissed = key; onDismissed() }) { Text("稍后再说") }
             }
         }
     )

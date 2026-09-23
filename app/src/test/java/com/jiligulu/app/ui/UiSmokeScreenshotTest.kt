@@ -8,6 +8,10 @@ import android.os.Looper
 import android.view.PixelCopy
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
@@ -503,6 +507,75 @@ class UiSmokeScreenshotTest {
                 compose.onNodeWithContentDescription("设置").assertIsDisplayed()
                 compose.runOnIdle { activity.setContent {} }
             }
+        }
+    }
+
+    @Test(timeout = 90_000)
+    fun announcementAndVoiceComposerSupportReviewBeforeSending() {
+        val app = RuntimeEnvironment.getApplication() as JiliguluApp
+        val prefs = app.container.userPrefs
+        val fixture = """{"announcements":[{"id":"holiday-demo","title":"中秋快乐，记得好好吃饭","summary":"阿噜寄来一封小小的节日来信","emoji":"🌕","body":"愿你的日子像月亮一样圆满。\n忙碌之余，也记得给自己留一点甜。\n\n这是一条仅用于界面验收的公告。"}]}"""
+        val notices = com.jiligulu.app.data.announcement.AnnouncementRepository(prefs, { fixture })
+        runBlocking {
+            prefs.setNickname("验收")
+            prefs.setWaterEnabled(false)
+            prefs.setUpdateRepository("")
+            prefs.setAnnouncementSource("https://example.test/feed.json")
+            notices.initialize()
+            prefs.setAnnouncementSource("") // The actual app container must not make network requests in this UI test.
+        }
+        lateinit var callback: com.jiligulu.app.ui.voice.SpeechInputEngine.Listener
+        val voice = com.jiligulu.app.ui.voice.SpeechInputController {
+            object : com.jiligulu.app.ui.voice.SpeechInputEngine {
+                override fun start(listener: com.jiligulu.app.ui.voice.SpeechInputEngine.Listener) { callback = listener; listener.ready() }
+                override fun stop() { callback.result("水，3") }
+                override fun cancel() = Unit
+                override fun destroy() = Unit
+            }
+        }
+        val input = androidx.compose.runtime.mutableStateOf("原有文字")
+        val sent = mutableListOf<String>()
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity {
+                activity = it
+                it.setContent {
+                    GuluTheme {
+                        val state = notices.state.collectAsStateWithLifecycle().value
+                        androidx.compose.foundation.layout.Column(androidx.compose.ui.Modifier.fillMaxSize()) {
+                            com.jiligulu.app.ui.announcement.AnnouncementBoard(state, notices::open)
+                            androidx.compose.foundation.layout.Spacer(androidx.compose.ui.Modifier.weight(1f))
+                            com.jiligulu.app.ui.voice.VoiceComposer(input.value, { input.value = it },
+                                { sent += input.value }, ready = true, sending = false, suppliedController = voice)
+                        }
+                        com.jiligulu.app.ui.announcement.AnnouncementDialogHost(notices, enabled = true)
+                    }
+                }
+            }
+            awaitTag("announcement-body")
+            capture("announcement-popup", dialog = true)
+            compose.onNodeWithText("关闭").performClick()
+            awaitTag("announcement-body", present = false)
+            compose.onNodeWithTag("announcement-board").performClick()
+            awaitTag("announcement-body")
+            compose.onNodeWithText("这条不再弹出").performClick()
+            awaitTag("announcement-body", present = false)
+            assertTrue(runBlocking { "holiday-demo" in prefs.readAnnouncements().mutedIds })
+            compose.onNodeWithTag("announcement-board").assertIsDisplayed()
+            capture("announcement-home-card")
+            compose.onNodeWithTag("voice-toggle").performClick()
+            awaitText("按住说话")
+            compose.onNodeWithTag("voice-hold").performTouchInput { down(center) }
+            awaitText("正在听，松开结束")
+            capture("voice-listening")
+            compose.onNodeWithTag("voice-hold").performTouchInput { up() }
+            awaitTag("chat-input")
+            compose.onNodeWithTag("chat-input").assertTextEquals("原有文字 水，3")
+            assertTrue(sent.isEmpty())
+            compose.onNodeWithTag("chat-input").performTextReplacement("水，3.50")
+            capture("voice-editable-text")
+            compose.onNodeWithContentDescription("发送").performClick()
+            assertEquals(listOf("水，3.50"), sent)
+            compose.runOnIdle { activity.setContent {} }
         }
     }
 

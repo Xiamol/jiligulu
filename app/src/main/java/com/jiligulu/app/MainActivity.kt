@@ -18,6 +18,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -34,6 +35,9 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.compose.currentBackStackEntryAsState
+import com.jiligulu.app.ui.announcement.AnnouncementDialogHost
+import com.jiligulu.app.ui.announcement.shouldShowUpdatePrompt
 import com.jiligulu.app.core.ai.NavTargets
 import com.jiligulu.app.data.prefs.UserPrefs
 import com.jiligulu.app.data.update.checkUpdatesOnForeground
@@ -121,6 +125,22 @@ private fun JiliguluRoot(waterRequest: Int) {
     val lifecycleOwner = LocalLifecycleOwner.current
     val startupCompleted = app.container.startupCompleted
     var mainReady by remember { mutableStateOf(startupCompleted) }
+    var updateSettled by remember { mutableStateOf(false) }
+    var dismissedUpdateKey by rememberSaveable { mutableStateOf<String?>(null) }
+    val updateState by app.container.updates.state.collectAsStateWithLifecycle()
+    val notices by app.container.announcements.state.collectAsStateWithLifecycle()
+    var noticeWasShowing by remember { mutableStateOf(false) }
+    LaunchedEffect(state.ready) {
+        if (state.ready) app.container.announcements.initialize()
+    }
+    LaunchedEffect(lifecycleOwner) {
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (true) {
+                app.container.announcements.updateTime()
+                kotlinx.coroutines.delay(60_000)
+            }
+        }
+    }
     LaunchedEffect(lifecycleOwner, startup) {
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             // 进程内已完成过一次完整启动就直接进主界面，不再播放入场动画
@@ -145,6 +165,7 @@ private fun JiliguluRoot(waterRequest: Int) {
         if (state.ready && mainReady) {
             lifecycleOwner.lifecycle.checkUpdatesOnForeground {
                 app.container.updates.check(automatic = true)
+                updateSettled = true
             }
         }
     }
@@ -154,6 +175,7 @@ private fun JiliguluRoot(waterRequest: Int) {
             val homeState by homeVm.uiState.collectAsStateWithLifecycle()
             LaunchedEffect(homeState.isLoaded) { if (homeState.isLoaded) mainReady = true }
             val navController = rememberNavController()
+            val navigation by navController.currentBackStackEntryAsState()
             val start = remember { if (nickname.isBlank()) Routes.ONBOARDING else Routes.MAIN }
             LaunchedEffect(waterRequest) {
                 if (waterRequest > 0 && nickname.isNotBlank()) {
@@ -226,10 +248,17 @@ private fun JiliguluRoot(waterRequest: Int) {
                     OnboardingScreen(onDone = { navController.popBackStack() }, preview = true, active = !showSplash)
                 }
             }
+            val releaseKey = updateState.available?.let { it.pageUrl + it.version }
+            val showUpdate = shouldShowUpdatePrompt(!showSplash, releaseKey, dismissedUpdateKey,
+                notices.manualId != null || (noticeWasShowing && notices.opened != null))
+            val showNotice = !showSplash && !showUpdate && navigation?.destination?.route == Routes.MAIN &&
+                (notices.manualId != null || (updateSettled && !updateState.checking))
+            LaunchedEffect(showNotice, notices.opened?.id) { noticeWasShowing = showNotice && notices.opened != null }
+            UpdatePromptHost(enabled = showUpdate, onDismissed = { dismissedUpdateKey = releaseKey })
+            AnnouncementDialogHost(app.container.announcements, enabled = showNotice)
         }
         AnimatedVisibility(visible = showSplash, enter = fadeIn(tween(100)), exit = fadeOut(tween(160))) {
             StartupScreen(state.error, startup::prepare)
         }
-        UpdatePromptHost(enabled = !showSplash)
     }
 }

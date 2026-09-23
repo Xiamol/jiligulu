@@ -12,6 +12,7 @@ import com.jiligulu.app.data.repository.CategoryAdminRepository
 import com.jiligulu.app.data.repository.CategoryRepository
 import com.jiligulu.app.data.repository.ChatHistoryRepository
 import com.jiligulu.app.data.update.ReleaseUpdateRepository
+import com.jiligulu.app.data.announcement.AnnouncementRepository
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -26,6 +27,7 @@ class AppContainer(private val app: Application) {
 
     val userPrefs: UserPrefs by lazy { UserPrefs(app) }
     val updates: ReleaseUpdateRepository by lazy { ReleaseUpdateRepository(userPrefs) }
+    val announcements: AnnouncementRepository by lazy { AnnouncementRepository(userPrefs) }
 
     val billRepository: BillRepository by lazy { BillRepository(database.billDao()) }
     val categoryRepository: CategoryRepository by lazy { CategoryRepository(database.categoryDao()) }

@@ -6,6 +6,8 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.stringSetPreferencesKey
+import kotlinx.coroutines.flow.first
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -28,6 +30,8 @@ data class WaterReminderState(
 )
 
 data class WaterReminderAdvance(val nextDueAt: Long, val pendingToDeliver: PendingWater?)
+
+data class SavedAnnouncements(val source: String, val cachedFeed: String, val mutedIds: Set<String>)
 
 /**
  * 用户偏好：称呼、称呼后缀、自定义 API Key。
@@ -56,6 +60,10 @@ class UserPrefs(private val context: Context) {
         private val KEY_UPDATE_CHECKED_AT = longPreferencesKey("update_checked_at")
         private val KEY_UPDATE_CHECKED_VERSION = stringPreferencesKey("update_checked_version")
         private val KEY_TRASH_RETENTION_DAYS = intPreferencesKey("trash_retention_days")
+        private val KEY_ANNOUNCEMENT_SOURCE = stringPreferencesKey("announcement_source")
+        private val KEY_ANNOUNCEMENT_CACHE = stringPreferencesKey("announcement_cache")
+        private val KEY_MUTED_ANNOUNCEMENTS = stringSetPreferencesKey("muted_announcements")
+        const val DEFAULT_ANNOUNCEMENT_SOURCE = "https://raw.githubusercontent.com/Xiamol/jiligulu/announcements/announcements.json"
         const val DEFAULT_SUFFIX = "大人"
 
         /** 主题模式：跟随系统 / 强制浅色 / 强制深色 */
@@ -83,6 +91,23 @@ class UserPrefs(private val context: Context) {
 
     /** null = 还没读过；"" = 未设置（需要 Onboarding） */
     val nickname: Flow<String> = context.dataStore.data.map { it[KEY_NICKNAME] ?: "" }
+
+    suspend fun readAnnouncements(): SavedAnnouncements {
+        val values = context.dataStore.data.first()
+        return SavedAnnouncements(values[KEY_ANNOUNCEMENT_SOURCE] ?: DEFAULT_ANNOUNCEMENT_SOURCE,
+            values[KEY_ANNOUNCEMENT_CACHE].orEmpty(), values[KEY_MUTED_ANNOUNCEMENTS].orEmpty())
+    }
+
+    suspend fun setAnnouncementSource(source: String) {
+        context.dataStore.edit {
+            it[KEY_ANNOUNCEMENT_SOURCE] = source
+            it.remove(KEY_ANNOUNCEMENT_CACHE)
+        }
+    }
+    suspend fun cacheAnnouncements(raw: String) { context.dataStore.edit { it[KEY_ANNOUNCEMENT_CACHE] = raw } }
+    suspend fun muteAnnouncement(id: String) {
+        context.dataStore.edit { it[KEY_MUTED_ANNOUNCEMENTS] = it[KEY_MUTED_ANNOUNCEMENTS].orEmpty() + id }
+    }
 
     val nameSuffix: Flow<String> = context.dataStore.data.map { it[KEY_NAME_SUFFIX] ?: DEFAULT_SUFFIX }
 

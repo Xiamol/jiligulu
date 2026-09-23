@@ -56,8 +56,10 @@ fun HomeScreen(
     vm: HomeViewModel = viewModel(factory = HomeViewModel.Factory)
 ) {
     val state by vm.uiState.collectAsStateWithLifecycle()
+    val app = androidx.compose.ui.platform.LocalContext.current.applicationContext as com.jiligulu.app.JiliguluApp
+    val notices by app.container.announcements.state.collectAsStateWithLifecycle()
     var selectedBillId by rememberSaveable { mutableStateOf<Long?>(null) }
-    HomeContent(state, onOpenChat, onAddBill) { selectedBillId = it }
+    HomeContent(state, onOpenChat, onAddBill, notices, app.container.announcements::open) { selectedBillId = it }
     selectedBillId?.let { BillDetailSheet(it) { selectedBillId = null } }
 }
 
@@ -67,12 +69,15 @@ private fun HomeContent(
     state: HomeUiState,
     onOpenChat: () -> Unit,
     onAddBill: () -> Unit,
+    announcements: com.jiligulu.app.data.announcement.AnnouncementState = com.jiligulu.app.data.announcement.AnnouncementState(loading = false),
+    onOpenAnnouncement: (String) -> Unit = {},
     onBillClick: (Long) -> Unit
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 24.dp)
     ) {
+        item(key = "announcements") { com.jiligulu.app.ui.announcement.AnnouncementBoard(announcements, onOpenAnnouncement) }
         item(key = "monthly_summary") { MonthlySummary(state) }
         item(key = "record_actions") {
             Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -200,6 +205,6 @@ private fun SummaryAmount(label: String, amount: String, count: Int, expense: Bo
 @Composable
 private fun HomePreview() {
     GuluTheme(darkTheme = false) {
-        HomeContent(HomeUiState(monthLabel = "2026年9月"), {}, {}, {})
+        HomeContent(HomeUiState(monthLabel = "2026年9月"), {}, {}, onBillClick = {})
     }
 }

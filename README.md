@@ -6,6 +6,8 @@ Android 本地记账应用，Kotlin + Jetpack Compose + Room。当前版本 `0.5
 
 后续接手与功能讨论先看 [当前路线图与用户决策](docs/ROADMAP.md)；旧交接中的优先级可能已被这里的最新反馈替代。
 
+本地待验收功能：远程公告小信箱、系统语音转可编辑文字。详见 [公告运营与语音说明](docs/ANNOUNCEMENTS.md)，尚未包含在已发布的 v0.5.6 APK 中。
+
 ## 构建
 
 使用 Android SDK 35、JDK 17 或 21。`local.properties` 中配置本机 `sdk.dir`，命令行的 `JAVA_HOME` 指向 JDK。Gradle Wrapper 已随项目提供并固定为 8.11.1，无需单独安装 Gradle。

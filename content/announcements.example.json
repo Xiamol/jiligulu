@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "announcements": [
+    {
+      "id": "mid-autumn-2026",
+      "title": "中秋快乐，记得好好吃饭",
+      "summary": "阿噜寄来一封小小的节日来信",
+      "body": "愿你的日子像月亮一样圆满。\n忙碌之余，也记得给自己留一点甜。",
+      "emoji": "🌕",
+      "startsAt": "2026-09-25T00:00:00+08:00",
+      "endsAt": "2026-09-28T00:00:00+08:00",
+      "priority": 10,
+      "enabled": true
+    }
+  ]
+}
