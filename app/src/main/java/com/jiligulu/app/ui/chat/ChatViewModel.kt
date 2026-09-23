@@ -7,10 +7,13 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.jiligulu.app.BuildConfig
 import com.jiligulu.app.JiliguluApp
+import com.jiligulu.app.core.ai.AiOption
 import com.jiligulu.app.core.ai.AiParseResult
 import com.jiligulu.app.core.ai.DeepSeekEmptyResponseException
 import com.jiligulu.app.core.ai.DeepSeekHttpException
+import com.jiligulu.app.core.ai.IntentActions
 import com.jiligulu.app.core.ai.LocalBillParser
+import com.jiligulu.app.core.ai.NavTargets
 import com.jiligulu.app.data.local.entity.BillType
 import com.jiligulu.app.data.local.entity.CategoryEntity
 import com.jiligulu.app.data.local.entity.ChatMessageEntity
@@ -38,6 +41,23 @@ import kotlinx.coroutines.withContext
 import java.io.IOException
 import java.time.ZoneId
 
+/**
+ * 跳转卡选项（[AiOption.action]）解析后的归宿。
+ *
+ * 放顶层而不是 companion 里：UI 层要按类型分支，嵌套在 companion 内的 sealed 类型
+ * 外部引用不到（编译期直接 Unresolved）。
+ */
+sealed interface ActionPick {
+    /** 跳到某个页面（目标取自 [NavTargets]）。 */
+    data class Navigate(val target: String) : ActionPick
+
+    /** 本地动作：以「帮我恢复账单」继续一轮对话。 */
+    data object RestoreAssist : ActionPick
+
+    /** 表外取值：**一律忽略，不崩**——模型随口编一个跳转目标比「不给」更糟。 */
+    data object Ignore : ActionPick
+}
+
 sealed interface ChatItem {
     val id: Long
     data class UserMsg(override val id: Long, val text: String) : ChatItem
@@ -51,6 +71,19 @@ sealed interface ChatItem {
     ) : ChatItem {
         enum class Status { EDITING, SAVING, CONFIRMED, CANCELLED }
     }
+
+    /**
+     * 阿噜给的「可点选项」卡（R4/R5）：指路跳转、或让阿噜帮忙恢复。
+     *
+     * **一次性**：点过任意选项就整条删掉（见 [ChatViewModel.consumeActionCard]）。
+     * 用户是被这张卡带走的，回来再看到一张已经用掉的卡只会碍事——
+     * 而且它从不进 AI 上下文，删掉对 prompt 零影响。
+     */
+    data class ActionCard(
+        override val id: Long,
+        val text: String,
+        val options: List<AiOption>
+    ) : ChatItem
 
     /**
      * 改账 / 删账确认卡。
@@ -280,12 +313,15 @@ class ChatViewModel(
             }
 
             is AiTurn.Choices -> {
-                // R4/R5：可点选项（(a)帮我恢复 /(b)自己去、页面跳转）。
-                // T04 会把这里换成带按钮的 ActionCard 并接 onNavigate；
-                // 在此之前先以文本回复落地，保证「指路」信息不丢，也不引入半成品 UI。
-                val message = pendingMsg.copy(status = "", content = turn.reply.ifBlank { "阿噜给你指条路～" })
-                history.update(message)
-                replace(message.toUi())
+                // R4/R5：可点选项（「让阿噜帮你恢复」/「我自己去回收站」、页面跳转）。
+                // 落成 ActionCard：正文 + 可点按钮。用户点过即整条销毁（一次性卡）。
+                val card = pendingMsg.copy(
+                    kind = "ACTION",
+                    content = turn.reply.ifBlank { "阿噜给你指条路～" },
+                    draftPayload = ActionCardCodec.encode(turn.options)
+                )
+                history.update(card)
+                replace(card.toUi())
                 clearPending()
                 return
             }
@@ -366,6 +402,24 @@ class ChatViewModel(
                     catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { /* Remains recoverable. */ }
                 }
                 _error.value = if (stored?.status == "CONFIRMED") "账单已保存，回应稍后再补。" else "暂时没能保存，请重试；不会重复记账。"
+            }
+        }
+    }
+
+    /**
+     * 跳转卡用过即销：整条删掉，回到聊天页时不再出现。
+     *
+     * 这里**物理删除**是刻意的（不是打标记）：
+     * - 它是一次性的指路卡，没有留档价值；
+     * - 它从不进 AI 上下文（`chatTurnsFor` 只认 USER/ASSISTANT），删掉对 prompt 零影响；
+     * - 用户是被它带走的，回来还看到一张已经用掉的卡只会碍事。
+     * 对话正文绝不走这条路——历史只追加、不回改。
+     */
+    fun consumeActionCard(cardId: Long) {
+        _items.value = _items.value.filterNot { it.id == cardId }
+        viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
+            withContext(NonCancellable) {
+                runCatching { history.deleteMessage(cardId) }
             }
         }
     }
@@ -501,6 +555,9 @@ class ChatViewModel(
             ChatItem.GuluMsg(id, "这张旧草稿暂时无法展示，原始记录仍已保留。原话：$rawInput")
         }
 
+        // 一次性跳转卡：正文 + 可点选项（点过即整条销毁，见 consumeActionCard）。
+        "ACTION" -> ChatItem.ActionCard(id, content, ActionCardCodec.decode(draftPayload))
+
         "COMMAND" -> {
             val payload = CommandCardCodec.decode(draftPayload)
             if (payload == null || payload.items.isEmpty()) {
@@ -543,6 +600,30 @@ class ChatViewModel(
     private fun trimAmount(value: Double) = java.math.BigDecimal.valueOf(value).stripTrailingZeros().toPlainString()
 
     companion object {
+        private val NAV_TARGETS = setOf(
+            NavTargets.TRASH, NavTargets.TRASH_DRAFT, NavTargets.SETTINGS, NavTargets.ADD_BILL
+        )
+
+        /**
+         * 把 [AiOption.action] 翻译成可执行的动作。
+         *
+         * 兼容两种写法：提示词里给的 `navigate:trash` 前缀式，和裸值 `trash`——
+         * 模型两种都可能吐出来，UI 不该因为写法差异就丢掉一次合法跳转。
+         * 其余一律 [ActionPick.Ignore]，保证「模型编目标」不会把用户带到不存在的页面。
+         */
+        internal fun parseAction(action: String): ActionPick {
+            val trimmed = action.trim()
+            if (trimmed.startsWith("navigate:")) {
+                val target = trimmed.removePrefix("navigate:").trim()
+                return if (target in NAV_TARGETS) ActionPick.Navigate(target) else ActionPick.Ignore
+            }
+            return when {
+                trimmed in NAV_TARGETS -> ActionPick.Navigate(trimmed)
+                trimmed == IntentActions.RESTORE_ASSIST -> ActionPick.RestoreAssist
+                else -> ActionPick.Ignore
+            }
+        }
+
         /**
          * 降级路径的措辞必须能指路。
          *

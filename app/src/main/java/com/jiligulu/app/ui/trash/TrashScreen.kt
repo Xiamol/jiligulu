@@ -67,11 +67,15 @@ import java.util.Locale
 @Composable
 fun TrashScreen(
     onBack: () -> Unit = {},
+    initialTab: TrashTab = TrashTab.BILLS,
     vm: TrashViewModel = viewModel(factory = TrashViewModel.Factory)
 ) {
     val state by vm.uiState.collectAsStateWithLifecycle()
     var confirmPurge by rememberSaveable { mutableStateOf(false) }
     var showRetention by rememberSaveable { mutableStateOf(false) }
+
+    // 从跳转卡进来时（onNavigate 的 trash_draft）直接落在草稿页签。
+    LaunchedEffect(initialTab) { vm.selectTab(initialTab) }
 
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(

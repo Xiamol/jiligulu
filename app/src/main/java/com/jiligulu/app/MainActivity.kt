@@ -31,6 +31,7 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.jiligulu.app.core.ai.NavTargets
 import com.jiligulu.app.data.prefs.UserPrefs
 import com.jiligulu.app.data.reminder.WaterReminderWorker
 import com.jiligulu.app.ui.add.AddBillScreen
@@ -44,6 +45,7 @@ import com.jiligulu.app.ui.startup.StartupScreen
 import com.jiligulu.app.ui.startup.StartupViewModel
 import com.jiligulu.app.ui.theme.GuluTheme
 import com.jiligulu.app.ui.trash.TrashScreen
+import com.jiligulu.app.ui.trash.TrashTab
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.MutableStateFlow
 
@@ -55,6 +57,9 @@ object Routes {
     const val ONBOARDING = "onboarding"
     const val WELCOME_PREVIEW = "welcome_preview"
     const val TRASH = "trash"
+
+    /** 回收站的草稿页签——跳转卡里的「我自己去回收站」直达这里。 */
+    const val TRASH_DRAFT = "trash_draft"
 }
 
 class MainActivity : ComponentActivity() {
@@ -164,13 +169,35 @@ private fun JiliguluRoot(waterRequest: Int) {
                     )
                 }
                 composable(Routes.ADD_BILL) { AddBillScreen(onBack = { navController.popBackStack() }) }
-                composable(Routes.CHAT) { ChatScreen(onBack = { navController.popBackStack() }) }
+                composable(Routes.CHAT) {
+                    ChatScreen(
+                        onBack = { navController.popBackStack() },
+                        // 跳转卡的目标映射：只认 Routes 里真实存在的页面。
+                        // 模型编出来的目标一律不跳——宁可没反应，也不能把用户带进空白页。
+                        onNavigate = { target ->
+                            val route = when (target) {
+                                NavTargets.TRASH -> Routes.TRASH
+                                NavTargets.TRASH_DRAFT -> Routes.TRASH_DRAFT
+                                NavTargets.SETTINGS -> Routes.SETTINGS
+                                NavTargets.ADD_BILL -> Routes.ADD_BILL
+                                else -> null
+                            }
+                            if (route != null) navController.navigate(route)
+                        }
+                    )
+                }
                 composable(Routes.SETTINGS) {
                     SettingsScreen(onBack = { navController.popBackStack() },
                         onPreviewWelcome = { navController.navigate(Routes.WELCOME_PREVIEW) },
                         onOpenTrash = { navController.navigate(Routes.TRASH) })
                 }
                 composable(Routes.TRASH) { TrashScreen(onBack = { navController.popBackStack() }) }
+                composable(Routes.TRASH_DRAFT) {
+                    TrashScreen(
+                        onBack = { navController.popBackStack() },
+                        initialTab = TrashTab.DRAFTS
+                    )
+                }
                 composable(Routes.WELCOME_PREVIEW) {
                     OnboardingScreen(onDone = { navController.popBackStack() }, preview = true, active = !showSplash)
                 }

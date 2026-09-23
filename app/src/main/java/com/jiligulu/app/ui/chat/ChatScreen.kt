@@ -1,8 +1,10 @@
 package com.jiligulu.app.ui.chat
 
 import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -53,6 +55,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.KeyboardType
@@ -82,6 +85,7 @@ private const val KEYBOARD_SETTLE_MS = 180L
 @Composable
 fun ChatScreen(
     onBack: () -> Unit = {},
+    onNavigate: (String) -> Unit = {},
     vm: ChatViewModel = viewModel(factory = ChatViewModel.Factory)
 ) {
     val items by vm.items.collectAsStateWithLifecycle()
@@ -182,6 +186,26 @@ fun ChatScreen(
                             onToggleAll = { vm.toggleCommandAll(item.id) },
                             onConfirm = { vm.confirmCommandCard(item.id) },
                             onCancel = { vm.cancelCommandCard(item.id) }
+                        )
+                        is ChatItem.ActionCard -> ActionCardView(
+                            card = item,
+                            onPick = { action ->
+                                // 卡片是一次性的：**先销毁再执行**。
+                                // 用户被它带到回收站，回来时它已经不在历史里了。
+                                when (val pick = ChatViewModel.parseAction(action)) {
+                                    is ActionPick.Navigate -> {
+                                        vm.consumeActionCard(item.id)
+                                        onNavigate(pick.target)
+                                    }
+
+                                    ActionPick.RestoreAssist -> {
+                                        vm.consumeActionCard(item.id)
+                                        vm.send("帮我恢复账单")
+                                    }
+
+                                    ActionPick.Ignore -> Unit
+                                }
+                            }
                         )
                     }
                 }
@@ -618,5 +642,55 @@ private fun CommandRow(item: CommandItem, deleting: Boolean, enabled: Boolean, o
                 )
             }
         }
+    }
+}
+
+/**
+ * 跳转卡：阿噜的正文 + 一排可点选项。
+ *
+ * 正文复用阿噜气泡，保证读起来和普通回复一样；按钮做成胶囊
+ * （与记账页的「再想想 / 删除」同一套语言），不用 Material 的 Button——
+ * 那套方正外观跟奶油手账不搭（本项目既定原则）。
+ *
+ * **表外取值不渲染按钮**：模型随口编一个跳转目标，点了也只会被忽略，
+ * 不如干脆不给用户按。
+ */
+@Composable
+private fun ActionCardView(
+    card: ChatItem.ActionCard,
+    onPick: (String) -> Unit
+) {
+    val usable = card.options.filter { ChatViewModel.parseAction(it.action) != ActionPick.Ignore }
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        GuluBubble(ChatItem.GuluMsg(card.id, card.text))
+        if (usable.isNotEmpty()) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                usable.forEach { option ->
+                    ActionPill(option.label.ifBlank { "走一个" }) { onPick(option.action) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ActionPill(text: String, onClick: () -> Unit) {
+    Surface(
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(50),
+        color = MaterialTheme.colorScheme.primaryContainer,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f))
+    ) {
+        Text(
+            text,
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onPrimaryContainer,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 9.dp)
+        )
     }
 }

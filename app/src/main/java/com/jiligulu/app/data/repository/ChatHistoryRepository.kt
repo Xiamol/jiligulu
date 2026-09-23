@@ -24,6 +24,14 @@ class ChatHistoryRepository(private val database: AppDatabase) {
     /** 清空草稿页，返回清掉的张数。 */
     suspend fun deleteAllActiveDrafts(): Int = dao.markActiveDraftsDeleted()
 
+    /**
+     * 物理删除一条消息——只给**一次性卡片**用（跳转卡用掉即销毁）。
+     *
+     * 对话正文不走这里：历史只追加、不回改（R9 铁律）。卡片也不进 AI 上下文，
+     * 所以删它不会动到任何 prompt 前缀。
+     */
+    suspend fun deleteMessage(id: Long): Int = dao.deleteById(id)
+
     /** 活跃草稿流（EDITING / DISMISSED，最新在前），供回收站草稿页展示。 */
     fun observeActiveDrafts(): Flow<List<ChatMessageEntity>> = dao.observeActiveDrafts()
 

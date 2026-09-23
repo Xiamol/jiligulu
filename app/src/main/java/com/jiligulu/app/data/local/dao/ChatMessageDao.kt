@@ -63,6 +63,16 @@ interface ChatMessageDao {
     @Query("SELECT * FROM chat_messages WHERE kind = 'DRAFT' AND status IN ('EDITING', 'DISMISSED') ORDER BY id DESC")
     fun observeActiveDrafts(): Flow<List<ChatMessageEntity>>
 
+    /**
+     * 物理删除一条消息。
+     *
+     * 只给**一次性卡片**用（跳转卡：用户点过就跳走了，回来不该再看到那张已经用掉的卡）。
+     * 对话正文（USER / ASSISTANT）**不走这里**——那是历史，只追加、不回改；
+     * 卡片本身也从不进 AI 上下文（见 `AiRepository.chatTurnsFor`），所以删它不影响任何 prompt。
+     */
+    @Query("DELETE FROM chat_messages WHERE id = :id")
+    suspend fun deleteById(id: Long): Int
+
     @Query("UPDATE chat_messages SET status = 'INTERRUPTED', content = :message WHERE kind = 'ASSISTANT' AND status = 'PENDING'")
     suspend fun markPendingInterrupted(message: String): Int
 
