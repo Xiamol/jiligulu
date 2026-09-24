@@ -23,4 +23,15 @@ class StickyPullGateTest {
         gate.begin(false, true); gate.finish(true, true, false)
         gate.begin(true, true); assertFalse(gate.allowExpand)
     }
+    @Test fun onlyQuickConsecutivePullUnlocks() {
+        var now = 100L
+        val gate = StickyPullGate({ now })
+        gate.begin(true, true); gate.finish(true, true, true)
+        now += 700; gate.begin(true, true); assertTrue(gate.allowExpand)
+        gate.finish(true, true, true)
+        now += 1300; gate.begin(true, true); assertFalse(gate.allowExpand)
+        gate.finish(true, true, true)
+        now += 100; gate.begin(true, true); gate.finish(true, true, false)
+        now += 100; gate.begin(true, true); assertFalse(gate.allowExpand)
+    }
 }

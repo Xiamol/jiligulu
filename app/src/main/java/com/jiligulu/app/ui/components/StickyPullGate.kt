@@ -1,16 +1,19 @@
 package com.jiligulu.app.ui.components
 
-/** A downward gesture can unlock the header only if the preceding gesture already stopped at the top. */
-internal class StickyPullGate {
-    private var armed = false
+/** Two consecutive downward gestures; a pause or another gesture starts a new pair. */
+internal class StickyPullGate(private val nowMillis: () -> Long = { System.nanoTime() / 1_000_000 },
+    private val consecutiveWindowMillis: Long = 1200) {
+    private var armedAt: Long? = null
     var allowExpand = false
         private set
     fun begin(pinned: Boolean, innerAtTop: Boolean) {
-        allowExpand = pinned && armed && innerAtTop
+        val elapsed = armedAt?.let { nowMillis() - it }
+        allowExpand = pinned && innerAtTop && elapsed != null && elapsed in 0..consecutiveWindowMillis
+        armedAt = null
     }
     fun finish(pinned: Boolean, innerAtTop: Boolean, downward: Boolean) {
-        armed = pinned && innerAtTop && downward
+        armedAt = if (pinned && innerAtTop && downward) nowMillis() else null
     }
-    fun blockedAtTop() { armed = true }
-    fun reset() { armed = false; allowExpand = false }
+    fun blockedAtTop() { armedAt = nowMillis() }
+    fun reset() { armedAt = null; allowExpand = false }
 }

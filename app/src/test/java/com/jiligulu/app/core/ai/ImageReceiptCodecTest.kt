@@ -58,4 +58,20 @@ class ImageReceiptCodecTest {
         assertEquals("吃饭", ImageReceiptCodec.classify(ImageReceiptCodec.parseText(text), listOf(food, drink)).bills.single().category)
         assertFalse(text.contains("分类其他"))
     }
+    @Test fun receivedRedPacketBecomesIncomeAndUsesOrCreatesRedPacketCategory() {
+        val text = render("""{"kind":"transaction","direction":"INCOME","amount":"50.00","counterparty":"家人","detail":"家人的红包","status":"已存入零钱","time":""}""", "00:06")
+        val parsed = ImageReceiptCodec.parseText(text)
+        val bill = ImageReceiptCodec.classify(parsed, emptyList()).bills.single()
+        assertEquals("INCOME", bill.type); assertEquals(50.0, bill.amountYuan, .001)
+        assertEquals("红包", bill.category); assertTrue(bill.isNewCategory)
+        assertTrue(bill.timeExpression.contains("00:06"))
+        val existing = com.jiligulu.app.data.local.entity.CategoryEntity(name = "红包", colorHue = 0f, colorIndex = 1)
+        assertFalse(ImageReceiptCodec.classify(parsed, listOf(existing)).bills.single().isNewCategory)
+    }
+    @Test fun refundAndSentRedPacketKeepTheirDirectionsWithoutNewKindWhitelist() {
+        val refund = render("""{"kind":"refund","direction":"INCOME","amount":"17.85","detail":"订单退款","status":"已到账"}""")
+        assertEquals("INCOME", ImageReceiptCodec.parseText(refund).bills.single().type)
+        val sent = render("""{"kind":"red_packet","direction":"EXPENSE","amount":"50","detail":"发给家人的红包","status":"已发出"}""")
+        assertEquals("EXPENSE", ImageReceiptCodec.parseText(sent).bills.single().type)
+    }
 }
