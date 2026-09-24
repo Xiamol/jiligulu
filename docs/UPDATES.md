@@ -4,7 +4,7 @@
 
 GitHub 并非技术上必需：自己的 HTTPS 服务也能提供版本信息与 APK。此版本先提供 GitHub Releases 适配器，方便个人使用，无需把登录凭据放进应用。
 
-应用默认更新源为 `Xiamol/jiligulu`。正式发布使用 `v0.5.6`，附件仅提供 release APK；远端最新版本以实际检查结果为准。
+应用默认更新源为 `Xiamol/jiligulu`。正式发布使用 `v0.6.0`，附件仅提供 release APK；远端最新版本以实际检查结果为准。
 
 ## 接通方式
 
@@ -18,7 +18,7 @@ GitHub 并非技术上必需：自己的 HTTPS 服务也能提供版本信息与
 
 ## 发布约定
 
-- 正式发布时保持 `applicationId` 与签名一致，增加 `versionCode`，并将 `versionName` 更新为与 Release 标签相同的三段版本号。当前正式包为 versionCode 9 / versionName 0.5.6，旧 0.5.5 可以检测到新版。
+- 正式发布时保持 `applicationId` 与签名一致，增加 `versionCode`，并将 `versionName` 更新为与 Release 标签相同的三段版本号。当前正式包为 versionCode 10 / versionName 0.6.0，旧 0.5.6 可以检测到新版。
 - 当前 release 构建沿用既有 debug 签名，以兼容已安装版本；不能单独切换签名后要求用户覆盖安装。是否改签名应作为独立迁移安排。
 - 保留签名私钥，不能随便换签名；不要把私钥、密码或令牌提交到公开仓库。
 - 如果改变数据库结构，追加并测试 Migration，不要用清库迁移兜底。

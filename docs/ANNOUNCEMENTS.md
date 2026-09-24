@@ -10,7 +10,7 @@
 - 文件：分支根目录的 `announcements.json`。
 - 读取地址：`https://raw.githubusercontent.com/Xiamol/jiligulu/announcements/announcements.json`。
 - 编辑入口：`https://github.com/Xiamol/jiligulu/edit/announcements/announcements.json`。
-- 现已按用户要求发布测试来信 test-letter-20260924。`content/announcements.example.json` 只是本地示例，不会被客户端自动加载。
+- v0.6.0 发布时撤下测试来信，发布版本来信与中秋来信；中秋来信于 2026-09-28 00:00（UTC+8）到期。`content/announcements.example.json` 只是本地示例，不会被客户端自动加载。
 
 在 GitHub 编辑文件并提交后，客户端在下一次冷启动或首页下拉刷新时拉取；静态托管有缓存，内容可能稍后才更新。App 不含发布凭据，不用 DeepSeek 生成或转发公告。
 
