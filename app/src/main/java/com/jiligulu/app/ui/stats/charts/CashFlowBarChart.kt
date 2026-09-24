@@ -26,20 +26,21 @@ import kotlin.math.*
 
 data class DayBar(val day: Int, val dayStartMillis: Long, val amountFen: Long, val isToday: Boolean)
 
+internal fun cashFlowAxisTop(maxYuan: Double): Double = if (maxYuan.isFinite() && maxYuan > 0) maxYuan / 0.9 else 1.0
+
 /** Fixed value axis and scrollable 44dp day slots. Selection uses outline, label and color. */
 @Composable
 fun CashFlowBarChart(bars: List<DayBar>, selectedDayMillis: Long?, onSelectDay: (Long) -> Unit,
     color: Color, trackColor: Color, modifier: Modifier = Modifier) {
     val maxYuan = (bars.maxOfOrNull { it.amountFen } ?: 0L) / 100.0
-    val magnitude = 10.0.pow(floor(log10(maxYuan.coerceAtLeast(1.0))))
-    val top = (ceil(maxYuan.coerceAtLeast(1.0) / magnitude / 4) * magnitude * 4).coerceAtLeast(4.0)
+    val top = cashFlowAxisTop(maxYuan)
     val scroll = rememberScrollState()
     val density = LocalDensity.current
     LaunchedEffect(selectedDayMillis, bars.size) {
         val index = bars.indexOfFirst { it.dayStartMillis == selectedDayMillis }
         if (index >= 0) scroll.animateScrollTo(with(density) { ((index - 2).coerceAtLeast(0) * 44).dp.roundToPx() })
     }
-    fun tick(value: Double): String = when { value >= 10000 -> "${String.format(java.util.Locale.ROOT, "%.1f", value / 10000)}万"; value >= 1000 -> "${String.format(java.util.Locale.ROOT, "%.1f", value / 1000)}k"; else -> value.toInt().toString() }
+    fun tick(value: Double): String = java.math.BigDecimal.valueOf(value).setScale(if (top < 1) 3 else if (top < 100) 2 else 0, java.math.RoundingMode.HALF_UP).stripTrailingZeros().toPlainString()
     Column(modifier) {
         val selected = bars.find { it.dayStartMillis == selectedDayMillis }
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {

@@ -162,4 +162,20 @@ class BillTimeResolverTest {
         assertNull(bill("午餐肉9元", "2026-09-21T16:00:00").timestamp)
         assertNull(bill("晚餐9元", "2026-09-21T16:00:00").timestamp)
     }
+    @Test fun importedRowsKeepDatesWhenNamesAreParaphrased() {
+        val input = "1. 9月17日17:15，转账支出42.37元，对方朋友，状态已被接收。\n2. 9月17日17:15，转账收入42.37元，对方朋友，状态已收款。\n3. 9月20日，转账支出0.57元，对方朋友。\n4. 9月20日，转账收入0.57元，对方朋友。"
+        val first = BillTimeResolver.expressionForBill(input, "朋友转账", 4, "", 42.37, "INCOME")
+        val second = BillTimeResolver.expressionForBill(input, "转账给朋友", 4, "", .57, "EXPENSE")
+        assertEquals(instant("2026-09-17T17:15:00"), resolve(first).timestamp)
+        assertEquals(instant("2026-09-20T12:00:00"), resolve(second).timestamp)
+        val ambiguous = "9月17日17:15；收入42.37元；朋友\n9月20日17:54；收入42.37元；朋友"
+        assertNull(BillTimeResolver.sourceRowForBill(ambiguous, 42.37, "INCOME"))
+    }
+
+    @Test fun screenshotClockPrefillsButDoesNotPretendToKnowTransactionDate() {
+        val result = resolve("截图参考时间16:41，日期待确认，非支付时间")
+        assertEquals(instant("2026-09-21T16:41:00"), result.timestamp)
+        assertTrue(result.needsReview)
+        assertTrue(result.hint.contains("非支付"))
+    }
 }

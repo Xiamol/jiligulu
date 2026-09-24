@@ -43,8 +43,31 @@ object BillTimeResolver {
         } else "时间待确认"
     }
 
+    /** Keep each imported line intact even when the model paraphrases its merchant/detail. */
+    internal fun sourceRowForBill(input: String, amountYuan: Double?, type: String?): String? {
+        if (amountYuan == null || !amountYuan.isFinite() || amountYuan <= 0) return null
+        val rows = input.lines().map { it.trim().replace(Regex("^\\d+[.、)）]\\s*"), "") }.filter(String::isNotBlank)
+        if (rows.size < 2) return null
+        val amount = java.math.BigDecimal.valueOf(amountYuan).setScale(2, java.math.RoundingMode.HALF_UP)
+        val matches = rows.filter { row ->
+            val values = Regex("(?<![\\d.])(?:[¥￥]\\s*)?(\\d+(?:\\.\\d{1,2})?)\\s*元").findAll(row)
+            val hasAmount = values.any { it.groupValues[1].toBigDecimalOrNull()?.setScale(2) == amount }
+            val direction = when (type?.uppercase()) {
+                "INCOME" -> row.contains("收入") && !row.contains("支出")
+                "EXPENSE" -> row.contains("支出") && !row.contains("收入")
+                else -> true
+            }
+            hasAmount && direction
+        }
+        return matches.singleOrNull()
+    }
+
     /** A model-supplied time never creates temporal information absent from the user's words. */
-    fun expressionForBill(input: String, detail: String, count: Int, modelExpression: String): String {
+    fun expressionForBill(input: String, detail: String, count: Int, modelExpression: String, amountYuan: Double? = null, type: String? = null): String {
+        sourceRowForBill(input, amountYuan, type)?.let { row ->
+            return row
+        }
+        if (count == 1 && input.contains("日期待确认")) return input
         val context = contextForBill(input, detail, count)
         if (context == "时间待确认") return context
         if (context.isEmpty()) {
@@ -78,11 +101,19 @@ object BillTimeResolver {
             return ResolvedBillTime(requestMillis, hint = "按发送消息时的时间记录")
         }
         val now = Instant.ofEpochMilli(requestMillis).atZone(zone)
+        Regex("(?:截图参考时间|日期待确认)(\\d{1,2})[:：](\\d{2})").find(text)?.let { clock ->
+            return try {
+                val time = LocalTime.of(clock.groupValues[1].toInt(), clock.groupValues[2].toInt())
+                ResolvedBillTime(now.toLocalDate().atTime(time).atZone(zone).toInstant().toEpochMilli(),
+                    needsReview = true, hint = if (text.contains("截图参考时间")) "仅识别到截图参考时间 ${time}，日期暂放今天；请核对日期，非支付完成时间"
+                        else "已识别 ${time}，日期暂放今天；图片未显示日期，请核对")
+            } catch (_: Exception) { ResolvedBillTime(needsReview = true, hint = "截图参考时间无效，请重新选择") }
+        }
         return try {
             val date = resolveDate(text, now.toLocalDate())
             val time = resolveTime(text)
             // Vague periods must remain explicit in the editor, never silently become today.
-            val vague = Regex("前几天|前阵子|前段时间|周末|时间待确认|月初|月中|月底").containsMatchIn(text)
+            val vague = Regex("前几天|前阵子|前段时间|周末|时间待确认|日期待确认|日期不明|月初|月中|月底").containsMatchIn(text)
             if (vague) return ResolvedBillTime(needsReview = true, hint = "“$expression”还不够具体，请选择账单日期和时间")
             if (date == null && Regex("上个?月|去年|前年|今年|${N}年|${N}月|(?:${N}|几)个?月前|上周|本周|这周|星期|礼拜").containsMatchIn(text)) {
                 return ResolvedBillTime(needsReview = true, hint = "还需要具体日期，请选择账单日期和时间")

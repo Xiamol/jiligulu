@@ -296,7 +296,7 @@ class AiRepository(
         if (adds.isEmpty()) return AiTurn.Chat(parsed.reply.ifBlank { "阿噜在听，你说～" })
 
         val drafts = adds.map { bill ->
-            val expression = BillTimeResolver.expressionForBill(input, bill.detail, adds.size, bill.timeExpression)
+            val expression = BillTimeResolver.expressionForBill(input, bill.detail, adds.size, bill.timeExpression, bill.amountYuan, bill.type)
             val time = BillTimeResolver.resolve(expression, bill.occurredAt, requestMillis, zone)
             ConfirmItem(
                 amountText = if (bill.amountYuan.isFinite() && bill.amountYuan > 0) trimAmount(bill.amountYuan) else "",

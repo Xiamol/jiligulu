@@ -259,7 +259,7 @@ class ChatViewModel(
             } else AiTurn.Chat(parsed.reply)
         }
         val drafts = parsed.bills.map { bill ->
-            val expression = BillTimeResolver.expressionForBill(input, bill.detail, parsed.bills.size, bill.timeExpression)
+            val expression = BillTimeResolver.expressionForBill(input, bill.detail, parsed.bills.size, bill.timeExpression, bill.amountYuan, bill.type)
             val time = BillTimeResolver.resolve(expression, bill.occurredAt, requestMillis, zone)
             ConfirmItem(
                 amountText = if (bill.amountYuan.isFinite() && bill.amountYuan > 0)
