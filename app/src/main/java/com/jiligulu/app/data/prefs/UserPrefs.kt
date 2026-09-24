@@ -40,6 +40,7 @@ data class SavedAnnouncements(val source: String, val cachedFeed: String, val mu
 class UserPrefs(private val context: Context) {
 
     companion object {
+        private val KEY_FLOATING_CAPTURE = booleanPreferencesKey("floating_capture_enabled")
         private val KEY_NICKNAME = stringPreferencesKey("nickname")
         private val KEY_NAME_SUFFIX = stringPreferencesKey("name_suffix")
         private val KEY_API_KEY = stringPreferencesKey("api_key_override")
@@ -91,6 +92,11 @@ class UserPrefs(private val context: Context) {
 
     /** null = 还没读过；"" = 未设置（需要 Onboarding） */
     val nickname: Flow<String> = context.dataStore.data.map { it[KEY_NICKNAME] ?: "" }
+
+    val floatingCaptureEnabled: Flow<Boolean> = context.dataStore.data.map { it[KEY_FLOATING_CAPTURE] ?: false }.distinctUntilChanged()
+    suspend fun setFloatingCaptureEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[KEY_FLOATING_CAPTURE] = enabled }
+    }
 
     suspend fun readAnnouncements(): SavedAnnouncements {
         val values = context.dataStore.data.first()

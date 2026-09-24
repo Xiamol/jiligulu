@@ -86,6 +86,17 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+        lifecycleScope.launch {
+            lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                (application as JiliguluApp).container.userPrefs.floatingCaptureEnabled.collect { enabled ->
+                    if (enabled && android.provider.Settings.canDrawOverlays(this@MainActivity) &&
+                        !com.jiligulu.app.ui.capture.FloatingCaptureService.running.value) {
+                        runCatching { androidx.core.content.ContextCompat.startForegroundService(this@MainActivity,
+                            Intent(this@MainActivity, com.jiligulu.app.ui.capture.FloatingCaptureService::class.java)) }
+                    }
+                }
+            }
+        }
         enableEdgeToEdge()
         setContent {
             val app = LocalContext.current.applicationContext as JiliguluApp

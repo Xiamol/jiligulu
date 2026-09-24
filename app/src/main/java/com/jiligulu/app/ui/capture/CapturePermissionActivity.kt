@@ -15,7 +15,8 @@ class CapturePermissionActivity : ComponentActivity() {
         if (result.resultCode == Activity.RESULT_OK && result.data != null) {
             try {
                 ContextCompat.startForegroundService(this, Intent(this, ScreenCaptureService::class.java)
-                    .putExtra("code", result.resultCode).putExtra("grant", result.data))
+                    .putExtra("code", result.resultCode).putExtra("grant", result.data)
+                    .putExtra("prepareOnly", intent.getBooleanExtra("prepareOnly", false)))
                 handedOff = true
             } catch (_: Exception) { android.widget.Toast.makeText(this, "截图未能启动，请重试", android.widget.Toast.LENGTH_SHORT).show() }
         }
@@ -24,8 +25,17 @@ class CapturePermissionActivity : ComponentActivity() {
     }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (ScreenCaptureService.ready.value) {
+            if (!intent.getBooleanExtra("prepareOnly", false)) ScreenCaptureService.captureIfReady()
+            finish(); return
+        }
         if (savedInstanceState == null) {
-            try { permission.launch(getSystemService(MediaProjectionManager::class.java).createScreenCaptureIntent()) }
+            try {
+                val manager = getSystemService(MediaProjectionManager::class.java)
+                val request = if (android.os.Build.VERSION.SDK_INT >= 34) manager.createScreenCaptureIntent(
+                    android.media.projection.MediaProjectionConfig.createConfigForDefaultDisplay()) else manager.createScreenCaptureIntent()
+                permission.launch(request)
+            }
             catch (_: Exception) { FloatingCaptureService.restore(); finish() }
         }
     }

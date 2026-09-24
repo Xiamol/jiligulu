@@ -11,10 +11,12 @@ import android.widget.ImageView
 import android.widget.Toast
 import com.jiligulu.app.MainActivity
 import com.jiligulu.app.R
+import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlin.math.abs
 
 class FloatingCaptureService : Service() {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var bubble: ImageView? = null
     private val windows by lazy { getSystemService(WindowManager::class.java) }
     override fun onBind(intent: Intent?) = null
@@ -38,10 +40,10 @@ class FloatingCaptureService : Service() {
                 }
                 MotionEvent.ACTION_UP -> {
                     if (!moved) {
-                        if (SystemClock.elapsedRealtime() - downAt > 650) stopSelf()
+                        if (SystemClock.elapsedRealtime() - downAt > 650) closeExplicitly()
                         else if (!capturing) {
                             capturing = true; view.visibility = View.INVISIBLE
-                            runCatching { startActivity(Intent(this, CapturePermissionActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                            if (!ScreenCaptureService.captureIfReady()) runCatching { startActivity(Intent(this, CapturePermissionActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
                                 .onFailure { restore(); Toast.makeText(this, "无法打开截图授权，请回到设置重试", Toast.LENGTH_SHORT).show() }
                         }
                     }; true
@@ -52,8 +54,19 @@ class FloatingCaptureService : Service() {
         try { windows.addView(view, params); bubble = view; instance = this; running.value = true }
         catch (_: Exception) { Toast.makeText(this, "悬浮窗未能开启，请检查悬浮窗权限", Toast.LENGTH_SHORT).show(); stopSelf() }
     }
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int { if (intent?.action == "stop") stopSelf(); return START_NOT_STICKY }
-    override fun onDestroy() { bubble?.let { runCatching { windows.removeView(it) } }; bubble = null; instance = null; running.value = false; super.onDestroy() }
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int { if (intent?.action == "stop") closeExplicitly(); return START_NOT_STICKY }
+    private fun closeExplicitly() { scope.launch {
+        try { (application as com.jiligulu.app.JiliguluApp).container.userPrefs.setFloatingCaptureEnabled(false) }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { Toast.makeText(this@FloatingCaptureService, "未能记住关闭状态，请在设置中重试", Toast.LENGTH_SHORT).show() }
+        stopSelf()
+    } }
+    override fun onTaskRemoved(rootIntent: Intent?) { stopSelf(); super.onTaskRemoved(rootIntent) }
+    override fun onDestroy() {
+        scope.cancel()
+        stopService(Intent(this, ScreenCaptureService::class.java))
+        capturing = false
+        bubble?.let { runCatching { windows.removeView(it) } }; bubble = null; instance = null; running.value = false; super.onDestroy() }
     companion object {
         val running = MutableStateFlow(false)
         private var instance: FloatingCaptureService? = null

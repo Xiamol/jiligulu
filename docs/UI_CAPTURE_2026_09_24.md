@@ -61,3 +61,11 @@
 `DraftUi.requiresTimeInput` 仅在 timeNeedsReview 且 timestamp 为空时拦住确认。若已有显示的建议日期/时间，整张草稿的确认按钮即可接受，不再强制进出时间选择器；确认后清除复核标记，持久化接受的时间。旧草稿同样适用。缺失时间和无效金额继续拦截，存储层也校验缺失时间。
 
 本轮只执行 ImageReceiptCodecTest 与 DraftHistoryCodecTest 及 release 构建，不做额外网络识图和整套界面回归。
+
+## 悬浮开关记忆与会话内截屏复用
+
+用户反馈每张图弹系统授权且清后台后开关忘记。开关现在单独保存在 UserPrefs：进程退出/被清理不改偏好；MainActivity RESUMED 时在已有悬浮权限下恢复浮球。用户在设置关闭、长按关闭、悬浮通知关闭才保存false。两个服务stopWithTask且非sticky，用户移除任务时停止，不在后台自启。
+
+首次主动开启浮球后申请截屏授权（只准备，不截图）。ScreenCaptureService 每次授权只创建一个 VirtualDisplay，整个有效会话复用；每次点击附加新的 ImageReader，截图后断开surface并关闭reader，闲置不接收/保存屏幕帧。保留系统共享指示和前台通知，通知可结束会话。授权令牌仅留在活动对象，不落盘、不跨进程复用。系统onStop、进程被清理后失效，下次点击走新的系统授权。重新进App只恢复浮球，不自动弹屏幕授权。Android14+请求整屏用于跨应用截图。
+
+只验证偏好写入/重建读取/主动关闭及必要release构建；Android厂商实际会话保持、系统取消和连续截屏仍需真机验收，不能以单元测试冒充。官方约束：https://developer.android.com/media/grow/media-projection

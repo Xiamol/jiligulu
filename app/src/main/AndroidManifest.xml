@@ -22,10 +22,10 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Jiligulu">
 
-        <service android:name=".ui.capture.FloatingCaptureService" android:exported="false" android:foregroundServiceType="specialUse">
+        <service android:name=".ui.capture.FloatingCaptureService" android:stopWithTask="true" android:exported="false" android:foregroundServiceType="specialUse">
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="User-enabled draggable receipt capture bubble" />
         </service>
-        <service android:name=".ui.capture.ScreenCaptureService" android:exported="false" android:foregroundServiceType="mediaProjection" />
+        <service android:name=".ui.capture.ScreenCaptureService" android:stopWithTask="true" android:exported="false" android:foregroundServiceType="mediaProjection" />
         <activity android:name=".ui.capture.CapturePermissionActivity" android:taskAffinity="com.jiligulu.app.capture" android:exported="false" android:theme="@style/Theme.Jiligulu.Capture" android:excludeFromRecents="true" />
         <receiver android:name=".data.reminder.WaterReminderReceiver" android:exported="false" />
         <receiver android:name=".data.reminder.WaterReminderBootReceiver" android:exported="true">
