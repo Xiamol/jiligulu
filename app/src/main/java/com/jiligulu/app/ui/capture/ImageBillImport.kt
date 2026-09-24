@@ -53,6 +53,8 @@ object ImageBillImport {
     }
     private val client = OkHttpClient.Builder().connectTimeout(15, TimeUnit.SECONDS).readTimeout(60, TimeUnit.SECONDS).callTimeout(90, TimeUnit.SECONDS).build()
     suspend fun recognize(context: Context, file: File): String = withContext(Dispatchers.IO) {
+        val requestMillis = System.currentTimeMillis()
+        val zone = java.time.ZoneId.systemDefault()
         val key = (context.applicationContext as JiliguluApp).container.aiRepository.effectiveApiKey()
         val data = Base64.encodeToString(file.readBytes(), Base64.NO_WRAP)
         val body = buildJsonObject {
@@ -64,7 +66,7 @@ object ImageBillImport {
             put("messages", buildJsonArray {
                 addJsonObject { put("role", "system"); put("content", com.jiligulu.app.core.ai.ImageReceiptCodec.PROMPT) }
                 addJsonObject { put("role", "user"); put("content", buildJsonArray {
-                    addJsonObject { put("type", "text"); put("text", "请识别这张图片中的账单，返回可供我核对修改的文字。") }
+                    addJsonObject { put("type", "text"); put("text", com.jiligulu.app.core.ai.ImageReceiptCodec.requestContext(requestMillis, zone)) }
                     addJsonObject { put("type", "image_url"); put("image_url", buildJsonObject { put("url", "data:image/jpeg;base64,$data") }) }
                 }) }
             })
@@ -82,7 +84,7 @@ object ImageBillImport {
             val root = Json.parseToJsonElement(it.body!!.string()).jsonObject
             val content = root["choices"]?.jsonArray?.firstOrNull()?.jsonObject?.get("message")?.jsonObject?.get("content")?.jsonPrimitive?.contentOrNull?.takeIf { text -> text.isNotBlank() && text.length <= 8000 }
                 ?: error("这次没读到内容，可以换张清晰的图片重试")
-            com.jiligulu.app.core.ai.ImageReceiptCodec.render(content)
+            com.jiligulu.app.core.ai.ImageReceiptCodec.render(content, requestMillis, zone)
         }
     }
 }
