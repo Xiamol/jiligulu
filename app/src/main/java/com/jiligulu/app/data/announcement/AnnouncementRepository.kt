@@ -24,6 +24,7 @@ data class AnnouncementState(
     val entries: List<Announcement> = emptyList(),
     val automaticId: String? = null,
     val manualId: String? = null,
+    val emptyMailboxOpen: Boolean = false,
     val saving: Boolean = false,
     val offline: Boolean = false,
     val error: String? = null
@@ -84,11 +85,15 @@ class AnnouncementRepository(
 
     fun open(id: String) {
         updateTime()
-        if (mutable.value.entries.any { it.id == id }) mutable.value = mutable.value.copy(manualId = id, error = null)
+        if (id.isBlank() && mutable.value.entries.isEmpty()) {
+            mutable.value = mutable.value.copy(emptyMailboxOpen = true, error = null)
+        } else if (mutable.value.entries.any { it.id == id }) {
+            mutable.value = mutable.value.copy(manualId = id, emptyMailboxOpen = false, error = null)
+        }
     }
 
     fun close() {
-        if (!mutable.value.saving) mutable.value = mutable.value.copy(automaticId = null, manualId = null, error = null)
+        if (!mutable.value.saving) mutable.value = mutable.value.copy(automaticId = null, manualId = null, emptyMailboxOpen = false, error = null)
     }
 
     suspend fun muteOpened() = mutex.withLock {

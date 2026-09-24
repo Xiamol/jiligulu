@@ -63,6 +63,7 @@ class UserPrefs(private val context: Context) {
         private val KEY_ANNOUNCEMENT_SOURCE = stringPreferencesKey("announcement_source")
         private val KEY_ANNOUNCEMENT_CACHE = stringPreferencesKey("announcement_cache")
         private val KEY_MUTED_ANNOUNCEMENTS = stringSetPreferencesKey("muted_announcements")
+        private val KEY_PREFER_VOICE_INPUT = booleanPreferencesKey("prefer_voice_input")
         const val DEFAULT_ANNOUNCEMENT_SOURCE = "https://raw.githubusercontent.com/Xiamol/jiligulu/announcements/announcements.json"
         const val DEFAULT_SUFFIX = "大人"
 
@@ -91,6 +92,8 @@ class UserPrefs(private val context: Context) {
 
     /** null = 还没读过；"" = 未设置（需要 Onboarding） */
     val nickname: Flow<String> = context.dataStore.data.map { it[KEY_NICKNAME] ?: "" }
+    val preferVoiceInput: Flow<Boolean> = context.dataStore.data.map { it[KEY_PREFER_VOICE_INPUT] ?: false }.distinctUntilChanged()
+    suspend fun setPreferVoiceInput(voice: Boolean) { context.dataStore.edit { it[KEY_PREFER_VOICE_INPUT] = voice } }
 
     suspend fun readAnnouncements(): SavedAnnouncements {
         val values = context.dataStore.data.first()

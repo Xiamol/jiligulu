@@ -250,9 +250,9 @@ private fun JiliguluRoot(waterRequest: Int) {
             }
             val releaseKey = updateState.available?.let { it.pageUrl + it.version }
             val showUpdate = shouldShowUpdatePrompt(!showSplash, releaseKey, dismissedUpdateKey,
-                notices.manualId != null || (noticeWasShowing && notices.opened != null))
+                notices.manualId != null || notices.emptyMailboxOpen || (noticeWasShowing && notices.opened != null))
             val showNotice = !showSplash && !showUpdate && navigation?.destination?.route == Routes.MAIN &&
-                (notices.manualId != null || (updateSettled && !updateState.checking))
+                (notices.manualId != null || notices.emptyMailboxOpen || (updateSettled && !updateState.checking))
             LaunchedEffect(showNotice, notices.opened?.id) { noticeWasShowing = showNotice && notices.opened != null }
             UpdatePromptHost(enabled = showUpdate, onDismissed = { dismissedUpdateKey = releaseKey })
             AnnouncementDialogHost(app.container.announcements, enabled = showNotice)

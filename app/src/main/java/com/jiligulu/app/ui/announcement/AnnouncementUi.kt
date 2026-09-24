@@ -27,7 +27,7 @@ fun AnnouncementBoard(state: AnnouncementState, onOpen: (String) -> Unit) {
     val latest = state.entries.firstOrNull()
     Surface(modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
         .testTag("announcement-board")
-        .clickable(enabled = latest != null && !state.loading) { latest?.let { onOpen(it.id) } },
+        .clickable(enabled = !state.loading) { onOpen(latest?.id.orEmpty()) },
         shape = MaterialTheme.shapes.large,
         color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
         border = BorderStroke(0.7.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.13f))) {
@@ -60,6 +60,14 @@ fun AnnouncementDialogHost(repository: AnnouncementRepository, enabled: Boolean)
     val state by repository.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     if (!enabled || state.loading) return
+    if (state.emptyMailboxOpen) {
+        GuluDialog(title = "💌 阿噜的小信箱", onDismiss = repository::close, confirmLabel = "收好信笺") {
+            Text(if (state.offline) "这次暂时没连上公告服务，等网络恢复、下次启动时再看看。"
+                else "信箱里暂时还没有新消息。\n有新的公告或节日祝福时，阿噜会把来信放在这里。",
+                style = MaterialTheme.typography.bodyLarge, modifier = Modifier.testTag("announcement-empty"))
+        }
+        return
+    }
     val entry = state.opened ?: return
     GuluDialog(title = "${entry.emoji.ifBlank { "💌" }} ${entry.title}",
         onDismiss = repository::close, dismissLabel = "关闭", confirmLabel = "这条不再弹出",

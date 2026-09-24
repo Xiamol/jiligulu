@@ -517,6 +517,7 @@ class UiSmokeScreenshotTest {
         val fixture = """{"announcements":[{"id":"holiday-demo","title":"中秋快乐，记得好好吃饭","summary":"阿噜寄来一封小小的节日来信","emoji":"🌕","body":"愿你的日子像月亮一样圆满。\n忙碌之余，也记得给自己留一点甜。\n\n这是一条仅用于界面验收的公告。"}]}"""
         val notices = com.jiligulu.app.data.announcement.AnnouncementRepository(prefs, { fixture })
         runBlocking {
+            prefs.setPreferVoiceInput(false)
             prefs.setNickname("验收")
             prefs.setWaterEnabled(false)
             prefs.setUpdateRepository("")
@@ -575,16 +576,65 @@ class UiSmokeScreenshotTest {
             capture("voice-editable-text")
             compose.onNodeWithContentDescription("发送").performClick()
             assertEquals(listOf("水，3.50"), sent)
+            awaitText("按住说话")
+            assertTrue(runBlocking { prefs.preferVoiceInput.first() })
+            compose.runOnIdle { activity.setContent {} }
+        }
+    }
+
+    @Test(timeout = 60_000)
+    fun voicePreferenceAndEmptyMailboxSurviveComposerReopening() {
+        val app = RuntimeEnvironment.getApplication() as JiliguluApp
+        val prefs = app.container.userPrefs
+        runBlocking {
+            prefs.setNickname("验收")
+            prefs.setWaterEnabled(false)
+            prefs.setUpdateRepository("")
+            prefs.setAnnouncementSource("")
+            prefs.setPreferVoiceInput(true)
+            app.container.announcements.initialize()
+        }
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { activity = it }
+            awaitText("对话记账")
+            compose.onNodeWithTag("announcement-board").performClick()
+            awaitTag("announcement-empty")
+            compose.onNodeWithText("收好信笺").performClick()
+            awaitTag("announcement-empty", present = false)
+            compose.onNodeWithText("对话记账").performClick()
+            awaitText("按住说话")
+            compose.onNodeWithContentDescription("返回").performClick()
+            awaitText("对话记账")
+            compose.onNodeWithText("对话记账").performClick()
+            awaitText("按住说话")
+            compose.waitUntil(10_000) {
+                shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(16))
+                val toggle = compose.onAllNodesWithTag("voice-toggle").fetchSemanticsNodes().singleOrNull()
+                toggle != null && !toggle.config.contains(androidx.compose.ui.semantics.SemanticsProperties.Disabled)
+            }
+            compose.onNodeWithTag("voice-toggle").performClick()
+            awaitTag("chat-input")
+            assertEquals(false, runBlocking { prefs.preferVoiceInput.first() })
+            compose.onNodeWithContentDescription("返回").performClick()
+            awaitText("对话记账")
+            compose.onNodeWithText("对话记账").performClick()
+            awaitTag("chat-input")
+            compose.onNodeWithTag("voice-hold").assertDoesNotExist()
             compose.runOnIdle { activity.setContent {} }
         }
     }
 
     private fun awaitTag(tag: String, present: Boolean = true) {
+        try {
         compose.waitUntil(10_000) {
             shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(16))
             compose.onAllNodesWithTag(tag).fetchSemanticsNodes().isNotEmpty() == present
         }
         compose.waitForIdle()
+        } catch (failure: Throwable) {
+            File("build/reports/ui/failed-tag.txt").writeText("$tag present=$present\n" + compose.onRoot().printToString())
+            throw failure
+        }
     }
 
     private fun awaitText(text: String, substring: Boolean = false) {

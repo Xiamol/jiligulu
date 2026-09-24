@@ -36,6 +36,11 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
+import com.jiligulu.app.data.prefs.UserPrefs
 
 @Composable
 fun VoiceComposer(
@@ -53,11 +58,25 @@ fun VoiceComposer(
     }
     val state by controller.state.collectAsStateWithLifecycle()
     val owner = LocalLifecycleOwner.current
-    var voiceMode by rememberSaveable { mutableStateOf(false) }
+    val prefs = remember(context.applicationContext) { UserPrefs(context.applicationContext) }
+    val preferredVoice by prefs.preferVoiceInput.collectAsStateWithLifecycle(false)
+    var editingTranscript by rememberSaveable { mutableStateOf(false) }
+    val voiceMode = preferredVoice && !editingTranscript
+    val scope = rememberCoroutineScope()
+    fun chooseMode(voice: Boolean) {
+        editingTranscript = false
+        scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            withContext(NonCancellable) {
+                try { prefs.setPreferVoiceInput(voice) }
+                catch (_: Exception) { controller.showError("输入模式没能保存，请再切换一次。") }
+            }
+        }
+    }
+    fun sendEditedText() { onSend(); editingTranscript = false }
     val currentText by rememberUpdatedState(text)
     val currentChange by rememberUpdatedState(onTextChange)
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        voiceMode = granted
+        if (granted) chooseMode(true)
         if (!granted) controller.showError("未允许麦克风权限，仍可用键盘输入。")
         // Never begin recording from the permission callback: the original finger press has ended.
     }
@@ -74,7 +93,7 @@ fun VoiceComposer(
     LaunchedEffect(state.result?.id) {
         state.result?.let {
             currentChange(if (currentText.isBlank()) it.text else currentText.trimEnd() + " " + it.text)
-            voiceMode = false
+            editingTranscript = true
             controller.consumeResult(it.id)
         }
     }
@@ -101,10 +120,10 @@ fun VoiceComposer(
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             IconButton(enabled = ready && !sending, onClick = {
                 controller.cancel()
-                if (voiceMode) voiceMode = false
+                if (voiceMode) chooseMode(false)
                 else {
                     focus.clearFocus()
-                    if (canRecord()) voiceMode = true else permission.launch(Manifest.permission.RECORD_AUDIO)
+                    if (canRecord()) chooseMode(true) else permission.launch(Manifest.permission.RECORD_AUDIO)
                 }
             }, modifier = Modifier.testTag("voice-toggle")) {
                 Icon(if (voiceMode) Icons.Default.Keyboard else Icons.Default.Mic, if (voiceMode) "切换键盘" else "语音输入")
@@ -141,11 +160,11 @@ fun VoiceComposer(
                 placeholder = { Text(if (sending) "阿噜正在回复…" else "比如：早饭 9 元") },
                 singleLine = true, shape = MaterialTheme.shapes.extraLarge,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                keyboardActions = KeyboardActions(onSend = { if (!sending && text.isNotBlank()) onSend() }),
+                keyboardActions = KeyboardActions(onSend = { if (!sending && text.isNotBlank()) sendEditedText() }),
                 colors = OutlinedTextFieldDefaults.colors(unfocusedContainerColor = MaterialTheme.colorScheme.surface,
                     focusedContainerColor = MaterialTheme.colorScheme.surface,
                     unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant))
-            IconButton(onClick = onSend, enabled = ready && !sending && !state.busy && !voiceMode && text.isNotBlank(),
+            IconButton(onClick = ::sendEditedText, enabled = ready && !sending && !state.busy && !voiceMode && text.isNotBlank(),
                 colors = IconButtonDefaults.iconButtonColors(containerColor = MaterialTheme.colorScheme.primary,
                     contentColor = MaterialTheme.colorScheme.onPrimary), modifier = Modifier.size(48.dp)) {
                 Icon(Icons.AutoMirrored.Filled.Send, "发送")
