@@ -102,12 +102,23 @@ android {
 }
 
 // Room schema 导出到 app/schemas，方便以后做数据库迁移对比
+val verifyOfflineVoiceModel by tasks.registering {
+    doLast {
+        val model = file("src/main/assets/offline_voice/model.zip")
+        check(model.isFile && model.length() == 43898754L) {
+            "Offline voice model missing or incomplete. Run: python tools/prepare_voice_model.py"
+        }
+    }
+}
+tasks.named("preBuild").configure { dependsOn(verifyOfflineVoiceModel) }
+
 ksp {
     arg("room.schemaLocation", "$projectDir/schemas")
     arg("room.incremental", "true")
 }
 
 dependencies {
+    implementation(libs.vosk.android)
     testImplementation(libs.junit)
     testImplementation(libs.robolectric)
     testImplementation(libs.androidx.work.testing)

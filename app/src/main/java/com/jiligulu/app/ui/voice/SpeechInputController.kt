@@ -65,7 +65,7 @@ class SpeechInputController(private val factory: () -> SpeechInputEngine) {
                 }
             })
         } catch (_: SecurityException) { fail("需要麦克风权限才能说话。")
-        } catch (_: Exception) { fail("当前手机没有可用的系统语音识别服务，可切回键盘输入。") }
+        } catch (_: Exception) { fail("语音引擎暂时没准备好，请稍后再试或切回键盘。") }
     }
 
     fun stop() {

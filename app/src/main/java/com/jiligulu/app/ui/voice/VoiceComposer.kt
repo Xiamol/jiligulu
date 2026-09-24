@@ -53,13 +53,20 @@ fun VoiceComposer(
 ) {
     val context = LocalContext.current
     val focus = LocalFocusManager.current
-    val controller = suppliedController ?: remember(context.applicationContext) {
-        SpeechInputController { AndroidSpeechInput(context.applicationContext) }
+    val offline = if (suppliedController == null) remember(context.applicationContext) {
+        OfflineSpeechSession(context.applicationContext)
+    } else null
+    val modelState by (offline?.state ?: remember { kotlinx.coroutines.flow.MutableStateFlow(OfflineModelState(OfflineModelPhase.READY)) })
+        .collectAsStateWithLifecycle()
+    val modelReady = suppliedController != null || modelState.phase == OfflineModelPhase.READY
+    val controller = suppliedController ?: remember(offline) {
+        SpeechInputController { checkNotNull(offline).engine() }
     }
     val state by controller.state.collectAsStateWithLifecycle()
     val owner = LocalLifecycleOwner.current
     val prefs = remember(context.applicationContext) { UserPrefs(context.applicationContext) }
     val preferredVoice by prefs.preferVoiceInput.collectAsStateWithLifecycle(false)
+    val currentPreferredVoice by rememberUpdatedState(preferredVoice)
     var editingTranscript by rememberSaveable { mutableStateOf(false) }
     val voiceMode = preferredVoice && !editingTranscript
     val scope = rememberCoroutineScope()
@@ -82,13 +89,20 @@ fun VoiceComposer(
     }
     fun canRecord() = suppliedController != null || context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
     fun begin() {
-        if (!ready || sending) return
+        if (!ready || sending || !modelReady) return
         if (canRecord()) controller.start() else permission.launch(Manifest.permission.RECORD_AUDIO)
     }
-    DisposableEffect(owner, controller) {
-        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_STOP) controller.cancel() }
+    LaunchedEffect(preferredVoice, offline) {
+        if (preferredVoice && owner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) offline?.prepare()
+        else if (!preferredVoice) { controller.cancel(); offline?.unload() }
+    }
+    DisposableEffect(owner, controller, offline) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) { controller.cancel(); offline?.unload() }
+            if (event == Lifecycle.Event.ON_START && currentPreferredVoice) offline?.prepare()
+        }
         owner.lifecycle.addObserver(observer)
-        onDispose { owner.lifecycle.removeObserver(observer); controller.cancel() }
+        onDispose { owner.lifecycle.removeObserver(observer); controller.cancel(); offline?.close() }
     }
     LaunchedEffect(state.result?.id) {
         state.result?.let {
@@ -113,7 +127,11 @@ fun VoiceComposer(
             }) { Text("打开系统设置") }
         }
         if (voiceMode) {
-            Text(state.partial.ifBlank { "松开后转成文字，可修改再发送 · 移出按钮取消" },
+            modelState.error?.let { error ->
+                Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                TextButton(onClick = { offline?.prepare() }) { Text("重新准备模型") }
+            }
+            Text(state.partial.ifBlank { "离线识别 · 松开后可修改文字 · 移出按钮取消" },
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 2, modifier = Modifier.padding(horizontal = 6.dp, vertical = 5.dp))
         }
@@ -129,7 +147,7 @@ fun VoiceComposer(
                 Icon(if (voiceMode) Icons.Default.Keyboard else Icons.Default.Mic, if (voiceMode) "切换键盘" else "语音输入")
             }
             if (voiceMode) {
-                val interactive = ready && !sending && state.phase != VoicePhase.PROCESSING
+                val interactive = ready && !sending && modelReady && state.phase != VoicePhase.PROCESSING
                 Box(Modifier.weight(1f).heightIn(min = 56.dp)
                     .background(MaterialTheme.colorScheme.primaryContainer, MaterialTheme.shapes.extraLarge)
                     .testTag("voice-hold")
@@ -140,15 +158,17 @@ fun VoiceComposer(
                             true
                         }
                     }
-                    .pointerInput(ready, sending, voiceMode) {
+                    .pointerInput(ready, sending, voiceMode, modelReady) {
                         detectTapGestures(onPress = {
-                            if (ready && !sending && controller.state.value.phase != VoicePhase.PROCESSING) {
+                            if (ready && !sending && modelReady && controller.state.value.phase != VoicePhase.PROCESSING) {
                                 begin()
                                 if (tryAwaitRelease()) controller.stop() else controller.cancel()
                             }
                         })
                     }, contentAlignment = Alignment.Center) {
-                    Text(when (state.phase) {
+                    Text(if (!modelReady) {
+                        if (modelState.phase == OfflineModelPhase.FAILED) "模型暂不可用" else "正在准备离线语音…"
+                    } else when (state.phase) {
                         VoicePhase.IDLE -> "按住说话"
                         VoicePhase.LISTENING -> "正在听，松开结束"
                         VoicePhase.PROCESSING -> "正在转成文字…"

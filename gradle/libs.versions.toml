@@ -16,8 +16,10 @@ datastore = "1.1.1"
 workmanager = "2.9.1"
 junit = "4.13.2"
 robolectric = "4.14.1"
+vosk = "0.3.75"
 
 [libraries]
+vosk-android = { module = "com.alphacephei:vosk-android", version.ref = "vosk" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 robolectric = { group = "org.robolectric", name = "robolectric", version.ref = "robolectric" }
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
