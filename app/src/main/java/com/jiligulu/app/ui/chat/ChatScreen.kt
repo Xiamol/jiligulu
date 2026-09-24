@@ -121,8 +121,10 @@ fun ChatScreen(
     val focusManager = LocalFocusManager.current
     val sendInput = {
         if (input.isNotBlank() && ready && !sending) {
+            val valid = !com.jiligulu.app.core.ai.ImageReceiptCodec.isImageText(input) ||
+                runCatching { com.jiligulu.app.core.ai.ImageReceiptCodec.parseText(input) }.isSuccess
             vm.send(input)
-            input = ""
+            if (valid) input = ""
             // 发完就收键盘、回到最新（用户报过：键盘不退、页面也不跟，回复被挡在下面）。
             // 顺序要紧：先清焦点让键盘收起，等列表高度稳定后再定位，
             // 否则键盘动画期间算出来的位置是错的。
@@ -267,7 +269,7 @@ fun ChatScreen(
         }
 
         com.jiligulu.app.ui.capture.ImageAttachment(enabled = ready && !sending) { result ->
-            input = if (input.isBlank()) result else input + "\n" + result
+            input = result + if (input.isBlank()) "" else "\n备注：" + input.replace("\n", " ")
         }
         // ---------- 输入栏 ----------
         Row(

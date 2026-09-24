@@ -139,6 +139,7 @@ class AiRepository(
      * [parseRaw] 保留「未经动作分派」的结果，供降级路径（本地规则）复用。
      */
     suspend fun parse(input: String, requestMillis: Long, zone: ZoneId): Result<AiParseResult> {
+        if (com.jiligulu.app.core.ai.ImageReceiptCodec.isImageText(input)) return runCatching { com.jiligulu.app.core.ai.ImageReceiptCodec.parseText(input) }
         val categories = categoryRepository.getAll()
         val pending = PromptRenderer.pendingOf(chatHistoryRepository.latestPending())
         val chatContext = buildContext(categories, requestMillis, zone)
@@ -296,7 +297,8 @@ class AiRepository(
         if (adds.isEmpty()) return AiTurn.Chat(parsed.reply.ifBlank { "阿噜在听，你说～" })
 
         val drafts = adds.map { bill ->
-            val expression = BillTimeResolver.expressionForBill(input, bill.detail, adds.size, bill.timeExpression, bill.amountYuan, bill.type)
+            val expression = if (com.jiligulu.app.core.ai.ImageReceiptCodec.isImageText(input)) bill.timeExpression
+                else BillTimeResolver.expressionForBill(input, bill.detail, adds.size, bill.timeExpression, bill.amountYuan, bill.type)
             val time = BillTimeResolver.resolve(expression, bill.occurredAt, requestMillis, zone)
             ConfirmItem(
                 amountText = if (bill.amountYuan.isFinite() && bill.amountYuan > 0) trimAmount(bill.amountYuan) else "",

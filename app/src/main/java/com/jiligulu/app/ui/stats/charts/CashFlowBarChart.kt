@@ -26,14 +26,27 @@ import kotlin.math.*
 
 data class DayBar(val day: Int, val dayStartMillis: Long, val amountFen: Long, val isToday: Boolean)
 
-internal fun cashFlowAxisTop(maxYuan: Double): Double = if (maxYuan.isFinite() && maxYuan > 0) maxYuan / 0.9 else 1.0
+internal data class CashFlowAxis(val step: Double, val intervals: Int) { val top get() = step * intervals }
+internal fun cashFlowAxis(maxYuan: Double): CashFlowAxis {
+    if (!maxYuan.isFinite() || maxYuan <= 0) return CashFlowAxis(.25, 4)
+    val power = floor(log10(maxYuan)).toInt()
+    val candidates = (-2..1).flatMap { offset ->
+        listOf(1.0, 1.1, 1.25, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 5.5, 6.0, 7.5, 8.0, 10.0).flatMap { factor ->
+            (3..6).map { count -> CashFlowAxis(factor * 10.0.pow(power + offset), count) }
+        }
+    }.filter { maxYuan / it.top in .80.. .95 }
+    return candidates.minByOrNull { abs(maxYuan / it.top - .9) + abs(it.intervals - 4) * .01 }
+        ?: CashFlowAxis(10.0.pow(power), ceil(maxYuan / 10.0.pow(power)).toInt() + 1)
+}
+internal fun cashFlowAxisTop(maxYuan: Double): Double = cashFlowAxis(maxYuan).top
 
 /** Fixed value axis and scrollable 44dp day slots. Selection uses outline, label and color. */
 @Composable
 fun CashFlowBarChart(bars: List<DayBar>, selectedDayMillis: Long?, onSelectDay: (Long) -> Unit,
     color: Color, trackColor: Color, modifier: Modifier = Modifier) {
     val maxYuan = (bars.maxOfOrNull { it.amountFen } ?: 0L) / 100.0
-    val top = cashFlowAxisTop(maxYuan)
+    val axis = cashFlowAxis(maxYuan)
+    val top = axis.top
     val scroll = rememberScrollState()
     val density = LocalDensity.current
     LaunchedEffect(selectedDayMillis, bars.size) {
@@ -54,12 +67,12 @@ fun CashFlowBarChart(bars: List<DayBar>, selectedDayMillis: Long?, onSelectDay: 
         Spacer(Modifier.height(12.dp))
         Row(Modifier.fillMaxWidth()) {
             Column(Modifier.width(42.dp).height(154.dp), verticalArrangement = Arrangement.SpaceBetween) {
-                for (i in 4 downTo 0) Text((if (i == 4) "¥" else "") + tick(top * i / 4), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                for (i in axis.intervals downTo 0) Text((if (i == axis.intervals) "¥" else "") + tick(axis.step * i), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Box(Modifier.weight(1f)) {
                 Canvas(Modifier.fillMaxWidth().height(154.dp)) {
-                    repeat(5) { index ->
-                        val y = size.height * index / 4
+                    repeat(axis.intervals + 1) { index ->
+                        val y = size.height * index / axis.intervals
                         drawLine(trackColor.copy(alpha = .6f), Offset(0f, y), Offset(size.width, y),
                             strokeWidth = 1.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(3.dp.toPx(), 5.dp.toPx())))
                     }

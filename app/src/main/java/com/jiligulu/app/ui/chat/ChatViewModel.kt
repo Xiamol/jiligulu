@@ -191,6 +191,10 @@ class ChatViewModel(
     fun send(text: String) {
         val input = text.trim()
         if (input.isBlank() || !_ready.value || _sending.value) return
+        if (com.jiligulu.app.core.ai.ImageReceiptCodec.isImageText(input)) {
+            val failure = runCatching { com.jiligulu.app.core.ai.ImageReceiptCodec.parseText(input) }.exceptionOrNull()
+            if (failure != null) { _error.value = failure.message; return }
+        }
         _sending.value = true
         _error.value = null
         val requestMillis = System.currentTimeMillis()
