@@ -88,6 +88,26 @@ class AnnouncementRepositoryTest {
         assertTrue(AnnouncementCodec.decode(prefs.readAnnouncements().cachedFeed).isEmpty())
     }
 
+    @Test fun manualRefreshUpdatesWithoutAnotherPopupAndFailureRetainsCache() = runBlocking {
+        val prefs = prefs
+        prefs.setAnnouncementSource("https://example.test/feed.json")
+        var next = feed
+        val repo = AnnouncementRepository(prefs, { next }, { 1L })
+        repo.initialize(); repo.close()
+        next = feed.replace("holiday", "new-letter")
+        repo.refresh()
+        assertEquals("new-letter", repo.state.value.entries.single().id)
+        assertNull(repo.state.value.automaticId)
+        next = "not json"
+        repo.refresh()
+        assertTrue(repo.state.value.offline)
+        assertFalse(repo.state.value.loading)
+        assertEquals("new-letter", repo.state.value.entries.single().id)
+        next = "{\"announcements\":[]}"
+        repo.refresh()
+        assertTrue(repo.state.value.entries.isEmpty())
+    }
+
     @Test fun invalidDuplicateAndUnboundedAnnouncementsAreRejected() {
         val row = """{"id":"same","title":"标题","body":"内容"}"""
         for (raw in listOf("{\"announcements\":[$row,$row]}", feed.replace("2030-01-01T00:00:00Z", "not-a-date"),

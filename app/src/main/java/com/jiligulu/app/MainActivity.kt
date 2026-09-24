@@ -176,6 +176,10 @@ private fun JiliguluRoot(waterRequest: Int) {
             LaunchedEffect(homeState.isLoaded) { if (homeState.isLoaded) mainReady = true }
             val navController = rememberNavController()
             val navigation by navController.currentBackStackEntryAsState()
+            val imageImport by com.jiligulu.app.ui.capture.ImageBillImport.pending.collectAsStateWithLifecycle()
+            LaunchedEffect(imageImport) {
+                if (imageImport != null && nickname.isNotBlank()) navController.navigate(Routes.CHAT) { launchSingleTop = true }
+            }
             val start = remember { if (nickname.isBlank()) Routes.ONBOARDING else Routes.MAIN }
             LaunchedEffect(waterRequest) {
                 if (waterRequest > 0 && nickname.isNotBlank()) {

@@ -39,9 +39,9 @@ val PaperNoteDark = Color(0xFF41382B)
 val PaperInkLight = Color(0xFF6C5F48)
 val PaperInkDark = Color(0xFFE3D4B4)
 
-// ---------- 语义色（中国习惯：红=收入/涨，绿=支出/跌） ----------
-val IncomeRed = Color(0xFFE0654F)
-val ExpenseGreen = Color(0xFF5FA568)
+// ---------- 语义色（收入绿、支出珊瑚红；始终辅以正负号和文字） ----------
+val IncomeGreen = Color(0xFF38875B)
+val ExpenseCoral = Color(0xFFD56559)
 
 /** 余粮环"剩余预算"固定语义绿（PRD §5.4：不与分类色混用） */
 val BudgetRemainGreen = Color(0xFF639922)

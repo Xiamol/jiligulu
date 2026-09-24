@@ -51,11 +51,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.jiligulu.app.ui.theme.ExpenseGreen
+import com.jiligulu.app.ui.theme.ExpenseCoral
 import com.jiligulu.app.ui.components.CategoryBadge
 import com.jiligulu.app.domain.color.GoldenAnglePalette
 import com.jiligulu.app.ui.theme.GuluBrandFont
-import com.jiligulu.app.ui.theme.IncomeRed
+import com.jiligulu.app.ui.theme.IncomeGreen
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -361,7 +361,7 @@ private fun TrashBillCard(
             Text(
                 item.amountText,
                 style = MaterialTheme.typography.titleSmall,
-                color = if (item.isExpense) ExpenseGreen else IncomeRed
+                color = if (item.isExpense) ExpenseCoral else IncomeGreen
             )
         }
     }

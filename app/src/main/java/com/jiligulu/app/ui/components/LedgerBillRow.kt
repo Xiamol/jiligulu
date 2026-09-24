@@ -22,8 +22,8 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.jiligulu.app.domain.color.GoldenAnglePalette
-import com.jiligulu.app.ui.theme.ExpenseGreen
-import com.jiligulu.app.ui.theme.IncomeRed
+import com.jiligulu.app.ui.theme.ExpenseCoral
+import com.jiligulu.app.ui.theme.IncomeGreen
 
 /** One row for both the ledger and statistics. Its parent owns the group outline and corners. */
 @Composable
@@ -56,7 +56,7 @@ fun LedgerBillRow(
             }
             Spacer(Modifier.width(8.dp))
             Text(amountText, style = MaterialTheme.typography.titleMedium,
-                color = if (isExpense) ExpenseGreen else IncomeRed)
+                color = if (isExpense) ExpenseCoral else IncomeGreen)
         }
         if (showDivider) {
             val color = MaterialTheme.colorScheme.outline

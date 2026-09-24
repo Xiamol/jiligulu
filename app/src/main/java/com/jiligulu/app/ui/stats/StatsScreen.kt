@@ -66,8 +66,8 @@ import com.jiligulu.app.ui.components.LedgerBillRow
 import com.jiligulu.app.ui.billdetail.BillDetailSheet
 import com.jiligulu.app.ui.stats.charts.CashFlowBarChart
 import com.jiligulu.app.ui.stats.charts.DonutChart
-import com.jiligulu.app.ui.theme.ExpenseGreen
-import com.jiligulu.app.ui.theme.IncomeRed
+import com.jiligulu.app.ui.theme.ExpenseCoral
+import com.jiligulu.app.ui.theme.IncomeGreen
 import com.jiligulu.app.ui.components.billDatePickerYearRange
 import java.time.Instant
 import java.time.YearMonth
@@ -141,7 +141,9 @@ fun StatsScreen(
 
         // ---------- 收支长河 ----------
         item(key = "cash_flow") {
-            ChartCard(title = "每日收支", subtitle = "收支长河 · 看看钱都花在了哪一天") {
+            ChartCard(title = "每日收支", subtitle = "一日一格，记下生活的小脚印 ♡", action = {
+                TextButton(onClick = { showDateFilter = true }) { Icon(Icons.Outlined.CalendarMonth, null, Modifier.size(18.dp)); Spacer(Modifier.width(4.dp)); Text("选日期") }
+            }) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(
                         selected = flowType == BillType.EXPENSE,
@@ -159,15 +161,15 @@ fun StatsScreen(
                     bars = bars,
                     selectedDayMillis = selectedDay,
                     onSelectDay = { vm.selectDay(it) },
-                    color = if (flowType == BillType.EXPENSE) ExpenseGreen else IncomeRed,
+                    color = if (flowType == BillType.EXPENSE) ExpenseCoral else IncomeGreen,
                     trackColor = MaterialTheme.colorScheme.outlineVariant,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(152.dp)
+                        .height(250.dp)
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    "轻点柱子，查看当天账单；点账单可以修改。",
+                    "左右滑一滑，轻点柱子看看当天的小账单。",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -207,7 +209,7 @@ fun StatsScreen(
                             dayDonut.slices.forEach { slice ->
                                 LegendRow(
                                     color = slice.color,
-                                    label = slice.label,
+                                    label = "${slice.label} · ${String.format(java.util.Locale.ROOT, "%.1f", slice.valueFen.toDouble() / dayDonut.slices.sumOf { it.valueFen }.coerceAtLeast(1) * 100)}%",
                                     amountText = "¥${Formatters.fenToYuanText(slice.valueFen)}",
                                     selected = slice.key == dayDonut.selectedCategoryId,
                                     onClick = { vm.toggleCategory(slice.key as? Long) }
@@ -223,11 +225,6 @@ fun StatsScreen(
         item(key = "category_details") {
                 ChartCard(title = if (dayDonut.selectedCategoryId == null) "当天账单" else "${dayDonut.selectedLabel} · 账单",
                     subtitle = "${dayDonut.dayLabel} · ${dayDetails.size} 笔") {
-                    TextButton(onClick = { showDateFilter = true }) {
-                        Icon(Icons.Outlined.CalendarMonth, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("选择统计日期")
-                    }
                     if (dayDonut.selectedCategoryId != null) {
                         TextButton(onClick = { vm.toggleCategory(null) }) { Text("查看全部账单") }
                     }
@@ -290,7 +287,7 @@ fun StatsScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Text("预算  ¥${budget.totalText}", style = MaterialTheme.typography.bodyLarge)
-                            Text("已用  ¥${budget.spentText}", style = MaterialTheme.typography.bodyLarge)
+                            Text("已用  ¥${budget.spentText} · ${budget.usedPercentText}", style = MaterialTheme.typography.bodyLarge)
                             if (budget.overspendPercentText.isNotBlank()) {
                                 Text(
                                     budget.overspendPercentText,
@@ -360,10 +357,14 @@ fun StatsScreen(
 private fun ChartCard(
     title: String,
     subtitle: String? = null,
+    action: (@Composable () -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit
 ) {
     LedgerCard {
-        Text(title, style = MaterialTheme.typography.titleMedium)
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+            action?.invoke()
+        }
         if (subtitle != null) {
             Spacer(Modifier.height(4.dp))
             Text(

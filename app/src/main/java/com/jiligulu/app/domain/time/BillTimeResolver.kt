@@ -46,10 +46,24 @@ object BillTimeResolver {
     /** A model-supplied time never creates temporal information absent from the user's words. */
     fun expressionForBill(input: String, detail: String, count: Int, modelExpression: String): String {
         val context = contextForBill(input, detail, count)
-        if (context.isEmpty() || context == "时间待确认") return context
+        if (context == "时间待确认") return context
+        if (context.isEmpty()) {
+            val clauses = splitClauses(input)
+            val matching = clauses.filter { detail.isNotBlank() && it.contains(detail) }
+            val own = if (matching.size == 1) matching.single() else if (count == 1) input else ""
+            return if (mealTime(own) != null) own else ""
+        }
         // Retain the complete clause: a shortened model value such as "中午" can drop "昨天".
         // Original wording is also the only trustworthy fallback when the model invents a date.
         return if (modelExpression.isNotBlank() && !hasTimeExpression(context)) "" else context
+    }
+
+    /** Meal names imply a conventional time only when the meal window has clearly passed. */
+    private fun mealTime(text: String): Pair<LocalTime, LocalTime>? = when {
+        Regex("(?:早餐|早饭)(?!机|券|卡|奶)").containsMatchIn(text) -> LocalTime.of(8, 0) to LocalTime.of(10, 30)
+        Regex("(?:午餐|午饭)(?!肉|券|卡)").containsMatchIn(text) -> LocalTime.NOON to LocalTime.of(14, 30)
+        Regex("(?:晚餐|晚饭)(?!券|卡)").containsMatchIn(text) -> LocalTime.of(18, 0) to LocalTime.of(21, 0)
+        else -> null
     }
 
     fun resolve(
@@ -72,6 +86,20 @@ object BillTimeResolver {
             if (vague) return ResolvedBillTime(needsReview = true, hint = "“$expression”还不够具体，请选择账单日期和时间")
             if (date == null && Regex("上个?月|去年|前年|今年|${N}年|${N}月|(?:${N}|几)个?月前|上周|本周|这周|星期|礼拜").containsMatchIn(text)) {
                 return ResolvedBillTime(needsReview = true, hint = "还需要具体日期，请选择账单日期和时间")
+            }
+            val meal = mealTime(text)
+            if (time == null && meal != null) {
+                val explicitPresent = Regex("刚才|刚刚|现在|此刻|刚吃|正在吃|才吃").containsMatchIn(text)
+                if ((date == null || date == now.toLocalDate()) && explicitPresent) {
+                    return ResolvedBillTime(requestMillis, hint = "按你说的当前时间记录")
+                }
+                val earlierMeal = !now.toLocalTime().isBefore(meal.second)
+                val explicitBackfill = Regex("补记|补录").containsMatchIn(text) && !now.toLocalTime().isBefore(meal.first)
+                if (date != null && date != now.toLocalDate() || earlierMeal || explicitBackfill) {
+                    val value = (date ?: now.toLocalDate()).atTime(meal.first).atZone(zone).toInstant().toEpochMilli()
+                    return ResolvedBillTime(value, hint = "按餐次暂记 ${meal.first}，可以修改")
+                }
+                return ResolvedBillTime()
             }
             if (date != null || time != null) {
                 val actualTime = time ?: LocalTime.NOON

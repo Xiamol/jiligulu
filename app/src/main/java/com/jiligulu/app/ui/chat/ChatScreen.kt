@@ -78,8 +78,8 @@ import com.jiligulu.app.ui.components.BillDateTimeField
 import com.jiligulu.app.ui.components.CategoryBadge
 import com.jiligulu.app.domain.color.GoldenAnglePalette
 import com.jiligulu.app.domain.category.CategoryDefaults
-import com.jiligulu.app.ui.theme.ExpenseGreen
-import com.jiligulu.app.ui.theme.IncomeRed
+import com.jiligulu.app.ui.theme.ExpenseCoral
+import com.jiligulu.app.ui.theme.IncomeGreen
 import com.jiligulu.app.ui.theme.GuluBrandFont
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -266,6 +266,9 @@ fun ChatScreen(
             }
         }
 
+        com.jiligulu.app.ui.capture.ImageAttachment(enabled = ready && !sending) { result ->
+            input = if (input.isBlank()) result else input + "\n" + result
+        }
         // ---------- 输入栏 ----------
         Row(
             modifier = Modifier
@@ -283,7 +286,8 @@ fun ChatScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 },
-                singleLine = true,
+                singleLine = false,
+                maxLines = 4,
                 enabled = ready,
                 shape = MaterialTheme.shapes.extraLarge,
                 colors = OutlinedTextFieldDefaults.colors(
@@ -425,7 +429,7 @@ internal fun DraftCardView(
                     }
                     Text("${if (draft.type == BillType.EXPENSE) "−" else "+"}¥${draft.amountText}",
                         style = MaterialTheme.typography.titleSmall,
-                        color = if (draft.type == BillType.EXPENSE) ExpenseGreen else IncomeRed)
+                        color = if (draft.type == BillType.EXPENSE) ExpenseCoral else IncomeGreen)
                 }
             }
             if (visibleDrafts.size > summaryDrafts.size) Text("还有 ${visibleDrafts.size - summaryDrafts.size} 笔", style = MaterialTheme.typography.labelSmall,
@@ -461,7 +465,7 @@ internal fun DraftCardView(
                         Text(
                             if (draft.type == BillType.EXPENSE) "支出" else "收入",
                             style = MaterialTheme.typography.bodyMedium,
-                            color = if (draft.type == BillType.EXPENSE) ExpenseGreen else IncomeRed
+                            color = if (draft.type == BillType.EXPENSE) ExpenseCoral else IncomeGreen
                         )
                     }
                     Spacer(Modifier.height(6.dp))

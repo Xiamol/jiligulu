@@ -10,9 +10,9 @@
 - 文件：分支根目录的 `announcements.json`。
 - 读取地址：`https://raw.githubusercontent.com/Xiamol/jiligulu/announcements/announcements.json`。
 - 编辑入口：`https://github.com/Xiamol/jiligulu/edit/announcements/announcements.json`。
-- 初始内容为空列表，没有自动发布测试祝福。`content/announcements.example.json` 只是本地示例，不会被客户端自动加载。
+- 现已按用户要求发布测试来信 test-letter-20260924。`content/announcements.example.json` 只是本地示例，不会被客户端自动加载。
 
-在 GitHub 编辑文件并提交后，客户端在下一次冷启动拉取；静态托管有缓存，内容可能稍后才更新。App 不含发布凭据，不用 DeepSeek 生成或转发公告。
+在 GitHub 编辑文件并提交后，客户端在下一次冷启动或首页下拉刷新时拉取；静态托管有缓存，内容可能稍后才更新。App 不含发布凭据，不用 DeepSeek 生成或转发公告。
 
 ## 文件格式
 

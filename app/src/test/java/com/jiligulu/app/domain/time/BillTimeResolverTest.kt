@@ -105,16 +105,16 @@ class BillTimeResolverTest {
         assertEquals(now, resolve("刚才买了杯咖啡12元").timestamp)
     }
 
-    @Test fun hallucinatedBreakfastTimeCannotOverrideDefaultNow() {
+    @Test fun mealBackfillUsesUserWordsInsteadOfInventedModelDate() {
         val expression = BillTimeResolver.expressionForBill("早餐9元", "早餐", 1, "今天早上8点")
-        assertEquals("", expression)
-        assertNull(resolve(expression).timestamp)
+        assertEquals("早餐9元", expression)
+        assertEquals(instant("2026-09-21T08:00:00"), resolve(expression).timestamp)
     }
 
     @Test fun laterBillDateNeverAppliesToEarlierBill() {
         val input = "早餐9元，昨天下午咖啡12元"
         assertEquals("", BillTimeResolver.contextForBill(input, "早餐", 2))
-        assertEquals("", BillTimeResolver.expressionForBill(input, "早餐", 2, "昨天下午"))
+        assertEquals("早餐9元", BillTimeResolver.expressionForBill(input, "早餐", 2, "昨天下午"))
         assertEquals(instant("2026-09-20T15:00:00"), resolve(BillTimeResolver.contextForBill(input, "咖啡", 2)).timestamp)
     }
 
@@ -134,7 +134,7 @@ class BillTimeResolverTest {
 
     @Test fun singleBillUsesItsOwnClauseInsteadOfAnEarlierDate() {
         val expression = BillTimeResolver.expressionForBill("昨天没花钱，今天早餐9元", "早餐", 1, "昨天")
-        assertEquals(instant("2026-09-21T12:00:00"), resolve(expression).timestamp)
+        assertEquals(instant("2026-09-21T08:00:00"), resolve(expression).timestamp)
     }
 
     @Test fun singleBillWithoutReliableDateAssociationRequiresReview() {
@@ -151,5 +151,15 @@ class BillTimeResolverTest {
             assertTrue(input, result.needsReview)
             assertNull(input, result.timestamp)
         }
+    }
+    @Test fun lunchBackfillRespectsMealWindowAndExplicitTime() {
+        fun bill(input: String, at: String) = resolve(BillTimeResolver.expressionForBill(input, "吃饭", 1, ""), instant(at))
+        assertEquals(instant("2026-09-21T12:00:00"), bill("午餐9", "2026-09-21T16:00:00").timestamp)
+        assertNull(bill("午餐9", "2026-09-21T12:40:00").timestamp)
+        assertEquals(instant("2026-09-21T16:00:00"), bill("刚吃午餐9元", "2026-09-21T16:00:00").timestamp)
+        assertEquals(instant("2026-09-21T13:20:00"), bill("午餐13:20花9元", "2026-09-21T16:00:00").timestamp)
+        assertEquals(instant("2026-09-20T08:00:00"), bill("昨天早餐9元", "2026-09-21T16:00:00").timestamp)
+        assertNull(bill("午餐肉9元", "2026-09-21T16:00:00").timestamp)
+        assertNull(bill("晚餐9元", "2026-09-21T16:00:00").timestamp)
     }
 }

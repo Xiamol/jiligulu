@@ -75,6 +75,23 @@ class AnnouncementRepository(
         }
     }
 
+    /** User refresh updates the mailbox without scheduling another automatic popup. */
+    suspend fun refresh() = mutex.withLock {
+        mutable.value = mutable.value.copy(loading = true, error = null)
+        try {
+            val source = prefs.readAnnouncements().source
+            val raw = if (source.isBlank()) "{\"schemaVersion\":1,\"announcements\":[]}" else fetch(source)
+            val parsed = AnnouncementCodec.decode(raw)
+            prefs.cacheAnnouncements(raw)
+            feed = parsed
+            updateTime()
+            mutable.value = mutable.value.copy(offline = false)
+        } catch (cancelled: CancellationException) { throw cancelled
+        } catch (_: Exception) {
+            mutable.value = mutable.value.copy(offline = true, error = "暂时没收到新来信，已保留原来的信笺。")
+        } finally { mutable.value = mutable.value.copy(loading = false) }
+    }
+
     /** Expiration changes the home list; it never schedules a second automatic popup this process. */
     fun updateTime() {
         val active = feed.filter { it.activeAt(now()) }

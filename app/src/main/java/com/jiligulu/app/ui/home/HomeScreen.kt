@@ -1,5 +1,6 @@
 package com.jiligulu.app.ui.home
 
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -45,10 +46,11 @@ import com.jiligulu.app.ui.billdetail.BillDetailSheet
 import com.jiligulu.app.ui.components.LedgerBillRow
 import com.jiligulu.app.ui.components.LedgerCard
 import com.jiligulu.app.ui.components.PaperNote
-import com.jiligulu.app.ui.theme.ExpenseGreen
+import com.jiligulu.app.ui.theme.ExpenseCoral
 import com.jiligulu.app.ui.theme.GuluTheme
-import com.jiligulu.app.ui.theme.IncomeRed
+import com.jiligulu.app.ui.theme.IncomeGreen
 
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
     onOpenChat: () -> Unit,
@@ -59,7 +61,21 @@ fun HomeScreen(
     val app = androidx.compose.ui.platform.LocalContext.current.applicationContext as com.jiligulu.app.JiliguluApp
     val notices by app.container.announcements.state.collectAsStateWithLifecycle()
     var selectedBillId by rememberSaveable { mutableStateOf<Long?>(null) }
-    HomeContent(state, onOpenChat, onAddBill, notices, app.container.announcements::open) { selectedBillId = it }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    var refreshMessage by androidx.compose.runtime.remember { mutableStateOf<String?>(null) }
+    androidx.compose.material3.pulltorefresh.PullToRefreshBox(
+        isRefreshing = notices.loading,
+        onRefresh = { scope.launch {
+            app.container.announcements.refresh()
+            refreshMessage = if (app.container.announcements.state.value.offline) "暂时连不上，已保留原来的信笺" else "信箱已刷新 💌"
+        } }, modifier = Modifier.fillMaxSize()
+    ) {
+        HomeContent(state, onOpenChat, onAddBill, notices, app.container.announcements::open) { selectedBillId = it }
+        refreshMessage?.let { message ->
+            androidx.compose.material3.Snackbar(Modifier.align(Alignment.BottomCenter).padding(16.dp)) { Text(message) }
+        }
+    }
+    androidx.compose.runtime.LaunchedEffect(refreshMessage) { if (refreshMessage != null) { kotlinx.coroutines.delay(2500); refreshMessage = null } }
     selectedBillId?.let { BillDetailSheet(it) { selectedBillId = null } }
 }
 
@@ -137,7 +153,7 @@ private fun HomeContent(
                         Text(day.dayLabel, style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Text("支出 ¥${day.dayExpenseText}", style = MaterialTheme.typography.labelMedium,
-                            color = ExpenseGreen)
+                            color = ExpenseCoral)
                     }
                 }
                 itemsIndexed(day.bills, key = { _, bill -> bill.id }) { index, bill ->
@@ -194,7 +210,7 @@ private fun SummaryAmount(label: String, amount: String, count: Int, expense: Bo
     Column(modifier, verticalArrangement = Arrangement.spacedBy(3.dp)) {
         Text(label, style = MaterialTheme.typography.bodyMedium)
         Text("¥$decimal", style = MaterialTheme.typography.headlineSmall,
-            color = if (expense) ExpenseGreen else IncomeRed, softWrap = false,
+            color = if (expense) ExpenseCoral else IncomeGreen, softWrap = false,
             modifier = Modifier.horizontalScroll(rememberScrollState()))
         Text("共 $count 笔", style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant)

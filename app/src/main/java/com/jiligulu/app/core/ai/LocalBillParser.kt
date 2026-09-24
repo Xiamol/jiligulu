@@ -17,7 +17,7 @@ object LocalBillParser {
             val matches = money.findAll(text).toList()
             if (matches.isEmpty()) {
                 // Accept the common "早餐 12" form only when no date/time or other number exists.
-                val plain = Regex("^([^\\d]+?)\\s+(\\d+(?:\\.\\d{1,2})?)$").matchEntire(text)
+                val plain = Regex("^([^\\d]+?)\\s*(\\d+(?:\\.\\d{1,2})?)$").matchEntire(text)
                 if (plain != null && !BillTimeResolver.hasTimeExpression(text)) {
                     listOf(draft(text, plain.groupValues[2].toDouble(), plain.groupValues[1], inheritedTime))
                 } else emptyList()

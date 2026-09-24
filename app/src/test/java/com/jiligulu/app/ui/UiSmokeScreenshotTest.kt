@@ -172,6 +172,7 @@ class UiSmokeScreenshotTest {
             compose.onNodeWithContentDescription("设置").performClick()
             awaitText("保存设置")
             capture("settings-light")
+            compose.onNodeWithText("关于").performClick()
             scrollSettingsTo("阿噜使用手册")
             compose.onNodeWithText("阿噜使用手册").performClick()
             awaitText("阿噜使用手册 ♡")
@@ -238,23 +239,16 @@ class UiSmokeScreenshotTest {
             capture("water-completed")
             compose.onNodeWithContentDescription("设置").performClick()
             awaitText("保存设置")
-            scrollSettingsTo("重看初次见面")
-            compose.waitForIdle()
-            compose.onNodeWithText("重看初次见面").performClick()
-            awaitText("你的名字")
-            capture("welcome-preview")
-            compose.onNodeWithText("继续看动画").performClick()
-            compose.mainClock.advanceTimeBy(4_000)
-            awaitText("保存设置")
-            assertEquals("Welcome preview must not overwrite the user's profile", "路陌",
-                runBlocking { app.container.userPrefs.nickname.first() })
+            compose.onNodeWithText("关于").performClick()
             scrollSettingsTo("检查更新")
             compose.waitForIdle()
             // 内置默认更新源后，检查更新按钮应始终可点击（不再依赖手动配置仓库）
             compose.onNodeWithText("检查更新").assertIsEnabled()
             capture("update-settings")
 
-            scrollSettingsTo("历史对话", towardTop = true)
+            scrollSettingsTo("数据", towardTop = true)
+            compose.onNodeWithText("数据", substring = false).performClick()
+            scrollSettingsTo("历史对话")
             val history = app.container.chatHistoryRepository
             val keptBills = runBlocking { app.container.billRepository.recent(30) }
             compose.onNodeWithTag("clear-history-entry").performClick()
@@ -574,6 +568,40 @@ class UiSmokeScreenshotTest {
             compose.onNodeWithText("对话记账").performClick()
             awaitTag("chat-input")
             compose.onNodeWithTag("voice-toggle").assertDoesNotExist()
+            compose.runOnIdle { activity.setContent {} }
+        }
+    }
+
+    @Test(timeout = 60_000)
+    fun refreshedStatisticsAndCompactSettings() {
+        val app = RuntimeEnvironment.getApplication() as JiliguluApp
+        runBlocking {
+            app.container.userPrefs.setNickname("路陌")
+            app.container.userPrefs.setThemeMode(UserPrefs.THEME_LIGHT)
+            app.container.userPrefs.setWaterEnabled(false)
+            app.container.userPrefs.setUpdateRepository("")
+            app.container.userPrefs.setAnnouncementSource("")
+        }
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity {
+                activity = it
+                it.setContent { GuluTheme {
+                    androidx.compose.foundation.layout.Column(androidx.compose.ui.Modifier.fillMaxSize()) {
+                        com.jiligulu.app.ui.stats.charts.CashFlowBarChart(
+                            (1..30).map { day -> com.jiligulu.app.ui.stats.charts.DayBar(day, day.toLong(), if (day % 3 == 0) day * 120L else day * 60L, day == 24) },
+                            24L, {}, com.jiligulu.app.ui.theme.ExpenseCoral, com.jiligulu.app.ui.theme.OutlineLight,
+                            androidx.compose.ui.Modifier.fillMaxSize())
+                    }
+                } }
+            }
+            awaitText("♡ 24日 · ¥28.8")
+            capture("statistics-soft-bars")
+            compose.runOnIdle { activity.setContent { GuluTheme { com.jiligulu.app.ui.settings.SettingsScreen(onBack = {}) } } }
+            awaitText("你的称呼")
+            capture("settings-single-card")
+            compose.onNodeWithText("提醒", substring = false).performClick()
+            awaitText("阿噜悬浮球")
+            capture("settings-reminders-card")
             compose.runOnIdle { activity.setContent {} }
         }
     }

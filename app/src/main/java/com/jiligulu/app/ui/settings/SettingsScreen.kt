@@ -5,6 +5,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -91,6 +92,7 @@ fun SettingsScreen(
     }
 
     // Permission launchers belong to the UI; preference writes and scheduling belong to the VM.
+    var settingsTab by rememberSaveable { mutableStateOf("日常") }
     val context = LocalContext.current
     val notificationPermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -213,7 +215,15 @@ fun SettingsScreen(
                 if (state.isLoaded) {
                     SettingsCompanionHeader()
 
-                    SettingsSection("你的称呼", "让阿噜用你喜欢的方式叫你", "💌") {
+                    Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(26.dp), color = MaterialTheme.colorScheme.surface,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .5f))) {
+                        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
+                            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                listOf("日常", "提醒", "数据", "关于").forEach { tab ->
+                                    FilterChip(selected = settingsTab == tab, onClick = { settingsTab = tab }, label = { Text(tab) })
+                                }
+                            }
+                    if (settingsTab == "日常") SettingsSection("你的称呼", "让阿噜用你喜欢的方式叫你", "💌") {
                         OutlinedTextField(
                             value = state.nickname,
                             onValueChange = vm::setNickname,
@@ -235,7 +245,7 @@ fun SettingsScreen(
                         )
                     }
 
-                    SettingsSection("外观", "给小账本换个喜欢的模样", "🎨") {
+                    if (settingsTab == "日常") SettingsSection("外观", "给小账本换个喜欢的模样", "🎨") {
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             listOf(
                                 UserPrefs.THEME_SYSTEM to "跟随系统",
@@ -252,7 +262,7 @@ fun SettingsScreen(
                         }
                     }
 
-                    SettingsSection("喝水提醒", "工作再忙，也记得照顾自己", "💧") {
+                    if (settingsTab == "提醒") SettingsSection("喝水提醒", "工作再忙，也记得照顾自己", "💧") {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
@@ -312,7 +322,9 @@ fun SettingsScreen(
                         }
                     }
 
-                    SettingsSection("AI 服务", "让每一句生活，都有回应", "✨") {
+                    if (settingsTab == "提醒") SettingsSection("悬浮记账", "阿噜陪你跨应用记一笔", "📷") { com.jiligulu.app.ui.capture.FloatingCaptureSettings() }
+
+                    if (settingsTab == "数据") SettingsSection("AI 服务", "让每一句生活，都有回应", "✨") {
                         OutlinedTextField(
                             value = state.apiKey,
                             onValueChange = vm::setApiKey,
@@ -331,7 +343,7 @@ fun SettingsScreen(
                         )
                     }
 
-                    SettingsSection("数据管理", "删掉的东西，先放在手边", "🗂️") {
+                    if (settingsTab == "数据") SettingsSection("数据管理", "删掉的东西，先放在手边", "🗂️") {
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                 Text("回收站", style = MaterialTheme.typography.bodyLarge)
@@ -348,7 +360,7 @@ fun SettingsScreen(
                         ConversationSettingsCard(vm)
                     }
 
-                    SettingsSection("关于叽里咕噜", "小小的账本，大大的生活", "🌱") {
+                    if (settingsTab == "关于") SettingsSection("关于叽里咕噜", "小小的账本，大大的生活", "🌱") {
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             Text("叽里咕噜", style = MaterialTheme.typography.titleLarge.copy(fontFamily = GuluBrandFont, fontWeight = FontWeight.Normal),
@@ -385,8 +397,9 @@ fun SettingsScreen(
                             TextButton(onClick = { showFontLicense = true }) { Text("字体与开源许可") }
                         }
                     }
-                    TypingSoundSettingsCard(onPreviewWelcome)
-                    UpdateSettingsCard(checkOnOpen = checkUpdatesOnOpen)
+                    if (settingsTab == "关于") SettingsSection("版本与更新", "查看版本、检查新消息", "🎁") { UpdateSettingsCard(checkOnOpen = checkUpdatesOnOpen) }
+                        }
+                    }
                     Text("慢慢记，日子也会慢慢发光 ♡", modifier = Modifier.align(Alignment.CenterHorizontally).padding(bottom = 8.dp),
                         style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
@@ -483,23 +496,12 @@ private fun SettingsSection(
     icon: String,
     content: @Composable ColumnScope.() -> Unit
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Row(Modifier.padding(horizontal = 4.dp), horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(34.dp).background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f),
-                MaterialTheme.shapes.medium), contentAlignment = Alignment.Center) {
-                Text(icon, style = MaterialTheme.typography.titleMedium)
-            }
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(title, style = MaterialTheme.typography.titleSmall)
-                Text(description, style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(icon, style = MaterialTheme.typography.titleMedium)
+            Text(title, style = MaterialTheme.typography.titleSmall)
         }
-        Surface(modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.large,
-            color = MaterialTheme.colorScheme.surface,
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))) {
-            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp), content = content)
-        }
+        Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        content()
     }
 }

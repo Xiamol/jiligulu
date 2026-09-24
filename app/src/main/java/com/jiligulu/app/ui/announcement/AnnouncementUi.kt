@@ -62,7 +62,7 @@ fun AnnouncementDialogHost(repository: AnnouncementRepository, enabled: Boolean)
     if (!enabled || state.loading) return
     if (state.emptyMailboxOpen) {
         GuluDialog(title = "💌 阿噜的小信箱", onDismiss = repository::close, confirmLabel = "收好信笺") {
-            Text(if (state.offline) "这次暂时没连上公告服务，等网络恢复、下次启动时再看看。"
+            Text(if (state.offline) "这次暂时没连上公告服务，可以回到首页下拉刷新，再看看新来信。"
                 else "信箱里暂时还没有新消息。\n有新的公告或节日祝福时，阿噜会把来信放在这里。",
                 style = MaterialTheme.typography.bodyLarge, modifier = Modifier.testTag("announcement-empty"))
         }

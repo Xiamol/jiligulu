@@ -63,6 +63,7 @@ data class DayDonutUi(
 
 /** 余粮环卡片状态 */
 data class BudgetUi(
+    val usedPercentText: String = "0%",
     val visible: Boolean = false,                      // 未设预算 → 隐藏（PRD）
     val spentText: String = "",
     val totalText: String = "",
@@ -331,6 +332,7 @@ class StatsViewModel(
         }
         return BudgetUi(
             visible = true,
+            usedPercentText = String.format(java.util.Locale.ROOT, "%.1f%%", spentFen.toDouble() / budget.amountFen.coerceAtLeast(1) * 100),
             spentText = Formatters.fenToYuanText(spentFen),
             totalText = Formatters.fenToYuanText(budget.amountFen),
             remainText = Formatters.fenToYuanText(remainFen),

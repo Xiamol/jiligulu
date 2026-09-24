@@ -26,7 +26,6 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.jiligulu.app.JiliguluApp
-import com.jiligulu.app.ui.components.LedgerCard
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
@@ -58,7 +57,7 @@ fun UpdateSettingsCard(checkOnOpen: Boolean = false) {
             app.container.updates.check()
         }
     }
-    LedgerCard {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("应用更新", style = MaterialTheme.typography.titleMedium)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text("进入应用时自动检查", modifier = Modifier.padding(top = 14.dp))
