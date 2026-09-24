@@ -21,6 +21,7 @@ fun FloatingCaptureSettings() {
     val context = LocalContext.current
     val prefs = (context.applicationContext as JiliguluApp).container.userPrefs
     val enabled by prefs.floatingCaptureEnabled.collectAsStateWithLifecycle(false)
+    val hidden by FloatingCaptureService.hiddenForSession.collectAsStateWithLifecycle()
     val running by FloatingCaptureService.running.collectAsStateWithLifecycle()
     val ready by ScreenCaptureService.ready.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
@@ -30,6 +31,7 @@ fun FloatingCaptureSettings() {
     }
     fun enable() { scope.launch {
         try {
+            FloatingCaptureService.hiddenForSession.value = false
             prefs.setFloatingCaptureEnabled(true)
             ContextCompat.startForegroundService(context, Intent(context, FloatingCaptureService::class.java))
             if (!ScreenCaptureService.ready.value) prepare()
@@ -40,7 +42,7 @@ fun FloatingCaptureSettings() {
         if (Settings.canDrawOverlays(context)) enable() else error = "开启悬浮窗需要允许显示在其他应用上层"
     }
     Row(Modifier.fillMaxWidth()) {
-        Column(Modifier.weight(1f)) { Text("阿噜悬浮球"); Text("轻点截图、拖动挪位置、长按关闭", style = MaterialTheme.typography.bodySmall) }
+        Column(Modifier.weight(1f)) { Text("阿噜悬浮球"); Text("轻点截图；长按拖到底部可暂时隐藏", style = MaterialTheme.typography.bodySmall) }
         Switch(checked = enabled, onCheckedChange = { value ->
             error = null
             if (!value) scope.launch {
@@ -58,8 +60,8 @@ fun FloatingCaptureSettings() {
     }
     Text("开关会记住。截屏授权在本次共享会话内复用，系统会显示共享标识；只在点击时截取画面。清理后台或系统结束共享后，需要重新授权。", style = MaterialTheme.typography.bodySmall)
     if (enabled) {
-        Text(if (ready) "截屏已就绪 ♡" else if (running) "悬浮球已开启，下次截图时申请授权" else "已记住开启状态，等待恢复悬浮球", style = MaterialTheme.typography.bodySmall)
-        if (!ready) TextButton(onClick = { runCatching { prepare() }.onFailure { error = "暂时无法打开授权页面，请重试" } }) { Text("准备截屏") }
+        Text(if (hidden) "本次已隐藏，重新启动 App 后恢复；功能开关仍开启" else if (ready) "截屏已就绪 ♡" else if (running) "悬浮球已开启，下次截图时申请授权" else "已记住开启状态，等待恢复悬浮球", style = MaterialTheme.typography.bodySmall)
+        if (!ready && !hidden) TextButton(onClick = { runCatching { prepare() }.onFailure { error = "暂时无法打开授权页面，请重试" } }) { Text("准备截屏") }
     }
     error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
 }

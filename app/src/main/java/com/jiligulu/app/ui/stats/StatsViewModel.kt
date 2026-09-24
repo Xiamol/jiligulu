@@ -167,11 +167,9 @@ class StatsViewModel(
 
     /** 今日瓜分：选中日的分类切片（≤7 片，超出合并「其他」） */
     val dayDonut: StateFlow<DayDonutUi> =
-        combine(monthBills, selectedDay, categoryRepository.categories) { bills, day, cats ->
-            Triple(bills, day, cats)
-        }.combine(selectedCategoryId) { (bills, day, cats), selectedId ->
+        combine(monthBills, selectedDay, categoryRepository.categories, _flowType, selectedCategoryId) { bills, day, cats, type, selectedId ->
             val dayBills = bills.filter {
-                Formatters.dayStart(it.timestamp) == day && it.type == BillType.EXPENSE
+                Formatters.dayStart(it.timestamp) == day && it.type == type
             }
             val catMap = cats.associateBy { it.id }
             val byCat = dayBills.groupBy { it.categoryId }
@@ -201,20 +199,21 @@ class StatsViewModel(
                 slices = slices,
                 totalText = Formatters.fenToYuanText(total),
                 selectedCategoryId = selectedId,
-                selectedLabel = selectedSlice?.label ?: "当日总支出",
+                selectedLabel = selectedSlice?.label ?: if (type == BillType.EXPENSE) "当日总支出" else "当日总收入",
                 selectedAmountText = Formatters.fenToYuanText(selectedSlice?.valueFen ?: total)
             )
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), DayDonutUi())
 
     /** 选中日明细列表：分类过滤 + 排序，全内存操作 */
     val dayDetails: StateFlow<List<DayDetailUi>> =
-        combine(monthBills, selectedDay, selectedCategoryId, _sort) { bills, day, catId, sort ->
+        combine(combine(monthBills, _flowType) { bills, type -> bills.filter { it.type == type } }, selectedDay, selectedCategoryId, _sort) { bills, day, catId, sort ->
             Quad(bills, day, catId, sort)
         }.combine(categoryRepository.categories) { q, cats ->
             val catMap = cats.associateBy { it.id }
-            q.bills.asSequence()
-                .filter { Formatters.dayStart(it.timestamp) == q.day }
-                .filter { q.catId == null || (it.categoryId == q.catId && it.type == BillType.EXPENSE) }
+            val daily = q.bills.filter { Formatters.dayStart(it.timestamp) == q.day }
+            val leading = daily.groupBy { it.categoryId }.entries.sortedByDescending { entry -> entry.value.sumOf { it.amountFen } }.take(6).map { it.key }.toSet()
+            daily.asSequence()
+                .filter { q.catId == null || if (q.catId == OTHER_KEY) it.categoryId !in leading else it.categoryId == q.catId }
                 .sortedWith(
                     when (q.sort) {
                         DetailSort.TIME_DESC -> compareByDescending { it.timestamp }
@@ -266,7 +265,13 @@ class StatsViewModel(
     }
 
     fun setFlowType(type: BillType) {
+        _selectedCategory.value = null
         _flowType.value = type
+    }
+
+    fun shiftDay(delta: Int) {
+        val next = com.jiligulu.app.ui.components.shiftLocalDay(selectedDay.value, delta.toLong())
+        selectCalendarDate(next)
     }
 
     /** 点柱或日期 chip 选中日：只改内存状态，不触发数据库查询（同月换日月图不重绘） */
@@ -286,8 +291,6 @@ class StatsViewModel(
     }
 
     fun toggleCategory(categoryId: Long?) {
-        // 「其他」是多分类合并片，点选语义不明，暂不支持（Backlog：展开成子列表）
-        if (categoryId == OTHER_KEY) return
         _selectedCategory.value =
             if (categoryId == null || selectedCategoryId.value == categoryId) null
             else selectedDay.value to categoryId

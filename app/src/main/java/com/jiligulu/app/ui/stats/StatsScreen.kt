@@ -1,5 +1,15 @@
 package com.jiligulu.app.ui.stats
 
+import com.jiligulu.app.ui.components.DayBrowser
+import com.jiligulu.app.ui.components.daySwipe
+import com.jiligulu.app.ui.components.CompactChoice
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -178,14 +188,17 @@ fun StatsScreen(
 
         // ---------- 当日分类 ----------
         item(key = "day_categories") {
-            ChartCard(title = "支出分布", subtitle = dayDonut.dayLabel) {
+            ChartCard(title = if (flowType == BillType.EXPENSE) "支出分布" else "收入分布", subtitle = "左右滑动换一天 · 点分类展开账单") {
+                DayBrowser(selectedDay, vm::selectCalendarDate,
+                    latest = YearMonth.now().atEndOfMonth().atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli())
+                Column(Modifier.fillMaxWidth().daySwipe(selectedDay, { vm.shiftDay(-1) }, { vm.shiftDay(1) })) {
                 if (dayDonut.slices.isEmpty()) {
                     Column(
                         modifier = Modifier.fillMaxWidth().padding(vertical = 20.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Text("这一天还没有支出", style = MaterialTheme.typography.bodyLarge)
+                        Text(if (flowType == BillType.EXPENSE) "这一天还没有支出" else "这一天还没有收入", style = MaterialTheme.typography.bodyLarge)
                         Text(
                             "记下一笔后，这里就会慢慢丰富起来。",
                             style = MaterialTheme.typography.bodyMedium,
@@ -207,48 +220,21 @@ fun StatsScreen(
                         },
                         details = {
                             dayDonut.slices.forEach { slice ->
-                                LegendRow(
+                                CategoryDrawer(
                                     color = slice.color,
                                     label = "${slice.label} · ${String.format(java.util.Locale.ROOT, "%.1f", slice.valueFen.toDouble() / dayDonut.slices.sumOf { it.valueFen }.coerceAtLeast(1) * 100)}%",
                                     amountText = "¥${Formatters.fenToYuanText(slice.valueFen)}",
                                     selected = slice.key == dayDonut.selectedCategoryId,
-                                    onClick = { vm.toggleCategory(slice.key as? Long) }
+                                    onClick = { vm.toggleCategory(slice.key as? Long) },
+                                    details = if (slice.key == dayDonut.selectedCategoryId) dayDetails else emptyList(),
+                                    sort = sort, onSort = vm::setSort, onBill = { selectedBillId = it }
                                 )
                             }
                         }
                     )
                 }
-            }
-        }
-
-        // The daily ledger is visible immediately; category selection only narrows it.
-        item(key = "category_details") {
-                ChartCard(title = if (dayDonut.selectedCategoryId == null) "当天账单" else "${dayDonut.selectedLabel} · 账单",
-                    subtitle = "${dayDonut.dayLabel} · ${dayDetails.size} 笔") {
-                    if (dayDonut.selectedCategoryId != null) {
-                        TextButton(onClick = { vm.toggleCategory(null) }) { Text("查看全部账单") }
-                    }
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        SortChip("最新", sort == DetailSort.TIME_DESC) { vm.setSort(DetailSort.TIME_DESC) }
-                        SortChip("最早", sort == DetailSort.TIME_ASC) { vm.setSort(DetailSort.TIME_ASC) }
-                        SortChip("金额高", sort == DetailSort.AMOUNT_DESC) { vm.setSort(DetailSort.AMOUNT_DESC) }
-                        SortChip("金额低", sort == DetailSort.AMOUNT_ASC) { vm.setSort(DetailSort.AMOUNT_ASC) }
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    dayDetails.forEachIndexed { index, d ->
-                        LedgerBillRow(icon = d.icon, colorHue = d.colorHue, categoryName = d.categoryName,
-                            title = d.detail.ifBlank { d.categoryName }, subtitle = d.timeLabel,
-                            amountText = d.amountText, isExpense = d.isExpense,
-                            onClick = { selectedBillId = d.id }, showDivider = index < dayDetails.lastIndex)
-                    }
-                    if (dayDetails.isEmpty()) {
-                        Text(
-                            if (dayDonut.selectedCategoryId == null) "这一天还没有账单，生活慢慢记就好。" else "这个分类当天没有记录",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
                 }
+            }
         }
 
         // 预算始终对应当前周期，与上方所选账本月份独立。
@@ -442,6 +428,36 @@ private fun RingLabel(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
+    }
+}
+
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+private fun CategoryDrawer(color: Color, label: String, amountText: String, selected: Boolean, onClick: () -> Unit,
+    details: List<DayDetailUi>, sort: DetailSort, onSort: (DetailSort) -> Unit, onBill: (Long) -> Unit) {
+    val bringIntoView = remember { BringIntoViewRequester() }
+    LaunchedEffect(selected) {
+        if (selected) { kotlinx.coroutines.delay(250); bringIntoView.bringIntoView() }
+    }
+    Column(Modifier.fillMaxWidth().bringIntoViewRequester(bringIntoView)) {
+        LegendRow(color, label + if (selected) " ▴" else " ▾", amountText, selected, onClick)
+        AnimatedVisibility(selected) {
+            Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = .22f), MaterialTheme.shapes.medium).padding(8.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("${details.size} 笔小账单", Modifier.weight(1f), style = MaterialTheme.typography.labelMedium)
+                    CompactChoice(listOf("时间↓", "时间↑", "金额↓", "金额↑"), sort.ordinal) { onSort(DetailSort.entries[it]) }
+                }
+                if (details.isEmpty()) Text("这一天该分类没有账单", style = MaterialTheme.typography.bodySmall)
+                else LazyColumn(Modifier.fillMaxWidth().heightIn(max = 260.dp)) {
+                    itemsIndexed(details, key = { _, bill -> bill.id }) { index, d ->
+                        LedgerBillRow(icon = d.icon, colorHue = d.colorHue, categoryName = d.categoryName,
+                            title = d.detail.ifBlank { d.categoryName }, subtitle = d.timeLabel,
+                            amountText = d.amountText, isExpense = d.isExpense,
+                            onClick = { onBill(d.id) }, showDivider = index < details.lastIndex)
+                    }
+                }
+            }
+        }
     }
 }
 

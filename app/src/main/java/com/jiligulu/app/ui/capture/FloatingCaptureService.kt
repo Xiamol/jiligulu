@@ -7,6 +7,10 @@ import android.graphics.PixelFormat
 import android.os.*
 import android.provider.Settings
 import android.view.*
+import android.widget.TextView
+import android.graphics.Rect
+import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
 import android.widget.ImageView
 import android.widget.Toast
 import com.jiligulu.app.MainActivity
@@ -18,57 +22,97 @@ import kotlin.math.abs
 class FloatingCaptureService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var bubble: ImageView? = null
+    private var dismissTarget: TextView? = null
+    private val touchHandler = Handler(Looper.getMainLooper())
     private val windows by lazy { getSystemService(WindowManager::class.java) }
     override fun onBind(intent: Intent?) = null
     override fun onCreate() {
         super.onCreate()
         if (!Settings.canDrawOverlays(this)) { stopSelf(); return }
-        val notification = captureNotification(this, "阿噜悬浮记账", "轻点截图 · 拖动挪位置 · 长按关闭", FloatingCaptureService::class.java)
+        val notification = captureNotification(this, "阿噜悬浮记账", "轻点截图 · 长按拖到底部可暂时隐藏", FloatingCaptureService::class.java)
         if (Build.VERSION.SDK_INT >= 34) startForeground(3101, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE) else startForeground(3101, notification)
         val side = (60 * resources.displayMetrics.density).toInt()
         val params = WindowManager.LayoutParams(side, side, WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN, PixelFormat.TRANSLUCENT).apply { gravity = Gravity.TOP or Gravity.START; x = 0; y = 300 }
-        val view = ImageView(this).apply { setImageResource(R.mipmap.ic_launcher); contentDescription = "阿噜截图记账，长按关闭"; elevation = 8f }
-        var startX = 0f; var startY = 0f; var x = 0; var y = 0; var moved = false; var downAt = 0L
+        val view = ImageView(this).apply { setImageResource(R.mipmap.ic_launcher); contentDescription = "阿噜截图记账，长按后拖到底部关闭区"; elevation = 8f }
+        var startX = 0f; var startY = 0f; var x = 0; var y = 0
+        var moved = false; var held = false; var overTarget = false
+        val hold = Runnable { held = true; showDismissTarget(); view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS) }
         view.setOnTouchListener { _, event ->
             when (event.actionMasked) {
-                MotionEvent.ACTION_DOWN -> { startX = event.rawX; startY = event.rawY; x = params.x; y = params.y; moved = false; downAt = SystemClock.elapsedRealtime(); true }
+                MotionEvent.ACTION_DOWN -> {
+                    startX = event.rawX; startY = event.rawY; x = params.x; y = params.y
+                    moved = false; held = false; overTarget = false
+                    touchHandler.postDelayed(hold, ViewConfiguration.getLongPressTimeout().toLong()); true
+                }
                 MotionEvent.ACTION_MOVE -> {
                     val dx = event.rawX - startX; val dy = event.rawY - startY
                     if (abs(dx) + abs(dy) > ViewConfiguration.get(this).scaledTouchSlop) moved = true
-                    if (moved) { params.x = (x + dx.toInt()).coerceIn(0, (resources.displayMetrics.widthPixels - side).coerceAtLeast(0)); params.y = (y + dy.toInt()).coerceIn(0, (resources.displayMetrics.heightPixels - side).coerceAtLeast(0)); windows.updateViewLayout(view, params) }; true
-                }
-                MotionEvent.ACTION_UP -> {
-                    if (!moved) {
-                        if (SystemClock.elapsedRealtime() - downAt > 650) closeExplicitly()
-                        else if (!capturing) {
-                            capturing = true; view.visibility = View.INVISIBLE
-                            if (!ScreenCaptureService.captureIfReady()) runCatching { startActivity(Intent(this, CapturePermissionActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-                                .onFailure { restore(); Toast.makeText(this, "无法打开截图授权，请回到设置重试", Toast.LENGTH_SHORT).show() }
-                        }
+                    if (moved) {
+                        params.x = (x + dx.toInt()).coerceIn(0, (resources.displayMetrics.widthPixels - side).coerceAtLeast(0))
+                        params.y = (y + dy.toInt()).coerceIn(0, (resources.displayMetrics.heightPixels - side).coerceAtLeast(0))
+                        windows.updateViewLayout(view, params)
+                    }
+                    val target = dismissTarget
+                    val inside = if (held && target != null) {
+                        val location = IntArray(2); target.getLocationOnScreen(location)
+                        Rect(location[0], location[1], location[0] + target.width, location[1] + target.height).contains(event.rawX.toInt(), event.rawY.toInt())
+                    } else false
+                    if (inside != overTarget) {
+                        overTarget = inside
+                        target?.text = if (inside) "♡ 松开就回家\n下次启动再见" else "✕\n拖到这里，暂时隐藏"
+                        target?.scaleX = if (inside) 1.08f else 1f; target?.scaleY = if (inside) 1.08f else 1f
+                        if (inside) view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
                     }; true
                 }
+                MotionEvent.ACTION_UP -> {
+                    touchHandler.removeCallbacks(hold); hideDismissTarget()
+                    if (held && overTarget) hideForSession()
+                    else if (!moved && !held && !capturing) {
+                        capturing = true; view.visibility = View.INVISIBLE
+                        if (!ScreenCaptureService.captureIfReady()) runCatching {
+                            startActivity(Intent(this, CapturePermissionActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                        }.onFailure { restore(); Toast.makeText(this, "无法打开截图授权，请回到设置重试", Toast.LENGTH_SHORT).show() }
+                    }; true
+                }
+                MotionEvent.ACTION_CANCEL -> { touchHandler.removeCallbacks(hold); hideDismissTarget(); true }
                 else -> true
             }
         }
         try { windows.addView(view, params); bubble = view; instance = this; running.value = true }
         catch (_: Exception) { Toast.makeText(this, "悬浮窗未能开启，请检查悬浮窗权限", Toast.LENGTH_SHORT).show(); stopSelf() }
     }
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int { if (intent?.action == "stop") closeExplicitly(); return START_NOT_STICKY }
-    private fun closeExplicitly() { scope.launch {
-        try { (application as com.jiligulu.app.JiliguluApp).container.userPrefs.setFloatingCaptureEnabled(false) }
-        catch (cancelled: CancellationException) { throw cancelled }
-        catch (_: Exception) { Toast.makeText(this@FloatingCaptureService, "未能记住关闭状态，请在设置中重试", Toast.LENGTH_SHORT).show() }
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int { if (intent?.action == "stop") hideForSession(); return START_NOT_STICKY }
+    private fun hideForSession() {
+        hiddenForSession.value = true
+        Toast.makeText(this, "阿噜暂时回家了，下次启动再见 ♡", Toast.LENGTH_SHORT).show()
         stopSelf()
-    } }
+    }
+    private fun showDismissTarget() {
+        if (dismissTarget != null) return
+        val density = resources.displayMetrics.density
+        val target = TextView(this).apply {
+            text = "✕\n拖到这里，暂时隐藏"; textSize = 17f; gravity = Gravity.CENTER
+            setTextColor(Color.rgb(91, 68, 143))
+            background = GradientDrawable().apply { setColor(Color.rgb(244, 234, 250)); cornerRadius = 38 * density; setStroke((2 * density).toInt(), Color.rgb(190, 159, 224)) }
+        }
+        val layout = WindowManager.LayoutParams((200 * density).toInt(), (104 * density).toInt(),
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE, PixelFormat.TRANSLUCENT).apply {
+                gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL; y = (34 * density).toInt()
+            }
+        runCatching { windows.addView(target, layout); dismissTarget = target }
+    }
+    private fun hideDismissTarget() { dismissTarget?.let { runCatching { windows.removeView(it) } }; dismissTarget = null }
     override fun onTaskRemoved(rootIntent: Intent?) { stopSelf(); super.onTaskRemoved(rootIntent) }
     override fun onDestroy() {
-        scope.cancel()
+        scope.cancel(); touchHandler.removeCallbacksAndMessages(null); hideDismissTarget()
         stopService(Intent(this, ScreenCaptureService::class.java))
         capturing = false
         bubble?.let { runCatching { windows.removeView(it) } }; bubble = null; instance = null; running.value = false; super.onDestroy() }
     companion object {
         val running = MutableStateFlow(false)
+        val hiddenForSession = MutableStateFlow(false)
         private var instance: FloatingCaptureService? = null
         private var capturing = false
         fun restore() { capturing = false; instance?.bubble?.visibility = View.VISIBLE }

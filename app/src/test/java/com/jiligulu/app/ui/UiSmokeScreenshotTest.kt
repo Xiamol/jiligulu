@@ -163,10 +163,14 @@ class UiSmokeScreenshotTest {
 
             compose.onNodeWithText("统计").performClick()
             awaitText("收支统计")
-            openSampleBill()
+            compose.onNode(hasScrollToIndexAction()).performScrollToIndex(3)
+            awaitText("吃饭", substring = true)
+            compose.onAllNodesWithText("吃饭", substring = true).onFirst().performClick()
+            awaitText("牛肉面")
+            compose.onAllNodesWithText("牛肉面").onFirst().performClick()
             awaitText("保存修改")
             compose.onNodeWithText("关闭").performClick()
-            compose.onNode(hasScrollToIndexAction()).performScrollToIndex(0)
+            compose.onAllNodes(hasScrollToIndexAction()).onFirst().performScrollToIndex(0)
             capture("statistics-light")
 
             compose.onNodeWithContentDescription("设置").performClick()
@@ -604,6 +608,44 @@ class UiSmokeScreenshotTest {
             capture("settings-reminders-card")
             compose.runOnIdle { activity.setContent {} }
         }
+    }
+
+    @Test(timeout = 75_000)
+    fun dailyHomeAndInlineCategoryDrawerRender() {
+        val app = RuntimeEnvironment.getApplication() as JiliguluApp
+        val c = app.container
+        val today = com.jiligulu.app.core.util.Formatters.dayStart(System.currentTimeMillis())
+        var food = 0L
+        runBlocking {
+            c.userPrefs.setNickname("路陌"); c.userPrefs.setWaterEnabled(false)
+            c.userPrefs.setThemeMode(UserPrefs.THEME_LIGHT); c.userPrefs.setUpdateRepository("")
+            c.userPrefs.setAnnouncementSource(""); c.announcements.initialize()
+            food = c.categoryRepository.getAll().first { it.name == "吃饭" }.id
+            c.billRepository.addManual(900, BillType.EXPENSE, food, "午餐验收", "", today + 12 * 3600000L)
+            c.billRepository.addManual(1200, BillType.EXPENSE, food, "昨天晚餐", "", com.jiligulu.app.ui.components.shiftLocalDay(today, -1) + 18 * 3600000L)
+        }
+        val store = ViewModelStore()
+        val home = com.jiligulu.app.ui.home.HomeViewModel(c.billRepository, c.categoryRepository)
+        val stats = com.jiligulu.app.ui.stats.StatsViewModel(c.billRepository, c.categoryRepository, c.budgetRepository)
+        store.put("home-preview", home); store.put("stats-preview", stats)
+        try {
+            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                scenario.onActivity { activity = it; it.setContent { GuluTheme { com.jiligulu.app.ui.home.HomeScreen({}, {}, home) } } }
+                awaitText("午餐验收")
+                capture("home-daily-browser")
+                compose.onNodeWithContentDescription("前一天").performClick()
+                awaitText("昨天晚餐")
+                compose.onNodeWithText("午餐验收").assertDoesNotExist()
+                compose.runOnIdle { activity.setContent { GuluTheme { com.jiligulu.app.ui.stats.StatsScreen(stats) } } }
+                awaitText("每日收支")
+                compose.onNode(hasScrollToIndexAction()).performScrollToIndex(3)
+                awaitText("吃饭", substring = true)
+                compose.runOnIdle { stats.toggleCategory(food) }
+                awaitText("午餐验收")
+                capture("statistics-inline-drawer")
+                compose.runOnIdle { activity.setContent {} }
+            }
+        } finally { store.clear() }
     }
 
     private fun awaitTag(tag: String, present: Boolean = true) {

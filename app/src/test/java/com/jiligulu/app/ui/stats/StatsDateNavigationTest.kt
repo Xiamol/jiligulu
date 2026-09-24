@@ -93,6 +93,9 @@ class StatsDateNavigationTest {
             assertEquals(slices.size, slices.map { it.label }.toSet().size)
             assertEquals("其余（合并） 3", slices.last().label)
             assertTrue(slices.any { it.label == "其他" })
+            backgroundScope.launch { vm.dayDetails.collect {} }
+            vm.toggleCategory(-1L); runCurrent()
+            assertEquals(listOf(7L, 8L), vm.dayDetails.value.map { it.id }.sorted())
         } finally { store.clear() }
     }
 
@@ -123,9 +126,60 @@ class StatsDateNavigationTest {
         }
     }
 
+    @Test fun incomeExpenseAndSwipedDaysShareOneFilter() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        val store = ViewModelStore()
+        try {
+            val today = LocalDate.now().millis()
+            val yesterday = LocalDate.now().minusDays(1).millis()
+            val bills = listOf(
+                BillEntity(id = 1, amountFen = 900, type = BillType.EXPENSE, categoryId = 1, detail = "午饭", timestamp = today + 1000),
+                BillEntity(id = 2, amountFen = 20000, type = BillType.INCOME, categoryId = 2, detail = "转账", timestamp = today + 2000),
+                BillEntity(id = 3, amountFen = 30000, type = BillType.INCOME, categoryId = 2, detail = "昨天转账", timestamp = yesterday + 2000))
+            val vm = model(bills) { System.currentTimeMillis() }; store.put("stats", vm)
+            backgroundScope.launch { vm.dayDonut.collect {} }; backgroundScope.launch { vm.dayDetails.collect {} }; backgroundScope.launch { vm.cashFlowBars.collect {} }
+            runCurrent()
+            assertEquals("9", vm.dayDonut.value.totalText)
+            vm.toggleCategory(1); runCurrent(); vm.setFlowType(BillType.INCOME); runCurrent()
+            assertEquals(null, vm.selectedCategoryId.value)
+            assertEquals("200", vm.dayDonut.value.totalText)
+            assertEquals(listOf(2L), vm.dayDetails.value.map { it.id })
+            vm.shiftDay(-1); runCurrent()
+            assertEquals(yesterday, vm.selectedDay.value)
+            assertEquals("300", vm.dayDonut.value.totalText)
+            assertEquals(listOf(3L), vm.dayDetails.value.map { it.id })
+        } finally { store.clear() }
+    }
+
+    @Test fun homeQueriesOtherMonthsAndResetsTodayWithCompactFilters() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        val store = ViewModelStore()
+        try {
+            val today = LocalDate.now().millis()
+            val old = YearMonth.now().minusMonths(1).atDay(15).millis()
+            val bills = listOf(
+                BillEntity(id = 1, amountFen = 900, type = BillType.EXPENSE, categoryId = 1, detail = "午饭", timestamp = today + 1000),
+                BillEntity(id = 2, amountFen = 1200, type = BillType.EXPENSE, categoryId = 1, detail = "晚饭", timestamp = today + 2000),
+                BillEntity(id = 3, amountFen = 20000, type = BillType.INCOME, categoryId = 2, detail = "收入", timestamp = today + 3000),
+                BillEntity(id = 4, amountFen = 300, type = BillType.EXPENSE, categoryId = 1, detail = "旧账", timestamp = old + 1000))
+            val sources = repositories(bills) { System.currentTimeMillis() }
+            val vm = com.jiligulu.app.ui.home.HomeViewModel(sources.first, sources.second); store.put("home", vm)
+            backgroundScope.launch { vm.dailyBills.collect {} }; runCurrent()
+            assertEquals(3, vm.dailyBills.value.size)
+            assertEquals(listOf(2L, 1L), com.jiligulu.app.ui.home.filterHomeBills(vm.dailyBills.value, today, 1, 2).map { it.id })
+            assertEquals(listOf(3L), com.jiligulu.app.ui.home.filterHomeBills(vm.dailyBills.value, today, 2, 0).map { it.id })
+            vm.selectDay(old); runCurrent(); assertEquals(listOf(4L), vm.dailyBills.value.map { it.id })
+            vm.showToday(); runCurrent(); assertEquals(today, vm.selectedDay.value); assertEquals(3, vm.dailyBills.value.size)
+        } finally { store.clear() }
+    }
+
     private fun LocalDate.millis(): Long = atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
 
     private fun model(bills: List<BillEntity>, categories: List<CategoryEntity> = emptyList(), now: () -> Long): StatsViewModel {
+        val sources = repositories(bills, categories, now)
+        return StatsViewModel(sources.first, sources.second, sources.third)
+    }
+    private fun repositories(bills: List<BillEntity>, categories: List<CategoryEntity> = emptyList(), now: () -> Long): Triple<BillRepository, CategoryRepository, BudgetRepository> {
         val billDao = object : BillDao {
             override fun observeBetween(startMillis: Long, endMillis: Long) = flowOf(
                 bills.filter { it.timestamp >= startMillis && it.timestamp < endMillis })
@@ -166,7 +220,7 @@ class StatsDateNavigationTest {
             override suspend fun upsert(budget: BudgetEntity): Unit = error("unused")
             override suspend fun clear(): Unit = error("unused")
         }
-        return StatsViewModel(BillRepository(billDao, now), CategoryRepository(categoryDao),
+        return Triple(BillRepository(billDao, now), CategoryRepository(categoryDao),
             BudgetRepository(budgetDao, billDao))
     }
 }

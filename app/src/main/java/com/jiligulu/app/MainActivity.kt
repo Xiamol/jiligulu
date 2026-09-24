@@ -76,6 +76,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (savedInstanceState == null && intent?.action == Intent.ACTION_MAIN) {
+            com.jiligulu.app.ui.capture.FloatingCaptureService.hiddenForSession.value = false
+        }
         handleWaterIntent(intent)
         lifecycleScope.launch {
             lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -90,7 +93,8 @@ class MainActivity : ComponentActivity() {
             lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
                 (application as JiliguluApp).container.userPrefs.floatingCaptureEnabled.collect { enabled ->
                     if (enabled && android.provider.Settings.canDrawOverlays(this@MainActivity) &&
-                        !com.jiligulu.app.ui.capture.FloatingCaptureService.running.value) {
+                        !com.jiligulu.app.ui.capture.FloatingCaptureService.running.value &&
+                        !com.jiligulu.app.ui.capture.FloatingCaptureService.hiddenForSession.value) {
                         runCatching { androidx.core.content.ContextCompat.startForegroundService(this@MainActivity,
                             Intent(this@MainActivity, com.jiligulu.app.ui.capture.FloatingCaptureService::class.java)) }
                     }
