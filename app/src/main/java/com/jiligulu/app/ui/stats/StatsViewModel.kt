@@ -53,6 +53,8 @@ data class DayDetailUi(
 
 /** 今日瓜分卡片状态 */
 data class DayDonutUi(
+    val dayStartMillis: Long = 0L,
+    val type: BillType = BillType.EXPENSE,
     val dayLabel: String = "",
     val slices: List<DonutSlice> = emptyList(),       // 已按 PRD 合并「其他」(≤7 片)
     val totalText: String = "0",
@@ -168,6 +170,16 @@ class StatsViewModel(
     /** 今日瓜分：选中日的分类切片（≤7 片，超出合并「其他」） */
     val dayDonut: StateFlow<DayDonutUi> =
         combine(monthBills, selectedDay, categoryRepository.categories, _flowType, selectedCategoryId) { bills, day, cats, type, selectedId ->
+            distribution(bills, day, cats, type, selectedId)
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), DayDonutUi())
+
+    fun observeDay(day: Long, type: BillType): kotlinx.coroutines.flow.Flow<DayDonutUi> =
+        combine(billRepository.observeBetween(day, com.jiligulu.app.ui.components.shiftLocalDay(day, 1)), categoryRepository.categories) { bills, cats ->
+            distribution(bills, day, cats, type, null)
+        }
+
+    private fun distribution(bills: List<BillEntity>, day: Long, cats: List<com.jiligulu.app.data.local.entity.CategoryEntity>,
+        type: BillType, selectedId: Long?): DayDonutUi {
             val dayBills = bills.filter {
                 Formatters.dayStart(it.timestamp) == day && it.type == type
             }
@@ -194,7 +206,8 @@ class StatsViewModel(
             }
             val total = dayBills.sumOf { it.amountFen }
             val selectedSlice = slices.firstOrNull { it.key == selectedId }
-            DayDonutUi(
+            return DayDonutUi(
+                dayStartMillis = day, type = type,
                 dayLabel = Formatters.dayLabel(day),
                 slices = slices,
                 totalText = Formatters.fenToYuanText(total),
@@ -202,7 +215,7 @@ class StatsViewModel(
                 selectedLabel = selectedSlice?.label ?: if (type == BillType.EXPENSE) "当日总支出" else "当日总收入",
                 selectedAmountText = Formatters.fenToYuanText(selectedSlice?.valueFen ?: total)
             )
-        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), DayDonutUi())
+    }
 
     /** 选中日明细列表：分类过滤 + 排序，全内存操作 */
     val dayDetails: StateFlow<List<DayDetailUi>> =

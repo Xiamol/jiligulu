@@ -1,6 +1,5 @@
 package com.jiligulu.app.ui.components
 
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.shape.CircleShape
@@ -17,17 +16,10 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import com.jiligulu.app.core.util.Formatters
 import java.time.*
 
-fun Modifier.daySwipe(day: Long, previous: () -> Unit, next: () -> Unit): Modifier = pointerInput(day) {
-    var total = 0f
-    detectHorizontalDragGestures(onDragStart = { total = 0f }, onDragCancel = { total = 0f },
-        onDragEnd = { if (total > 48.dp.toPx()) previous() else if (total < -48.dp.toPx()) next() },
-        onHorizontalDrag = { change, delta -> total += delta; change.consume() })
-}
 fun shiftLocalDay(day: Long, delta: Long): Long = Instant.ofEpochMilli(day).atZone(ZoneId.systemDefault())
     .toLocalDate().plusDays(delta).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
 

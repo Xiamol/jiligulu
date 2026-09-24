@@ -19,6 +19,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -65,7 +66,7 @@ fun DonutChart(
     animateOnDataChange: Boolean = true,
     centerContent: (@Composable () -> Unit)? = null
 ) {
-    val emptyOutline = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .65f)
+    val emptyOutline = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .48f)
     // 1) 弧度预计算：slices 引用不变 → 不重算（ViewModel 保证切片列表 stateIn 缓存）
     val arcs = remember(slices, gapDeg) {
         val total = slices.sumOf { it.valueFen }.coerceAtLeast(1L)
@@ -136,8 +137,12 @@ fun DonutChart(
                 (size.height - arcSize.height) / 2f
             )
             if (arcs.isEmpty()) {
-                drawArc(emptyOutline, 0f, 360f, false, topLeft, arcSize, style = Stroke(width = thickness + 2.dp.toPx()))
                 drawArc(Color.White, 0f, 360f, false, topLeft, arcSize, style = Stroke(width = thickness))
+                val radius = arcSize.width / 2f
+                val center = Offset(size.width / 2, size.height / 2)
+                val dashed = Stroke(width = 1.5.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(4.dp.toPx(), 4.dp.toPx())))
+                drawCircle(emptyOutline, radius + thickness / 2 - 1.dp.toPx(), center, style = dashed)
+                drawCircle(emptyOutline, (radius - thickness / 2).coerceAtLeast(0f), center, style = dashed)
             }
             val p = progress.value
             arcs.forEach { arc ->

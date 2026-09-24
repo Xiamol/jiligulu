@@ -142,7 +142,7 @@ fun MainScreen(
                     }) { page ->
                 pageState.SaveableStateProvider(page) {
                     when (page) {
-                        0 -> HomeScreen(onOpenChat = onOpenChat, onAddBill = onAddBill, vm = homeVm)
+                        0 -> HomeScreen(onOpenChat = onOpenChat, onAddBill = onAddBill, vm = homeVm, active = selectedTab == 0)
                         1 -> StatsScreen()
                     }
                 }

@@ -1,7 +1,11 @@
 package com.jiligulu.app.ui.stats
 
+
+import com.jiligulu.app.ui.components.rememberPageData
+import com.jiligulu.app.ui.components.DayPager
+import com.jiligulu.app.ui.components.LedgerScrollBar
+import androidx.compose.foundation.lazy.rememberLazyListState
 import com.jiligulu.app.ui.components.DayBrowser
-import com.jiligulu.app.ui.components.daySwipe
 import com.jiligulu.app.ui.components.CompactChoice
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.layout.heightIn
@@ -107,7 +111,10 @@ fun StatsScreen(
     var selectedBillId by rememberSaveable { mutableStateOf<Long?>(null) }
     var showDateFilter by rememberSaveable { mutableStateOf(false) }
 
+    val scroll = rememberLazyListState()
+    Box(Modifier.fillMaxSize()) {
     LazyColumn(
+        state = scroll,
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background),
@@ -192,41 +199,51 @@ fun StatsScreen(
         // ---------- 当日分类 ----------
         item(key = "day_categories") {
             ChartCard(title = if (flowType == BillType.EXPENSE) "支出分布" else "收入分布", subtitle = "左右滑动换一天 · 点分类展开账单") {
-                DayBrowser(selectedDay, vm::selectCalendarDate,
-                    latest = YearMonth.now().atEndOfMonth().atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli())
-                Column(Modifier.fillMaxWidth().animateContentSize(tween(260)).daySwipe(selectedDay, { vm.shiftDay(-1) }, { vm.shiftDay(1) })) {
+                DayPager(selectedDay, YearMonth.now().atEndOfMonth().atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli(),
+                    vm::selectCalendarDate, Modifier.fillMaxWidth(), tag = "statistics-day-pager") { pageDay ->
+                    val flow = remember(pageDay, flowType) { vm.observeDay(pageDay, flowType) }
+                    val preview by rememberPageData(flow, DayDonutUi())
+                    val pageData = when {
+                        pageDay == selectedDay && dayDonut.dayStartMillis == pageDay && dayDonut.type == flowType -> dayDonut
+                        preview.dayStartMillis == pageDay && preview.type == flowType -> preview
+                        else -> DayDonutUi(dayStartMillis = pageDay, type = flowType)
+                    }
+                    Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface, MaterialTheme.shapes.large).padding(6.dp)) {
+                        DayBrowser(pageDay, vm::selectCalendarDate,
+                            latest = YearMonth.now().atEndOfMonth().atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli())
                     AdaptiveChartDetails(
                         chart = {
                             DonutChart(
-                                slices = dayDonut.slices,
-                                selectedKey = dayDonut.selectedCategoryId,
-                                onSelect = { key -> vm.toggleCategory(key as? Long) },
-                                modifier = Modifier.size(176.dp).testTag("daily-donut")
+                                slices = pageData.slices,
+                                selectedKey = pageData.selectedCategoryId,
+                                onSelect = if (pageDay == selectedDay) { key -> vm.toggleCategory(key as? Long) } else null,
+                                modifier = Modifier.size(176.dp).testTag(if (pageDay == selectedDay) "daily-donut" else "neighbor-donut")
                             ) {
-                                RingLabel(if (dayDonut.slices.isEmpty()) "暂无" + if (flowType == BillType.EXPENSE) "支出" else "收入" else dayDonut.selectedLabel,
-                                    "¥${dayDonut.selectedAmountText.ifBlank { "0" }}")
+                                RingLabel(if (pageData.slices.isEmpty()) "暂无" + if (flowType == BillType.EXPENSE) "支出" else "收入" else pageData.selectedLabel,
+                                    "¥${pageData.selectedAmountText.ifBlank { "0" }}")
                             }
                         },
                         details = {
                             Column(Modifier.fillMaxWidth().heightIn(min = 64.dp)) {
-                            if (dayDonut.slices.isEmpty()) {
+                            if (pageData.slices.isEmpty()) {
                                 Text("这一天先留个小空位 ♡", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp), textAlign = TextAlign.Center)
                             }
-                            dayDonut.slices.forEach { slice ->
+                            pageData.slices.forEach { slice ->
                                 CategoryDrawer(
                                     color = slice.color,
-                                    label = "${slice.label} · ${String.format(java.util.Locale.ROOT, "%.1f", slice.valueFen.toDouble() / dayDonut.slices.sumOf { it.valueFen }.coerceAtLeast(1) * 100)}%",
+                                    label = "${slice.label} · ${String.format(java.util.Locale.ROOT, "%.1f", slice.valueFen.toDouble() / pageData.slices.sumOf { it.valueFen }.coerceAtLeast(1) * 100)}%",
                                     amountText = "¥${Formatters.fenToYuanText(slice.valueFen)}",
-                                    selected = slice.key == dayDonut.selectedCategoryId,
-                                    onClick = { vm.toggleCategory(slice.key as? Long) },
-                                    details = if (slice.key == dayDonut.selectedCategoryId) dayDetails else emptyList(),
+                                    selected = slice.key == pageData.selectedCategoryId,
+                                    onClick = { if (pageDay == selectedDay) vm.toggleCategory(slice.key as? Long) },
+                                    details = if (pageDay == selectedDay && slice.key == pageData.selectedCategoryId) dayDetails else emptyList(),
                                     sort = sort, onSort = vm::setSort, onBill = { selectedBillId = it }
                                 )
                             }
                             }
                         }
                     )
+                    }
                 }
             }
         }
@@ -290,6 +307,9 @@ fun StatsScreen(
             }
         }
 
+    }
+
+    LedgerScrollBar(scroll, Modifier.align(Alignment.CenterEnd))
     }
 
     if (showBudgetDialog) {

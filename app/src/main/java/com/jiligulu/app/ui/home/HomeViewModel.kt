@@ -66,21 +66,22 @@ internal fun filterHomeBills(bills: List<BillUi>, day: Long, type: Int, sort: In
 
 class HomeViewModel(
     private val billRepository: BillRepository,
-    categoryRepository: CategoryRepository
+    private val categoryRepository: CategoryRepository
 ) : ViewModel() {
 
     private val _selectedDay = MutableStateFlow(Formatters.dayStart(System.currentTimeMillis()))
     val selectedDay: StateFlow<Long> = _selectedDay
     fun selectDay(day: Long) { _selectedDay.value = Formatters.dayStart(day).coerceAtMost(Formatters.dayStart(System.currentTimeMillis())) }
     fun showToday() = selectDay(System.currentTimeMillis())
-    @OptIn(ExperimentalCoroutinesApi::class)
-    val dailyLedger: StateFlow<DailyLedgerSnapshot> = _selectedDay.flatMapLatest { day ->
+    fun observeDay(day: Long): kotlinx.coroutines.flow.Flow<DailyLedgerSnapshot> =
         billRepository.observeBetween(day, com.jiligulu.app.ui.components.shiftLocalDay(day, 1))
             .combine(categoryRepository.categories) { bills, categories ->
                 val map = categories.associateBy { it.id }
                 DailyLedgerSnapshot(day, bills.map { it.toUi(map[it.categoryId]) }, true)
             }.onStart { emit(DailyLedgerSnapshot(day)) }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), DailyLedgerSnapshot(_selectedDay.value))
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val dailyLedger: StateFlow<DailyLedgerSnapshot> = _selectedDay.flatMapLatest(::observeDay)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), DailyLedgerSnapshot(_selectedDay.value))
     val dailyBills: StateFlow<List<BillUi>> = dailyLedger.map { it.bills }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 

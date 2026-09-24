@@ -10,6 +10,8 @@ import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.swipeDown
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.swipeRight
 import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.test.performTouchInput
@@ -652,17 +654,17 @@ class UiSmokeScreenshotTest {
     }
 
     @Test(timeout = 90_000)
-    fun dayChangesFromLongToShortAndEmptyKeepTheLedgerAnchor() {
-        val app = RuntimeEnvironment.getApplication() as JiliguluApp
-        val c = app.container
+    fun pagerFollowsFingerWithoutRedirectAndStickyHeaderNeedsSecondPull() {
+        val c = (RuntimeEnvironment.getApplication() as JiliguluApp).container
         val today = com.jiligulu.app.core.util.Formatters.dayStart(System.currentTimeMillis())
+        val yesterday = com.jiligulu.app.ui.components.shiftLocalDay(today, -1)
         runBlocking {
             c.userPrefs.setNickname("路陌"); c.userPrefs.setWaterEnabled(false)
             c.userPrefs.setThemeMode(UserPrefs.THEME_LIGHT); c.userPrefs.setUpdateRepository("")
             c.userPrefs.setAnnouncementSource(""); c.announcements.initialize()
             val food = c.categoryRepository.getAll().first { it.name == "吃饭" }.id
-            repeat(35) { i -> c.billRepository.addManual(900, BillType.EXPENSE, food, "今天-$i", "", today + (i + 1) * 60000L) }
-            c.billRepository.addManual(1200, BillType.EXPENSE, food, "昨天唯一账单", "", com.jiligulu.app.ui.components.shiftLocalDay(today, -1) + 3600000L)
+            repeat(12) { i -> c.billRepository.addManual(900, BillType.EXPENSE, food, "今天-$i", "", today + (i + 1) * 60000L) }
+            c.billRepository.addManual(1200, BillType.EXPENSE, food, "昨天唯一账单", "", yesterday + 3600000L)
         }
         val store = ViewModelStore()
         val home = com.jiligulu.app.ui.home.HomeViewModel(c.billRepository, c.categoryRepository)
@@ -671,38 +673,55 @@ class UiSmokeScreenshotTest {
         try {
             ActivityScenario.launch(MainActivity::class.java).use { scenario ->
                 scenario.onActivity { activity = it; it.setContent { GuluTheme { com.jiligulu.app.ui.home.HomeScreen({}, {}, home) } } }
-                awaitText("今天-34")
+                awaitText("今天-11")
+                // Leave the ledger partially below its pin position: horizontal navigation must not collapse the overview.
+                compose.onNodeWithTag("home-outer").performScrollToIndex(2)
+                compose.mainClock.advanceTimeBy(300)
+                compose.waitForIdle()
+                val before = compose.onNodeWithTag("home-ledger-heading").fetchSemanticsNode().boundsInRoot.top
+                compose.onNodeWithTag("home-day-pager").performTouchInput {
+                    down(Offset(width * .15f, height * .6f))
+                    moveTo(Offset(width * .25f, height * .6f), delayMillis = 70)
+                    moveTo(Offset(width * .48f, height * .6f), delayMillis = 100)
+                    moveTo(Offset(width * .78f, height * .6f), delayMillis = 160)
+                }
+                assertEquals(today, home.selectedDay.value)
+                capture("home-finger-held-pages")
+                File("build/reports/ui/pager-held-semantics.txt").writeText(compose.onNodeWithTag("home-day-pager").printToString(5))
+                compose.onNodeWithText("昨天唯一账单").assertIsDisplayed()
+                compose.onNodeWithTag("home-day-pager").performTouchInput { up() }
+                compose.waitUntil(8000) { shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(16)); home.selectedDay.value == yesterday }
+                assertEquals(before, compose.onNodeWithTag("home-ledger-heading").fetchSemanticsNode().boundsInRoot.top, 2f)
+                compose.runOnIdle { home.showToday() }
+                compose.mainClock.advanceTimeBy(800)
+                awaitText("今天-11")
+                assertEquals(today, home.selectedDay.value)
+                compose.waitUntil(8000) { shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(16)); compose.onAllNodesWithTag("home-day-bills").fetchSemanticsNodes().size == 1 }
                 compose.onNodeWithTag("home-outer").performScrollToIndex(3)
-                compose.onNodeWithTag("home-day-bills").performScrollToIndex(34)
-                compose.onNodeWithTag("home-outer").performTouchInput { swipeRight() }
-                awaitText("昨天唯一账单"); awaitTag("home-ready")
-                val outerTop = compose.onNodeWithTag("home-outer").fetchSemanticsNode().boundsInRoot.top
-                assertEquals(outerTop, compose.onNodeWithTag("home-ledger-heading").fetchSemanticsNode().boundsInRoot.top, 2f)
-                val shortRange = compose.onNodeWithTag("home-day-bills").fetchSemanticsNode().config[androidx.compose.ui.semantics.SemanticsProperties.VerticalScrollAxisRange]
-                assertEquals(0f, shortRange.maxValue(), .1f)
-                capture("home-short-day-stable")
-                compose.onNodeWithContentDescription("前一天").performClick()
-                awaitText("这一天还没有符合筛选的账单"); awaitTag("home-ready")
-                compose.onNodeWithTag("home-day-bills").assertDoesNotExist()
-                compose.onNodeWithTag("home-ready").performTouchInput { swipeUp() }
-                assertEquals(outerTop, compose.onNodeWithTag("home-ledger-heading").fetchSemanticsNode().boundsInRoot.top, 2f)
-                capture("home-empty-day-stable")
-                // Use the accessibility action after the synthetic fling: its event clock is independent of Robolectric's window clock.
-                compose.onNodeWithText("今天").performSemanticsAction(SemanticsActions.OnClick) { it() }
-                awaitText("今天-34"); awaitTag("home-ready")
-                compose.onNodeWithText("时间↓").performSemanticsAction(SemanticsActions.OnClick) { it() }
-                awaitText("排个顺眼的队 ♡")
+                compose.onNodeWithTag("home-day-bills").performScrollToIndex(11)
+                compose.mainClock.advanceTimeBy(300)
+                compose.waitForIdle()
+                val pinned = compose.onNodeWithTag("home-ledger-heading").fetchSemanticsNode().boundsInRoot.top
+                compose.onNodeWithTag("home-day-bills").performTouchInput { swipeDown() }
+                compose.mainClock.advanceTimeBy(1200)
+                assertEquals(pinned, compose.onNodeWithTag("home-ledger-heading").fetchSemanticsNode().boundsInRoot.top, 2f)
+                compose.onNodeWithTag("home-day-bills").performTouchInput { swipeDown() }
+                compose.mainClock.advanceTimeBy(800)
+                assertTrue(compose.onNodeWithTag("home-ledger-heading").fetchSemanticsNode().boundsInRoot.top > pinned + 10)
                 compose.runOnIdle { activity.setContent { GuluTheme { com.jiligulu.app.ui.stats.StatsScreen(stats) } } }
                 awaitText("每日收支")
                 compose.onAllNodes(hasScrollToIndexAction()).onFirst().performScrollToIndex(3)
-                awaitTag("daily-donut")
-                val ringBounds = compose.onNodeWithTag("daily-donut").getUnclippedBoundsInRoot()
-                compose.runOnIdle { stats.setFlowType(BillType.INCOME) }
-                awaitText("暂无收入")
-                val emptyRingBounds = compose.onNodeWithTag("daily-donut").getUnclippedBoundsInRoot()
-                assertEquals(ringBounds.bottom - ringBounds.top, emptyRingBounds.bottom - emptyRingBounds.top)
-                assertEquals(ringBounds.right - ringBounds.left, emptyRingBounds.right - emptyRingBounds.left)
-                capture("statistics-empty-ring")
+                awaitTag("statistics-day-pager")
+                compose.onNodeWithTag("statistics-day-pager").performTouchInput {
+                    down(Offset(width * .15f, height * .35f))
+                    moveTo(Offset(width * .25f, height * .35f), delayMillis = 70)
+                    moveTo(Offset(width * .48f, height * .35f), delayMillis = 100)
+                    moveTo(Offset(width * .78f, height * .35f), delayMillis = 160)
+                }
+                assertEquals(today, stats.selectedDay.value)
+                capture("statistics-finger-held-pages")
+                compose.onNodeWithTag("statistics-day-pager").performTouchInput { up() }
+                compose.waitUntil(8000) { shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(16)); stats.selectedDay.value == yesterday }
                 compose.runOnIdle { activity.setContent {} }
             }
         } finally { store.clear() }
