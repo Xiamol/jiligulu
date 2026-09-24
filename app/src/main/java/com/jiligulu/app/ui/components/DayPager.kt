@@ -1,6 +1,7 @@
 package com.jiligulu.app.ui.components
 
-import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.spring
+import androidx.compose.ui.Alignment
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -14,6 +15,8 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.flow.distinctUntilChanged
 import java.time.*
+
+internal val DaySnapSpec = spring<Float>(dampingRatio = 1f, stiffness = 650f, visibilityThreshold = 1f)
 
 private val firstDay = LocalDate.of(1900, 1, 1).toEpochDay()
 internal fun dayPage(day: Long): Int = (Instant.ofEpochMilli(day).atZone(ZoneId.systemDefault()).toLocalDate().toEpochDay() - firstDay).toInt()
@@ -33,7 +36,7 @@ fun DayPager(day: Long, latest: Long, onSelect: (Long) -> Unit, modifier: Modifi
         synchronized = false
         val target = dayPage(day).coerceIn(0, state.pageCount - 1)
         try {
-            if (target != state.settledPage) state.animateScrollToPage(target, animationSpec = tween(420))
+            if (target != state.settledPage) state.animateScrollToPage(target, animationSpec = DaySnapSpec)
         } finally {
             synchronizedDay = day
             synchronized = true
@@ -47,7 +50,8 @@ fun DayPager(day: Long, latest: Long, onSelect: (Long) -> Unit, modifier: Modifi
     }
     HorizontalPager(state = state, modifier = modifier.testTag(tag).clip(RoundedCornerShape(18.dp))
         .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = .25f)),
+        verticalAlignment = Alignment.Top,
         pageSpacing = 14.dp, beyondViewportPageCount = 1,
-        flingBehavior = PagerDefaults.flingBehavior(state, pagerSnapDistance = PagerSnapDistance.atMost(1), snapAnimationSpec = tween(420)),
+        flingBehavior = PagerDefaults.flingBehavior(state, pagerSnapDistance = PagerSnapDistance.atMost(1), snapAnimationSpec = DaySnapSpec),
         key = { it }) { page -> content(pageDay(page)) }
 }

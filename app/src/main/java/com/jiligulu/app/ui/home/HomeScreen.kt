@@ -6,6 +6,8 @@ import androidx.compose.runtime.*
 import com.jiligulu.app.core.util.Formatters
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.coroutineScope
+import androidx.compose.foundation.gestures.BringIntoViewSpec
+import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -16,6 +18,9 @@ import kotlin.math.abs
 import kotlinx.coroutines.flow.first
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.spring
+import androidx.compose.ui.platform.LocalDensity
+import kotlinx.coroutines.Job
 import androidx.compose.foundation.layout.*
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
@@ -132,18 +137,62 @@ private fun HomeContent(
     val outer = androidx.compose.foundation.lazy.rememberLazyListState()
     var activeInner by remember { mutableStateOf<LazyListState?>(null) }
     val gate = remember { StickyPullGate() }
+    val effectScope = rememberCoroutineScope()
+    val density = LocalDensity.current.density
+    var stretch by remember { mutableFloatStateOf(0f) }
+    val rebound = remember { Animatable(0f) }
+    var reboundJob by remember { mutableStateOf<Job?>(null) }
+    fun pullFeedback(delta: Float) {
+        if (delta > 0) stretch = (stretch + delta * .24f).coerceAtMost(40f * density)
+    }
+    fun releaseFeedback() {
+        val distance = stretch
+        if (distance <= 0f) return
+        reboundJob?.cancel()
+        reboundJob = effectScope.launch {
+            rebound.snapTo(distance)
+            stretch = 0f
+            rebound.animateTo(0f, spring(dampingRatio = .72f, stiffness = 500f, visibilityThreshold = .5f))
+        }
+    }
+    var resumeIndex by rememberSaveable { mutableIntStateOf(-1) }
+    var resumeOffset by rememberSaveable { mutableIntStateOf(0) }
+    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(lifecycle, outer) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_PAUSE) {
+                resumeIndex = outer.firstVisibleItemIndex
+                resumeOffset = outer.firstVisibleItemScrollOffset
+            } else if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME && resumeIndex >= 0) {
+                val index = resumeIndex; val offset = resumeOffset
+                effectScope.launch {
+                    withFrameNanos { }
+                    outer.scrollToItem(index, offset)
+                    resumeIndex = -1
+                    gate.reset()
+                }
+            }
+        }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
+    }
+
     LaunchedEffect(active, selectedDay) { gate.reset() }
     fun pinned() = outer.firstVisibleItemIndex >= 3
     fun innerAtTop() = activeInner?.canScrollBackward != true
     val nested = remember(outer, gate) { object : NestedScrollConnection {
         override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
             if (available.y < 0 && outer.canScrollForward) return Offset(0f, -outer.dispatchRawDelta(-available.y))
-            if (available.y > 0 && pinned() && innerAtTop() && !gate.allowExpand) { gate.blockedAtTop(); return Offset(0f, available.y) }
+            if (available.y > 0 && pinned() && innerAtTop() && !gate.allowExpand) { gate.blockedAtTop(); if (source == NestedScrollSource.UserInput) pullFeedback(available.y); return Offset(0f, available.y) }
             return Offset.Zero
         }
         override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
             if (pinned() && innerAtTop() && !gate.allowExpand && (available.y > 0 || consumed.y > 0)) gate.blockedAtTop()
-            return if (available.y > 0 && pinned() && !gate.allowExpand) Offset(0f, available.y) else Offset.Zero
+            if (available.y > 0 && pinned() && !gate.allowExpand) {
+                if (source == NestedScrollSource.UserInput) pullFeedback(available.y)
+                return Offset(0f, available.y)
+            }
+            return Offset.Zero
         }
         override suspend fun onPreFling(available: Velocity): Velocity =
             if (available.y > 0 && pinned() && innerAtTop() && !gate.allowExpand) Velocity(0f, available.y) else Velocity.Zero
@@ -153,6 +202,9 @@ private fun HomeContent(
     val observeGesture = Modifier.pointerInput(gate) {
         awaitEachGesture {
             val first = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+            reboundJob?.cancel()
+            effectScope.launch { rebound.snapTo(0f) }
+            stretch = 0f
             gate.begin(pinned(), innerAtTop())
             var finalPosition = first.position
             do {
@@ -161,9 +213,14 @@ private fun HomeContent(
             } while (event.changes.any { it.pressed })
             val distance = finalPosition - first.position
             gate.finish(pinned(), innerAtTop(), distance.y > viewConfiguration.touchSlop && distance.y > abs(distance.x))
+            releaseFeedback()
         }
     }
-    CompositionLocalProvider(LocalOverscrollConfiguration provides null) {
+    val childBringSpec = LocalBringIntoViewSpec.current
+    val manualHeaderSpec = remember { object : BringIntoViewSpec {
+        override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float) = 0f
+    } }
+    CompositionLocalProvider(LocalOverscrollConfiguration provides null, LocalBringIntoViewSpec provides manualHeaderSpec) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
     val viewport = maxHeight
     LazyColumn(
@@ -198,7 +255,9 @@ private fun HomeContent(
             }
         }
         item(key = "ledger_page") {
-            Column(Modifier.fillMaxWidth().height(viewport).nestedScroll(nested)) {
+            Column(Modifier.fillMaxWidth().height(viewport).nestedScroll(nested).graphicsLayer {
+                translationY = if (stretch > 0f) stretch else rebound.value
+            }) {
                 Row(Modifier.fillMaxWidth().testTag("home-ledger-heading").padding(top = 16.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("每日账单", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
                     CompactChoice(listOf("全部收支", "只看支出", "只看收入"), typeFilter) { typeFilter = it }
@@ -211,6 +270,7 @@ private fun HomeContent(
                     val rows = remember(snapshot, typeFilter, sort) { filterHomeBills(snapshot.bills, pageDay, typeFilter, sort) }
                     val inner = androidx.compose.foundation.lazy.rememberLazyListState()
                     SideEffect { if (pageDay == selectedDay) activeInner = inner }
+                    CompositionLocalProvider(LocalBringIntoViewSpec provides childBringSpec) {
                     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background, RoundedCornerShape(18.dp))
                         .padding(horizontal = 4.dp).testTag("home-page-$pageDay")) {
                         DayBrowser(pageDay, onSelectDay)
@@ -237,6 +297,7 @@ private fun HomeContent(
                             }
                             LedgerScrollBar(inner, Modifier.align(Alignment.CenterEnd))
                         }
+                    }
                     }
                 }
             }

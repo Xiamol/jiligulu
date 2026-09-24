@@ -702,6 +702,21 @@ class UiSmokeScreenshotTest {
                 compose.mainClock.advanceTimeBy(300)
                 compose.waitForIdle()
                 val pinned = compose.onNodeWithTag("home-ledger-heading").fetchSemanticsNode().boundsInRoot.top
+                compose.onNodeWithTag("home-day-bills").performTouchInput {
+                    down(Offset(width * .5f, height * .2f))
+                    moveTo(Offset(width * .5f, height * .4f), delayMillis = 70)
+                    moveTo(Offset(width * .5f, height * .75f), delayMillis = 140)
+                }
+                compose.mainClock.advanceTimeBy(32)
+                assertTrue(compose.onNodeWithTag("home-ledger-heading").fetchSemanticsNode().boundsInRoot.top > pinned + 4)
+                capture("home-first-pull-stretch")
+                compose.onNodeWithTag("home-day-bills").performTouchInput { up() }
+                compose.mainClock.advanceTimeBy(1200)
+                assertEquals(pinned, compose.onNodeWithTag("home-ledger-heading").fetchSemanticsNode().boundsInRoot.top, 2f)
+                scenario.moveToState(androidx.lifecycle.Lifecycle.State.CREATED)
+                scenario.moveToState(androidx.lifecycle.Lifecycle.State.RESUMED)
+                compose.mainClock.advanceTimeBy(800)
+                assertEquals(pinned, compose.onNodeWithTag("home-ledger-heading").fetchSemanticsNode().boundsInRoot.top, 2f)
                 compose.onNodeWithTag("home-day-bills").performTouchInput { swipeDown() }
                 compose.mainClock.advanceTimeBy(1200)
                 assertEquals(pinned, compose.onNodeWithTag("home-ledger-heading").fetchSemanticsNode().boundsInRoot.top, 2f)
@@ -711,16 +726,16 @@ class UiSmokeScreenshotTest {
                 compose.runOnIdle { activity.setContent { GuluTheme { com.jiligulu.app.ui.stats.StatsScreen(stats) } } }
                 awaitText("每日收支")
                 compose.onAllNodes(hasScrollToIndexAction()).onFirst().performScrollToIndex(3)
-                awaitTag("statistics-day-pager")
-                compose.onNodeWithTag("statistics-day-pager").performTouchInput {
+                awaitTag("statistics-day-swipe")
+                compose.onNodeWithTag("statistics-day-swipe").performTouchInput {
                     down(Offset(width * .15f, height * .35f))
                     moveTo(Offset(width * .25f, height * .35f), delayMillis = 70)
                     moveTo(Offset(width * .48f, height * .35f), delayMillis = 100)
                     moveTo(Offset(width * .78f, height * .35f), delayMillis = 160)
                 }
                 assertEquals(today, stats.selectedDay.value)
-                capture("statistics-finger-held-pages")
-                compose.onNodeWithTag("statistics-day-pager").performTouchInput { up() }
+                capture("statistics-release-swipe")
+                compose.onNodeWithTag("statistics-day-swipe").performTouchInput { up() }
                 compose.waitUntil(8000) { shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(16)); stats.selectedDay.value == yesterday }
                 compose.runOnIdle { activity.setContent {} }
             }

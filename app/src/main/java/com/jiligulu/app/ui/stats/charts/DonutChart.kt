@@ -64,6 +64,7 @@ fun DonutChart(
     thicknessFraction: Float = 0.15f,
     selectedBoost: Float = 1.14f,
     animateOnDataChange: Boolean = true,
+    replayKey: Any? = null,
     centerContent: (@Composable () -> Unit)? = null
 ) {
     val emptyOutline = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .48f)
@@ -90,11 +91,15 @@ fun DonutChart(
     //    否则 LazyColumn 滚动滑回时入场动画反复重播，Canvas 每帧重绘 → 肉眼可见的卡。
     val progress = remember { Animatable(1f) }
     var prevArcs by remember { mutableStateOf(arcs) }
-    LaunchedEffect(arcs) {
-        if (arcs !== prevArcs) {
-            prevArcs = arcs
-            if (animateOnDataChange) progress.snapTo(0f)
-            progress.animateTo(1f, tween(650, easing = FastOutSlowInEasing))
+    var previousReplay by remember { mutableStateOf<Any?>(null) }
+    LaunchedEffect(arcs, replayKey) {
+        val replay = replayKey != null && replayKey != previousReplay
+        val dataChanged = arcs !== prevArcs
+        prevArcs = arcs
+        previousReplay = replayKey
+        if (arcs.isNotEmpty() && (replay || dataChanged)) {
+            if (animateOnDataChange || replay) progress.snapTo(0f)
+            progress.animateTo(1f, tween(520, easing = FastOutSlowInEasing))
         }
     }
 

@@ -1,8 +1,8 @@
 package com.jiligulu.app.ui.stats
 
 
-import com.jiligulu.app.ui.components.rememberPageData
-import com.jiligulu.app.ui.components.DayPager
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import com.jiligulu.app.ui.components.LedgerScrollBar
 import androidx.compose.foundation.lazy.rememberLazyListState
 import com.jiligulu.app.ui.components.DayBrowser
@@ -199,25 +199,24 @@ fun StatsScreen(
         // ---------- 当日分类 ----------
         item(key = "day_categories") {
             ChartCard(title = if (flowType == BillType.EXPENSE) "支出分布" else "收入分布", subtitle = "左右滑动换一天 · 点分类展开账单") {
-                DayPager(selectedDay, YearMonth.now().atEndOfMonth().atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli(),
-                    vm::selectCalendarDate, Modifier.fillMaxWidth(), tag = "statistics-day-pager") { pageDay ->
-                    val flow = remember(pageDay, flowType) { vm.observeDay(pageDay, flowType) }
-                    val preview by rememberPageData(flow, DayDonutUi())
-                    val pageData = when {
-                        pageDay == selectedDay && dayDonut.dayStartMillis == pageDay && dayDonut.type == flowType -> dayDonut
-                        preview.dayStartMillis == pageDay && preview.type == flowType -> preview
-                        else -> DayDonutUi(dayStartMillis = pageDay, type = flowType)
-                    }
-                    Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface, MaterialTheme.shapes.large).padding(6.dp)) {
-                        DayBrowser(pageDay, vm::selectCalendarDate,
-                            latest = YearMonth.now().atEndOfMonth().atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli())
+                DayBrowser(selectedDay, vm::selectCalendarDate,
+                    latest = YearMonth.now().atEndOfMonth().atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli())
+                val pageData = dayDonut
+                Column(Modifier.fillMaxWidth().testTag("statistics-day-swipe").pointerInput(selectedDay) {
+                    var drag = 0f
+                    detectHorizontalDragGestures(onDragStart = { drag = 0f }, onDragCancel = { drag = 0f },
+                        onDragEnd = { if (drag > 48.dp.toPx()) vm.shiftDay(-1) else if (drag < -48.dp.toPx()) vm.shiftDay(1) },
+                        onHorizontalDrag = { change, delta -> drag += delta; change.consume() })
+                }) {
                     AdaptiveChartDetails(
                         chart = {
                             DonutChart(
                                 slices = pageData.slices,
+                                animateOnDataChange = true,
+                                replayKey = selectedDay to flowType,
                                 selectedKey = pageData.selectedCategoryId,
-                                onSelect = if (pageDay == selectedDay) { key -> vm.toggleCategory(key as? Long) } else null,
-                                modifier = Modifier.size(176.dp).testTag(if (pageDay == selectedDay) "daily-donut" else "neighbor-donut")
+                                onSelect = { key -> vm.toggleCategory(key as? Long) },
+                                modifier = Modifier.size(176.dp).testTag("daily-donut")
                             ) {
                                 RingLabel(if (pageData.slices.isEmpty()) "暂无" + if (flowType == BillType.EXPENSE) "支出" else "收入" else pageData.selectedLabel,
                                     "¥${pageData.selectedAmountText.ifBlank { "0" }}")
@@ -235,15 +234,14 @@ fun StatsScreen(
                                     label = "${slice.label} · ${String.format(java.util.Locale.ROOT, "%.1f", slice.valueFen.toDouble() / pageData.slices.sumOf { it.valueFen }.coerceAtLeast(1) * 100)}%",
                                     amountText = "¥${Formatters.fenToYuanText(slice.valueFen)}",
                                     selected = slice.key == pageData.selectedCategoryId,
-                                    onClick = { if (pageDay == selectedDay) vm.toggleCategory(slice.key as? Long) },
-                                    details = if (pageDay == selectedDay && slice.key == pageData.selectedCategoryId) dayDetails else emptyList(),
+                                    onClick = { vm.toggleCategory(slice.key as? Long) },
+                                    details = if (slice.key == pageData.selectedCategoryId) dayDetails else emptyList(),
                                     sort = sort, onSort = vm::setSort, onBill = { selectedBillId = it }
                                 )
                             }
                             }
                         }
                     )
-                    }
                 }
             }
         }
