@@ -23,5 +23,18 @@ class FloatingCapturePreferenceTest {
         restored.setFloatingCaptureEnabled(false)
         assertFalse(UserPrefs(context).floatingCaptureEnabled.first())
     }
+    @Test fun iconSizeDefaultsToEightyPercentAndPersistsWithBounds() = runBlocking {
+        val context = RuntimeEnvironment.getApplication()
+        val prefs = UserPrefs(context)
+        assertEquals(80, prefs.floatingCaptureSizePercent.first())
+        prefs.setFloatingCaptureSizePercent(120)
+        assertEquals(120, UserPrefs(context).floatingCaptureSizePercent.first())
+        prefs.setFloatingCaptureSizePercent(300)
+        assertEquals(140, prefs.floatingCaptureSizePercent.first())
+        prefs.setFloatingCaptureSizePercent(10)
+        assertEquals(60, prefs.floatingCaptureSizePercent.first())
+        prefs.setFloatingCaptureSizePercent(80)
+        assertEquals(80, UserPrefs(context).floatingCaptureSizePercent.first())
+    }
 }
 

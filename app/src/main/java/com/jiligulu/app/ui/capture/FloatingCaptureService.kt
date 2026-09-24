@@ -18,6 +18,8 @@ import com.jiligulu.app.R
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlin.math.abs
+import kotlin.math.roundToInt
+import com.jiligulu.app.data.prefs.UserPrefs
 
 class FloatingCaptureService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -31,10 +33,10 @@ class FloatingCaptureService : Service() {
         if (!Settings.canDrawOverlays(this)) { stopSelf(); return }
         val notification = captureNotification(this, "阿噜悬浮记账", "轻点截图 · 长按拖到底部可暂时隐藏", FloatingCaptureService::class.java)
         if (Build.VERSION.SDK_INT >= 34) startForeground(3101, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE) else startForeground(3101, notification)
-        val side = (60 * resources.displayMetrics.density).toInt()
+        val side = (60f * UserPrefs.DEFAULT_FLOATING_SIZE_PERCENT / 100 * resources.displayMetrics.density).roundToInt()
         val params = WindowManager.LayoutParams(side, side, WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN, PixelFormat.TRANSLUCENT).apply { gravity = Gravity.TOP or Gravity.START; x = 0; y = 300 }
-        val view = ImageView(this).apply { setImageResource(R.mipmap.ic_launcher); contentDescription = "阿噜截图记账，长按后拖到底部关闭区"; elevation = 8f }
+        val view = ImageView(this).apply { visibility = View.INVISIBLE; setImageResource(R.mipmap.ic_launcher); contentDescription = "阿噜截图记账，长按后拖到底部关闭区"; elevation = 8f }
         var startX = 0f; var startY = 0f; var x = 0; var y = 0
         var moved = false; var held = false; var overTarget = false
         val hold = Runnable { held = true; showDismissTarget(); view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS) }
@@ -49,8 +51,8 @@ class FloatingCaptureService : Service() {
                     val dx = event.rawX - startX; val dy = event.rawY - startY
                     if (abs(dx) + abs(dy) > ViewConfiguration.get(this).scaledTouchSlop) moved = true
                     if (moved) {
-                        params.x = (x + dx.toInt()).coerceIn(0, (resources.displayMetrics.widthPixels - side).coerceAtLeast(0))
-                        params.y = (y + dy.toInt()).coerceIn(0, (resources.displayMetrics.heightPixels - side).coerceAtLeast(0))
+                        params.x = (x + dx.toInt()).coerceIn(0, (resources.displayMetrics.widthPixels - params.width).coerceAtLeast(0))
+                        params.y = (y + dy.toInt()).coerceIn(0, (resources.displayMetrics.heightPixels - params.height).coerceAtLeast(0))
                         windows.updateViewLayout(view, params)
                     }
                     val target = dismissTarget
@@ -79,7 +81,19 @@ class FloatingCaptureService : Service() {
                 else -> true
             }
         }
-        try { windows.addView(view, params); bubble = view; instance = this; running.value = true }
+        try {
+            windows.addView(view, params); bubble = view; instance = this; running.value = true
+            scope.launch {
+                (application as com.jiligulu.app.JiliguluApp).container.userPrefs.floatingCaptureSizePercent.collect { percent ->
+                    val pixels = (60f * percent / 100 * resources.displayMetrics.density).roundToInt()
+                    params.width = pixels; params.height = pixels
+                    params.x = params.x.coerceIn(0, (resources.displayMetrics.widthPixels - pixels).coerceAtLeast(0))
+                    params.y = params.y.coerceIn(0, (resources.displayMetrics.heightPixels - pixels).coerceAtLeast(0))
+                    runCatching { windows.updateViewLayout(view, params) }
+                    if (!capturing) view.visibility = View.VISIBLE
+                }
+            }
+        }
         catch (_: Exception) { Toast.makeText(this, "悬浮窗未能开启，请检查悬浮窗权限", Toast.LENGTH_SHORT).show(); stopSelf() }
     }
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int { if (intent?.action == "stop") hideForSession(); return START_NOT_STICKY }

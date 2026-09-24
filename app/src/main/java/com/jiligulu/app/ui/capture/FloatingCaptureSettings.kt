@@ -13,6 +13,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.jiligulu.app.JiliguluApp
+import com.jiligulu.app.data.prefs.UserPrefs
+import androidx.compose.ui.Alignment
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
+import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
 
@@ -20,6 +25,10 @@ import kotlinx.coroutines.CancellationException
 fun FloatingCaptureSettings() {
     val context = LocalContext.current
     val prefs = (context.applicationContext as JiliguluApp).container.userPrefs
+    val savedSize by prefs.floatingCaptureSizePercent.collectAsStateWithLifecycle(UserPrefs.DEFAULT_FLOATING_SIZE_PERCENT)
+    var sizePercent by remember { mutableFloatStateOf(UserPrefs.DEFAULT_FLOATING_SIZE_PERCENT.toFloat()) }
+    var adjustingSize by remember { mutableStateOf(false) }
+    LaunchedEffect(savedSize) { if (!adjustingSize) sizePercent = savedSize.toFloat() }
     val enabled by prefs.floatingCaptureEnabled.collectAsStateWithLifecycle(false)
     val hidden by FloatingCaptureService.hiddenForSession.collectAsStateWithLifecycle()
     val running by FloatingCaptureService.running.collectAsStateWithLifecycle()
@@ -58,6 +67,33 @@ fun FloatingCaptureSettings() {
                 .onFailure { error = "请在系统设置中开启悬浮窗权限" }
         })
     }
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text("图标大小 · ${sizePercent.roundToInt()}%", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+        TextButton(onClick = {
+            adjustingSize = false
+            sizePercent = UserPrefs.DEFAULT_FLOATING_SIZE_PERCENT.toFloat()
+            scope.launch { withContext(NonCancellable) {
+                try { prefs.setFloatingCaptureSizePercent(UserPrefs.DEFAULT_FLOATING_SIZE_PERCENT) }
+                catch (_: Exception) { error = "大小未能保存，请重试" }
+            } }
+        }) { Text("恢复默认") }
+    }
+    Slider(value = sizePercent, valueRange = UserPrefs.MIN_FLOATING_SIZE_PERCENT.toFloat()..UserPrefs.MAX_FLOATING_SIZE_PERCENT.toFloat(),
+        steps = 7, onValueChange = { value ->
+            val next = (value / 10).roundToInt() * 10
+            if (next != sizePercent.roundToInt()) {
+                adjustingSize = true; sizePercent = next.toFloat()
+                scope.launch { withContext(NonCancellable) {
+                    try { prefs.setFloatingCaptureSizePercent(next) }
+                    catch (_: Exception) { error = "大小未能保存，请重试" }
+                } }
+            }
+        }, onValueChangeFinished = { adjustingSize = false })
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text("小一点", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("大一点", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+    Text("默认 80%，调整即时生效并自动保存。", style = MaterialTheme.typography.bodySmall)
     Text("开关会记住。截屏授权在本次共享会话内复用，系统会显示共享标识；只在点击时截取画面。清理后台或系统结束共享后，需要重新授权。", style = MaterialTheme.typography.bodySmall)
     if (enabled) {
         Text(if (hidden) "本次已隐藏，重新启动 App 后恢复；功能开关仍开启" else if (ready) "截屏已就绪 ♡" else if (running) "悬浮球已开启，下次截图时申请授权" else "已记住开启状态，等待恢复悬浮球", style = MaterialTheme.typography.bodySmall)

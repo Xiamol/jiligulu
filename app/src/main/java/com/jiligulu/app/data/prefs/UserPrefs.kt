@@ -40,6 +40,10 @@ data class SavedAnnouncements(val source: String, val cachedFeed: String, val mu
 class UserPrefs(private val context: Context) {
 
     companion object {
+        private val KEY_FLOATING_SIZE = intPreferencesKey("floating_capture_size_percent")
+        const val DEFAULT_FLOATING_SIZE_PERCENT = 80
+        const val MIN_FLOATING_SIZE_PERCENT = 60
+        const val MAX_FLOATING_SIZE_PERCENT = 140
         private val KEY_FLOATING_CAPTURE = booleanPreferencesKey("floating_capture_enabled")
         private val KEY_NICKNAME = stringPreferencesKey("nickname")
         private val KEY_NAME_SUFFIX = stringPreferencesKey("name_suffix")
@@ -92,6 +96,13 @@ class UserPrefs(private val context: Context) {
 
     /** null = 还没读过；"" = 未设置（需要 Onboarding） */
     val nickname: Flow<String> = context.dataStore.data.map { it[KEY_NICKNAME] ?: "" }
+
+    val floatingCaptureSizePercent: Flow<Int> = context.dataStore.data.map {
+        (it[KEY_FLOATING_SIZE] ?: DEFAULT_FLOATING_SIZE_PERCENT).coerceIn(MIN_FLOATING_SIZE_PERCENT, MAX_FLOATING_SIZE_PERCENT)
+    }.distinctUntilChanged()
+    suspend fun setFloatingCaptureSizePercent(percent: Int) {
+        context.dataStore.edit { it[KEY_FLOATING_SIZE] = percent.coerceIn(MIN_FLOATING_SIZE_PERCENT, MAX_FLOATING_SIZE_PERCENT) }
+    }
 
     val floatingCaptureEnabled: Flow<Boolean> = context.dataStore.data.map { it[KEY_FLOATING_CAPTURE] ?: false }.distinctUntilChanged()
     suspend fun setFloatingCaptureEnabled(enabled: Boolean) {
