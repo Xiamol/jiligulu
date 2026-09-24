@@ -140,8 +140,20 @@ class AiRepository(
      */
     suspend fun parse(input: String, requestMillis: Long, zone: ZoneId): Result<AiParseResult> {
         if (com.jiligulu.app.core.ai.ImageReceiptCodec.isImageText(input)) return runCatching {
-            com.jiligulu.app.core.ai.ImageReceiptCodec.classify(
-                com.jiligulu.app.core.ai.ImageReceiptCodec.parseText(input), categoryRepository.getAll())
+            val categories = categoryRepository.getAll()
+            val parsed = com.jiligulu.app.core.ai.ImageReceiptCodec.parseText(input)
+            val fallback = com.jiligulu.app.core.ai.ImageReceiptCodec.classify(parsed, categories)
+            if (parsed.bills.all { it.category in listOf("转账", "红包") }) fallback else {
+                val suggestions = try {
+                    clientFactory(effectiveApiKey()).parseBill(
+                        com.jiligulu.app.core.ai.ImageCategoryClassifier.PROMPT,
+                        com.jiligulu.app.core.ai.ImageCategoryClassifier.input(parsed, categories)
+                    ).getOrElse { if (it is CancellationException) throw it else null }
+                } catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) { null }
+                if (suggestions == null) fallback else
+                    com.jiligulu.app.core.ai.ImageCategoryClassifier.apply(fallback, suggestions, categories)
+            }
         }
         val categories = categoryRepository.getAll()
         val pending = PromptRenderer.pendingOf(chatHistoryRepository.latestPending())

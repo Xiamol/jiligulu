@@ -94,4 +94,24 @@ class ImageReceiptCodecTest {
         assertEquals("2026-09-25 00:34", bill.timeExpression)
         assertTrue(bill.note.contains("系统时间"))
     }
+    @Test fun merchantSurvivesAndPaymentChannelIsOnlyANote() {
+        val bill = ImageReceiptCodec.parseText(render("""{"kind":"transaction","direction":"EXPENSE","amount":"22.92","merchant":"零食有鸣","detail":"使用零钱通支付","payment_method":"零钱通","time":"昨天16:21","status":"已支付"}""")).bills.single()
+        assertEquals("零食有鸣", bill.detail)
+        assertTrue(bill.note.contains("支付方式：零钱通"))
+        assertEquals("2026-09-24 16:21", bill.timeExpression)
+    }
+    @Test fun semanticSuggestionsOnlyChangeCategoryFieldsAndRespectIds() {
+        val original = AiBillDraft(amountYuan = 22.92, type = "EXPENSE", detail = "零食有鸣", timeExpression = "昨天16:21", category = "待定")
+        val fallback = AiParseResult(bills = listOf(original), reply = "草稿")
+        val category = com.jiligulu.app.data.local.entity.CategoryEntity(name = "零食", colorHue = 30f, colorIndex = 1)
+        val suggestion = AiBillDraft(targetId = 1, action = "delete", amountYuan = 999.0, type = "INCOME", category = "零食")
+        val actual = ImageCategoryClassifier.apply(fallback, AiParseResult(bills = listOf(suggestion)), listOf(category))
+        assertEquals(original.copy(category = "零食", iconEmoji = category.iconValue, keywords = category.keywords), actual.bills.single())
+        assertEquals("草稿", actual.reply)
+        for (invalid in listOf(suggestion.copy(targetId = 0), suggestion.copy(category = "零钱通支付"))) {
+            assertEquals(fallback, ImageCategoryClassifier.apply(fallback, AiParseResult(bills = listOf(invalid)), emptyList()))
+        }
+        assertEquals(fallback, ImageCategoryClassifier.apply(fallback, AiParseResult(bills = listOf(suggestion, suggestion)), emptyList()))
+        assertTrue(ImageCategoryClassifier.apply(fallback, AiParseResult(bills = listOf(suggestion)), emptyList()).bills.single().isNewCategory)
+    }
 }
