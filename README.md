@@ -6,7 +6,7 @@ Android 本地记账应用，Kotlin + Jetpack Compose + Room。当前版本 `0.5
 
 后续接手与功能讨论先看 [当前路线图与用户决策](docs/ROADMAP.md)；旧交接中的优先级可能已被这里的最新反馈替代。
 
-本地待验收功能：远程公告小信箱、离线中文语音转可编辑文字。详见 [公告运营与语音说明](docs/ANNOUNCEMENTS.md) 和 [离线语音试用](docs/OFFLINE_VOICE.md)，尚未包含在已发布的 v0.5.6 APK 中。
+本地待验收功能：远程公告小信箱（已发布测试来信）。详见 [公告运营与语音说明](docs/ANNOUNCEMENTS.md)，尚未包含在已发布的 v0.5.6 APK 中。
 
 ## 构建
 

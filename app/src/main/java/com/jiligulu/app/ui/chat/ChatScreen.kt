@@ -95,8 +95,7 @@ private const val KEYBOARD_SETTLE_MS = 180L
 fun ChatScreen(
     onBack: () -> Unit = {},
     onNavigate: (String) -> Unit = {},
-    vm: ChatViewModel = viewModel(factory = ChatViewModel.Factory),
-    voiceController: com.jiligulu.app.ui.voice.SpeechInputController? = null
+    vm: ChatViewModel = viewModel(factory = ChatViewModel.Factory)
 ) {
     val items by vm.items.collectAsStateWithLifecycle()
     val categories by vm.categories.collectAsStateWithLifecycle()
@@ -267,10 +266,49 @@ fun ChatScreen(
             }
         }
 
-        com.jiligulu.app.ui.voice.VoiceComposer(
-            text = input, onTextChange = { input = it }, onSend = sendInput,
-            ready = ready, sending = sending, suppliedController = voiceController
-        )
+        // ---------- 输入栏 ----------
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            OutlinedTextField(
+                value = input,
+                onValueChange = { input = it },
+                modifier = Modifier.weight(1f).testTag("chat-input"),
+                placeholder = {
+                    Text(
+                        if (sending) "咕噜正在整理这笔账…" else "比如：昨天中午吃饭 9 元",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                },
+                singleLine = true,
+                enabled = ready,
+                shape = MaterialTheme.shapes.extraLarge,
+                colors = OutlinedTextFieldDefaults.colors(
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+                    focusedContainerColor = MaterialTheme.colorScheme.surface,
+                    unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant
+                ),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text, imeAction = ImeAction.Send),
+                keyboardActions = KeyboardActions(onSend = { sendInput() })
+            )
+            Spacer(Modifier.width(8.dp))
+            IconButton(
+                onClick = sendInput,
+                enabled = input.isNotBlank() && ready && !sending,
+                modifier = Modifier.size(48.dp),
+                colors = IconButtonDefaults.iconButtonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                    disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                )
+            ) {
+                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "发送")
+            }
+        }
     }
 }
 

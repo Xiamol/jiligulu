@@ -100,6 +100,16 @@ class JiliguluApp : Application() {
     override fun onCreate() {
         super.onCreate()
         container = AppContainer(this)
+        // Retired offline voice trial: remove only its private model directory.
+        Thread({
+            runCatching {
+                val root = filesDir.canonicalFile
+                val retired = java.io.File(root, "offline-voice").canonicalFile
+                if (retired.parentFile == root && retired.name == "offline-voice") {
+                    retired.deleteRecursively()
+                }
+            }
+        }, "RetiredVoiceCleanup").start()
         WaterReminderNotifications.createChannel(this)
         registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
             override fun onActivityStarted(activity: android.app.Activity) {

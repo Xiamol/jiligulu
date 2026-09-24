@@ -21,4 +21,3 @@ tools/sounds_raw/
 tools/sounds_preview/
 
 # Downloaded offline model; reproduced by tools/prepare_voice_model.py.
-/app/src/main/assets/offline_voice/model.zip*
