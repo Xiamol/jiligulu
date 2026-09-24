@@ -1,5 +1,12 @@
 package com.jiligulu.app.ui.main
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.tween
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -64,6 +71,7 @@ fun MainScreen(
     val drinkingId by personaVm.drinkingId.collectAsStateWithLifecycle()
     val showDrinking = drinkingId != null
     val pageState = rememberSaveableStateHolder()
+    LaunchedEffect(selectedTab) { if (selectedTab == 0) homeVm.showToday() }
     val lifecycleOwner = LocalLifecycleOwner.current
     BackHandler(enabled = showDrinking, onBack = personaVm::cancelDrinking)
 
@@ -126,11 +134,18 @@ fun MainScreen(
             }
         ) { padding ->
             Box(Modifier.fillMaxSize().padding(padding)) {
-                pageState.SaveableStateProvider(selectedTab) {
-                    when (selectedTab) {
+                AnimatedContent(targetState = selectedTab, modifier = Modifier.fillMaxSize(), label = "main-tab",
+                    transitionSpec = {
+                        val direction = if (targetState > initialState) 1 else -1
+                        (fadeIn(tween(240)) + slideInHorizontally(tween(280)) { direction * it / 12 }) togetherWith
+                            (fadeOut(tween(160)) + slideOutHorizontally(tween(220)) { -direction * it / 12 })
+                    }) { page ->
+                pageState.SaveableStateProvider(page) {
+                    when (page) {
                         0 -> HomeScreen(onOpenChat = onOpenChat, onAddBill = onAddBill, vm = homeVm)
                         1 -> StatsScreen()
                     }
+                }
                 }
             }
         }

@@ -10,6 +10,8 @@ import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -61,6 +63,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
@@ -191,34 +194,25 @@ fun StatsScreen(
             ChartCard(title = if (flowType == BillType.EXPENSE) "支出分布" else "收入分布", subtitle = "左右滑动换一天 · 点分类展开账单") {
                 DayBrowser(selectedDay, vm::selectCalendarDate,
                     latest = YearMonth.now().atEndOfMonth().atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli())
-                Column(Modifier.fillMaxWidth().daySwipe(selectedDay, { vm.shiftDay(-1) }, { vm.shiftDay(1) })) {
-                if (dayDonut.slices.isEmpty()) {
-                    Column(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 20.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Text(if (flowType == BillType.EXPENSE) "这一天还没有支出" else "这一天还没有收入", style = MaterialTheme.typography.bodyLarge)
-                        Text(
-                            "记下一笔后，这里就会慢慢丰富起来。",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = TextAlign.Center
-                        )
-                    }
-                } else {
+                Column(Modifier.fillMaxWidth().animateContentSize(tween(260)).daySwipe(selectedDay, { vm.shiftDay(-1) }, { vm.shiftDay(1) })) {
                     AdaptiveChartDetails(
                         chart = {
                             DonutChart(
                                 slices = dayDonut.slices,
                                 selectedKey = dayDonut.selectedCategoryId,
                                 onSelect = { key -> vm.toggleCategory(key as? Long) },
-                                modifier = Modifier.size(176.dp)
+                                modifier = Modifier.size(176.dp).testTag("daily-donut")
                             ) {
-                                RingLabel(dayDonut.selectedLabel, "¥${dayDonut.selectedAmountText}")
+                                RingLabel(if (dayDonut.slices.isEmpty()) "暂无" + if (flowType == BillType.EXPENSE) "支出" else "收入" else dayDonut.selectedLabel,
+                                    "¥${dayDonut.selectedAmountText.ifBlank { "0" }}")
                             }
                         },
                         details = {
+                            Column(Modifier.fillMaxWidth().heightIn(min = 64.dp)) {
+                            if (dayDonut.slices.isEmpty()) {
+                                Text("这一天先留个小空位 ♡", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp), textAlign = TextAlign.Center)
+                            }
                             dayDonut.slices.forEach { slice ->
                                 CategoryDrawer(
                                     color = slice.color,
@@ -230,9 +224,9 @@ fun StatsScreen(
                                     sort = sort, onSort = vm::setSort, onBill = { selectedBillId = it }
                                 )
                             }
+                            }
                         }
                     )
-                }
                 }
             }
         }

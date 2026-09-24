@@ -4,6 +4,19 @@ import com.jiligulu.app.ui.components.*
 import androidx.compose.runtime.*
 import com.jiligulu.app.core.util.Formatters
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.first
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.layout.*
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.testTag
+import androidx.compose.foundation.LocalOverscrollConfiguration
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -62,7 +75,7 @@ fun HomeScreen(
 ) {
     val state by vm.uiState.collectAsStateWithLifecycle()
     val day by vm.selectedDay.collectAsStateWithLifecycle()
-    val daily by vm.dailyBills.collectAsStateWithLifecycle()
+    val daily by vm.dailyLedger.collectAsStateWithLifecycle()
     LaunchedEffect(vm) { vm.showToday() }
     val owner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     DisposableEffect(owner, vm) {
@@ -92,6 +105,7 @@ fun HomeScreen(
 }
 
 /** Pure rendering makes previews independent of the database and keeps navigation in the route. */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun HomeContent(
     state: HomeUiState,
@@ -100,22 +114,64 @@ private fun HomeContent(
     announcements: com.jiligulu.app.data.announcement.AnnouncementState = com.jiligulu.app.data.announcement.AnnouncementState(loading = false),
     onOpenAnnouncement: (String) -> Unit = {},
     selectedDay: Long = Formatters.dayStart(System.currentTimeMillis()),
-    dailyBills: List<BillUi> = emptyList(),
+    daily: DailyLedgerSnapshot = DailyLedgerSnapshot(selectedDay, loaded = true),
     onSelectDay: (Long) -> Unit = {},
     onBillClick: (Long) -> Unit
 ) {
     var typeFilter by rememberSaveable { mutableIntStateOf(0) }
     var sort by rememberSaveable { mutableIntStateOf(0) }
-    val filtered = remember(dailyBills, selectedDay, typeFilter, sort) {
-        filterHomeBills(dailyBills, selectedDay, typeFilter, sort)
+    val outer = androidx.compose.foundation.lazy.rememberLazyListState()
+    val inner = androidx.compose.foundation.lazy.rememberLazyListState()
+    val latest by rememberUpdatedState(daily)
+    var shown by remember { mutableStateOf(daily) }
+    var shownType by remember { mutableIntStateOf(typeFilter) }
+    var shownSort by remember { mutableIntStateOf(sort) }
+    var initialized by remember { mutableStateOf(false) }
+    var changing by remember { mutableStateOf(false) }
+    val opacity = remember { Animatable(1f) }
+    val slide = remember { Animatable(0f) }
+    LaunchedEffect(daily) {
+        if (!changing && daily.loaded && daily.day == shown.day && daily.day == selectedDay && shownType == typeFilter && shownSort == sort) {
+            shown = daily
+        }
     }
-    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
-    LaunchedEffect(selectedDay, typeFilter, sort) { if (listState.firstVisibleItemIndex >= 3) listState.scrollToItem(3) }
-
+    LaunchedEffect(selectedDay, typeFilter, sort) {
+        if (!initialized) { initialized = true; return@LaunchedEffect }
+        changing = true
+        val direction = if (selectedDay < shown.day) -1 else 1
+        opacity.animateTo(0f, tween(120))
+        // Keep the old rows while resetting scroll so a shorter day cannot clamp the viewport.
+        coroutineScope {
+            launch { outer.animateScrollToItem(3) }
+            launch {
+                // An empty day has no inner LazyColumn: never wait for a layout that does not exist.
+                if (filterHomeBills(shown.bills, shown.day, shownType, shownSort).isNotEmpty()) inner.animateScrollToItem(0)
+            }
+        }
+        shown = snapshotFlow { latest }.first { it.loaded && it.day == selectedDay }
+        shownType = typeFilter; shownSort = sort
+        slide.snapTo(direction * 24f)
+        coroutineScope {
+            launch { opacity.animateTo(1f, tween(240)) }
+            launch { slide.animateTo(0f, tween(280)) }
+        }
+        if (latest.loaded && latest.day == selectedDay) shown = latest
+        changing = false
+    }
+    val filtered = remember(shown, shownType, shownSort) { filterHomeBills(shown.bills, shown.day, shownType, shownSort) }
+    val collapseHeader = remember(outer) { object : NestedScrollConnection {
+        override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+            return if (available.y < 0 && outer.canScrollForward) Offset(0f, -outer.dispatchRawDelta(-available.y)) else Offset.Zero
+        }
+    } }
+    CompositionLocalProvider(LocalOverscrollConfiguration provides null) {
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+    val viewport = maxHeight
     LazyColumn(
-        state = listState,
-        modifier = Modifier.fillMaxSize().daySwipe(selectedDay, { onSelectDay(shiftLocalDay(selectedDay, -1)) }, { onSelectDay(shiftLocalDay(selectedDay, 1)) }),
-        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 24.dp)
+        state = outer,
+        modifier = Modifier.fillMaxSize().testTag("home-outer").daySwipe(selectedDay,
+            { onSelectDay(shiftLocalDay(selectedDay, -1)) }, { onSelectDay(shiftLocalDay(selectedDay, 1)) }),
+        contentPadding = PaddingValues(start = 20.dp, end = 20.dp)
     ) {
         item(key = "announcements") { com.jiligulu.app.ui.announcement.AnnouncementBoard(announcements, onOpenAnnouncement) }
         item(key = "monthly_summary") { MonthlySummary(state) }
@@ -143,41 +199,47 @@ private fun HomeContent(
                 }
             }
         }
-        item(key = "ledger_heading") {
-            Column(Modifier.fillMaxWidth().padding(top = 20.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("每日账单", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
-                    CompactChoice(listOf("全部收支", "只看支出", "只看收入"), typeFilter) { typeFilter = it }
-                    CompactChoice(listOf("时间↓", "时间↑", "金额↓", "金额↑"), sort) { sort = it }
+        item(key = "ledger_page") {
+            Column(Modifier.fillMaxWidth().height(viewport).nestedScroll(collapseHeader)) {
+                Column(Modifier.fillMaxWidth().testTag("home-ledger-heading").padding(top = 16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("每日账单", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+                        CompactChoice(listOf("全部收支", "只看支出", "只看收入"), typeFilter) { typeFilter = it }
+                        CompactChoice(listOf("时间↓", "时间↑", "金额↓", "金额↑"), sort) { sort = it }
+                    }
+                    DayBrowser(selectedDay, onSelectDay)
+                    Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("支出 ¥${Formatters.fenToYuanText(shown.bills.filter { it.isExpense }.sumOf { it.entity.amountFen })}", color = ExpenseCoral, style = MaterialTheme.typography.labelMedium)
+                        Text("收入 ¥${Formatters.fenToYuanText(shown.bills.filter { !it.isExpense }.sumOf { it.entity.amountFen })}", color = IncomeGreen, style = MaterialTheme.typography.labelMedium)
+                        Text("${filtered.size} 笔", style = MaterialTheme.typography.labelMedium)
+                    }
                 }
-                DayBrowser(selectedDay, onSelectDay)
-                Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("支出 ¥${Formatters.fenToYuanText(dailyBills.filter { it.isExpense && Formatters.dayStart(it.entity.timestamp) == selectedDay }.sumOf { it.entity.amountFen })}", color = ExpenseCoral, style = MaterialTheme.typography.labelMedium)
-                    Text("收入 ¥${Formatters.fenToYuanText(dailyBills.filter { !it.isExpense && Formatters.dayStart(it.entity.timestamp) == selectedDay }.sumOf { it.entity.amountFen })}", color = IncomeGreen, style = MaterialTheme.typography.labelMedium)
-                    Text("${filtered.size} 笔", style = MaterialTheme.typography.labelMedium)
+                Box(Modifier.fillMaxWidth().weight(1f).testTag(if (changing) "home-transitioning" else "home-ready").clip(MaterialTheme.shapes.large)
+                    .graphicsLayer { alpha = opacity.value; translationX = slide.value * density }) {
+                    if (filtered.isEmpty()) {
+                        Column(Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center) {
+                            Text("♡", style = MaterialTheme.typography.headlineLarge, color = MaterialTheme.colorScheme.primary)
+                            Spacer(Modifier.height(12.dp))
+                            Text(if (shown.loaded) "这一天还没有符合筛选的账单" else "阿噜正在翻开账本…", style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center)
+                            Spacer(Modifier.height(8.dp))
+                            Text("左右滑动换一天，生活慢慢记就好。", style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
+                        }
+                    } else LazyColumn(Modifier.fillMaxSize().testTag("home-day-bills"), state = inner, userScrollEnabled = !changing) {
+                        itemsIndexed(filtered, key = { _, bill -> bill.id }) { index, bill ->
+                            val shape = RoundedCornerShape(topStart = if (index == 0) 16.dp else 0.dp, topEnd = if (index == 0) 16.dp else 0.dp,
+                                bottomStart = if (index == filtered.lastIndex) 16.dp else 0.dp, bottomEnd = if (index == filtered.lastIndex) 16.dp else 0.dp)
+                            LedgerBillRow(icon = bill.icon, colorHue = bill.colorHue, title = bill.title, categoryName = bill.categoryName,
+                                subtitle = bill.subtitle, amountText = bill.amountText, isExpense = bill.isExpense,
+                                onClick = { if (!changing) onBillClick(bill.id) }, modifier = Modifier.clip(shape), showDivider = index < filtered.lastIndex)
+                        }
+                    }
                 }
             }
         }
-        if (filtered.isEmpty()) {
-            item(key = "empty_day") {
-                LedgerCard { Text("这一天还没有符合筛选的账单 ♡", style = MaterialTheme.typography.bodyMedium)
-                    Text("左右滑动换一天，也可以点日期直接跳转。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-            }
-        } else itemsIndexed(filtered, key = { _, bill -> bill.id }) { index, bill ->
-            val shape = RoundedCornerShape(
-                topStart = if (index == 0) 16.dp else 0.dp, topEnd = if (index == 0) 16.dp else 0.dp,
-                bottomStart = if (index == filtered.lastIndex) 16.dp else 0.dp, bottomEnd = if (index == filtered.lastIndex) 16.dp else 0.dp)
-            LedgerBillRow(icon = bill.icon, colorHue = bill.colorHue, title = bill.title, categoryName = bill.categoryName,
-                subtitle = bill.subtitle, amountText = bill.amountText, isExpense = bill.isExpense,
-                onClick = { onBillClick(bill.id) }, modifier = Modifier.animateItem().clip(shape), showDivider = index < filtered.lastIndex)
-        }
-        item(key = "ledger_end") {
-            Text("每一笔，都算数。♡",
-                modifier = Modifier.fillMaxWidth().padding(top = 20.dp, bottom = 4.dp),
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center)
-        }
+    }
+    }
     }
 }
 

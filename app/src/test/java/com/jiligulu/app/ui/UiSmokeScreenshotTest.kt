@@ -6,9 +6,12 @@ import androidx.activity.compose.setContent
 import android.os.Handler
 import android.os.Looper
 import android.view.PixelCopy
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.swipeRight
+import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -163,7 +166,7 @@ class UiSmokeScreenshotTest {
 
             compose.onNodeWithText("统计").performClick()
             awaitText("收支统计")
-            compose.onNode(hasScrollToIndexAction()).performScrollToIndex(3)
+            compose.onAllNodes(hasScrollToIndexAction()).onFirst().performScrollToIndex(3)
             awaitText("吃饭", substring = true)
             compose.onAllNodesWithText("吃饭", substring = true).onFirst().performClick()
             awaitText("牛肉面")
@@ -186,7 +189,7 @@ class UiSmokeScreenshotTest {
             compose.onNodeWithText("阿噜使用手册 ♡").assertDoesNotExist()
             compose.onNodeWithContentDescription("返回").performClick()
             compose.onNodeWithText("账本").performClick()
-            compose.onNode(hasScrollToIndexAction()).performScrollToIndex(0)
+            compose.onAllNodes(hasScrollToIndexAction()).onFirst().performScrollToIndex(0)
 
             runBlocking {
                 app.container.userPrefs.setThemeMode(UserPrefs.THEME_DARK)
@@ -638,11 +641,68 @@ class UiSmokeScreenshotTest {
                 compose.onNodeWithText("午餐验收").assertDoesNotExist()
                 compose.runOnIdle { activity.setContent { GuluTheme { com.jiligulu.app.ui.stats.StatsScreen(stats) } } }
                 awaitText("每日收支")
-                compose.onNode(hasScrollToIndexAction()).performScrollToIndex(3)
+                compose.onAllNodes(hasScrollToIndexAction()).onFirst().performScrollToIndex(3)
                 awaitText("吃饭", substring = true)
                 compose.runOnIdle { stats.toggleCategory(food) }
                 awaitText("午餐验收")
                 capture("statistics-inline-drawer")
+                compose.runOnIdle { activity.setContent {} }
+            }
+        } finally { store.clear() }
+    }
+
+    @Test(timeout = 90_000)
+    fun dayChangesFromLongToShortAndEmptyKeepTheLedgerAnchor() {
+        val app = RuntimeEnvironment.getApplication() as JiliguluApp
+        val c = app.container
+        val today = com.jiligulu.app.core.util.Formatters.dayStart(System.currentTimeMillis())
+        runBlocking {
+            c.userPrefs.setNickname("路陌"); c.userPrefs.setWaterEnabled(false)
+            c.userPrefs.setThemeMode(UserPrefs.THEME_LIGHT); c.userPrefs.setUpdateRepository("")
+            c.userPrefs.setAnnouncementSource(""); c.announcements.initialize()
+            val food = c.categoryRepository.getAll().first { it.name == "吃饭" }.id
+            repeat(35) { i -> c.billRepository.addManual(900, BillType.EXPENSE, food, "今天-$i", "", today + (i + 1) * 60000L) }
+            c.billRepository.addManual(1200, BillType.EXPENSE, food, "昨天唯一账单", "", com.jiligulu.app.ui.components.shiftLocalDay(today, -1) + 3600000L)
+        }
+        val store = ViewModelStore()
+        val home = com.jiligulu.app.ui.home.HomeViewModel(c.billRepository, c.categoryRepository)
+        val stats = com.jiligulu.app.ui.stats.StatsViewModel(c.billRepository, c.categoryRepository, c.budgetRepository)
+        store.put("home-preview", home); store.put("stats-preview", stats)
+        try {
+            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                scenario.onActivity { activity = it; it.setContent { GuluTheme { com.jiligulu.app.ui.home.HomeScreen({}, {}, home) } } }
+                awaitText("今天-34")
+                compose.onNodeWithTag("home-outer").performScrollToIndex(3)
+                compose.onNodeWithTag("home-day-bills").performScrollToIndex(34)
+                compose.onNodeWithTag("home-outer").performTouchInput { swipeRight() }
+                awaitText("昨天唯一账单"); awaitTag("home-ready")
+                val outerTop = compose.onNodeWithTag("home-outer").fetchSemanticsNode().boundsInRoot.top
+                assertEquals(outerTop, compose.onNodeWithTag("home-ledger-heading").fetchSemanticsNode().boundsInRoot.top, 2f)
+                val shortRange = compose.onNodeWithTag("home-day-bills").fetchSemanticsNode().config[androidx.compose.ui.semantics.SemanticsProperties.VerticalScrollAxisRange]
+                assertEquals(0f, shortRange.maxValue(), .1f)
+                capture("home-short-day-stable")
+                compose.onNodeWithContentDescription("前一天").performClick()
+                awaitText("这一天还没有符合筛选的账单"); awaitTag("home-ready")
+                compose.onNodeWithTag("home-day-bills").assertDoesNotExist()
+                compose.onNodeWithTag("home-ready").performTouchInput { swipeUp() }
+                assertEquals(outerTop, compose.onNodeWithTag("home-ledger-heading").fetchSemanticsNode().boundsInRoot.top, 2f)
+                capture("home-empty-day-stable")
+                // Use the accessibility action after the synthetic fling: its event clock is independent of Robolectric's window clock.
+                compose.onNodeWithText("今天").performSemanticsAction(SemanticsActions.OnClick) { it() }
+                awaitText("今天-34"); awaitTag("home-ready")
+                compose.onNodeWithText("时间↓").performSemanticsAction(SemanticsActions.OnClick) { it() }
+                awaitText("排个顺眼的队 ♡")
+                compose.runOnIdle { activity.setContent { GuluTheme { com.jiligulu.app.ui.stats.StatsScreen(stats) } } }
+                awaitText("每日收支")
+                compose.onAllNodes(hasScrollToIndexAction()).onFirst().performScrollToIndex(3)
+                awaitTag("daily-donut")
+                val ringBounds = compose.onNodeWithTag("daily-donut").getUnclippedBoundsInRoot()
+                compose.runOnIdle { stats.setFlowType(BillType.INCOME) }
+                awaitText("暂无收入")
+                val emptyRingBounds = compose.onNodeWithTag("daily-donut").getUnclippedBoundsInRoot()
+                assertEquals(ringBounds.bottom - ringBounds.top, emptyRingBounds.bottom - emptyRingBounds.top)
+                assertEquals(ringBounds.right - ringBounds.left, emptyRingBounds.right - emptyRingBounds.left)
+                capture("statistics-empty-ring")
                 compose.runOnIdle { activity.setContent {} }
             }
         } finally { store.clear() }
@@ -690,10 +750,8 @@ class UiSmokeScreenshotTest {
     }
 
     private fun openSampleBill() {
-        // Both screens place this seeded ledger in section 4. A single bounded scroll followed
-        // by an idle wait lets StandardTestDispatcher finish it; Compose 1.7's search-and-scroll
-        // loop assumes an unconfined continuation and can spin without advancing queued work.
-        compose.onNode(hasScrollToIndexAction()).performScrollToIndex(4)
+        compose.onNodeWithTag("home-outer").performScrollToIndex(3)
+        compose.onNodeWithTag("home-day-bills").performScrollToIndex(0)
         awaitText("牛肉面")
         compose.onAllNodesWithText("牛肉面").onFirst().performClick()
     }

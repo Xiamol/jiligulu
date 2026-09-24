@@ -16,6 +16,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -52,6 +53,8 @@ data class HomeUiState(
     val days: List<DayGroupUi> = emptyList()
 )
 
+data class DailyLedgerSnapshot(val day: Long, val bills: List<BillUi> = emptyList(), val loaded: Boolean = false)
+
 internal fun filterHomeBills(bills: List<BillUi>, day: Long, type: Int, sort: Int): List<BillUi> =
     bills.filter { Formatters.dayStart(it.entity.timestamp) == day && (type == 0 || it.isExpense == (type == 1)) }
         .sortedWith(when (sort) {
@@ -71,12 +74,15 @@ class HomeViewModel(
     fun selectDay(day: Long) { _selectedDay.value = Formatters.dayStart(day).coerceAtMost(Formatters.dayStart(System.currentTimeMillis())) }
     fun showToday() = selectDay(System.currentTimeMillis())
     @OptIn(ExperimentalCoroutinesApi::class)
-    val dailyBills: StateFlow<List<BillUi>> = _selectedDay.flatMapLatest { day ->
+    val dailyLedger: StateFlow<DailyLedgerSnapshot> = _selectedDay.flatMapLatest { day ->
         billRepository.observeBetween(day, com.jiligulu.app.ui.components.shiftLocalDay(day, 1))
-    }.combine(categoryRepository.categories) { bills, categories ->
-        val map = categories.associateBy { it.id }
-        bills.map { it.toUi(map[it.categoryId]) }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+            .combine(categoryRepository.categories) { bills, categories ->
+                val map = categories.associateBy { it.id }
+                DailyLedgerSnapshot(day, bills.map { it.toUi(map[it.categoryId]) }, true)
+            }.onStart { emit(DailyLedgerSnapshot(day)) }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), DailyLedgerSnapshot(_selectedDay.value))
+    val dailyBills: StateFlow<List<BillUi>> = dailyLedger.map { it.bills }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val uiState: StateFlow<HomeUiState> =
         combine(

@@ -1,6 +1,13 @@
 package com.jiligulu.app.ui.components
 
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.outlined.Tune
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
@@ -55,11 +62,34 @@ fun DayBrowser(day: Long, onSelect: (Long) -> Unit, latest: Long = Formatters.da
 @Composable
 fun CompactChoice(options: List<String>, selected: Int, onSelect: (Int) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
-    Box {
-        TextButton(onClick = { expanded = true }) { Text(options[selected] + " ▾", style = MaterialTheme.typography.labelMedium) }
-        DropdownMenu(expanded, onDismissRequest = { expanded = false }) {
-            options.forEachIndexed { index, label -> DropdownMenuItem(text = { Text((if (index == selected) "✓ " else "") + when (label) { "时间↓" -> "时间：最新在前"; "时间↑" -> "时间：最早在前"; "金额↓" -> "金额：从高到低"; "金额↑" -> "金额：从低到高"; else -> label }) },
-                onClick = { onSelect(index); expanded = false }) }
+    val sorting = options.firstOrNull()?.startsWith("时间") == true
+    Box(Modifier.padding(start = 5.dp)) {
+        Surface(onClick = { expanded = true }, shape = RoundedCornerShape(50),
+            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = .4f),
+            border = BorderStroke(.7.dp, MaterialTheme.colorScheme.primary.copy(alpha = .12f))) {
+            Row(Modifier.padding(horizontal = 9.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                if (sorting) Icon(Icons.Outlined.Tune, null, Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
+                Text(options[selected], style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                Icon(Icons.Default.ExpandMore, null, Modifier.size(15.dp), tint = MaterialTheme.colorScheme.primary)
+            }
+        }
+        DropdownMenu(expanded, onDismissRequest = { expanded = false }, shape = RoundedCornerShape(22.dp),
+            containerColor = MaterialTheme.colorScheme.surface) {
+            Text(if (sorting) "排个顺眼的队 ♡" else "翻翻哪一边的小账本？", Modifier.padding(horizontal = 16.dp, vertical = 9.dp),
+                style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            options.forEachIndexed { index, label ->
+                DropdownMenuItem(
+                    modifier = Modifier.padding(horizontal = 6.dp).background(
+                        if (index == selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = .55f) else androidx.compose.ui.graphics.Color.Transparent,
+                        RoundedCornerShape(14.dp)),
+                    text = { Text(when (label) { "时间↓" -> "最新在前"; "时间↑" -> "最早在前"; "金额↓" -> "金额从高到低"; "金额↑" -> "金额从低到高"; else -> label }, style = MaterialTheme.typography.bodyMedium) },
+                    leadingIcon = { Box(Modifier.size(28.dp).background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = .4f), CircleShape), contentAlignment = Alignment.Center) {
+                        Text(if (sorting) { if (index < 2) "◷" else "¥" } else listOf("♡", "−", "+")[index], color = MaterialTheme.colorScheme.primary)
+                    } },
+                    trailingIcon = { if (index == selected) Icon(Icons.Default.Check, "已选中", Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary) },
+                    onClick = { onSelect(index); expanded = false })
+            }
         }
     }
 }

@@ -3,6 +3,8 @@ package com.jiligulu.app.ui.stats.charts
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
@@ -63,6 +65,7 @@ fun DonutChart(
     animateOnDataChange: Boolean = true,
     centerContent: (@Composable () -> Unit)? = null
 ) {
+    val emptyOutline = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .65f)
     // 1) 弧度预计算：slices 引用不变 → 不重算（ViewModel 保证切片列表 stateIn 缓存）
     val arcs = remember(slices, gapDeg) {
         val total = slices.sumOf { it.valueFen }.coerceAtLeast(1L)
@@ -132,6 +135,10 @@ fun DonutChart(
                 (size.width - arcSize.width) / 2f,
                 (size.height - arcSize.height) / 2f
             )
+            if (arcs.isEmpty()) {
+                drawArc(emptyOutline, 0f, 360f, false, topLeft, arcSize, style = Stroke(width = thickness + 2.dp.toPx()))
+                drawArc(Color.White, 0f, 360f, false, topLeft, arcSize, style = Stroke(width = thickness))
+            }
             val p = progress.value
             arcs.forEach { arc ->
                 val boost = if (arc.key == selectedKey) selectedBoost else 1f
