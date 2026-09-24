@@ -27,7 +27,9 @@ data class DraftUi(
     val timeNeedsReview: Boolean = false,
     val timeHint: String = "未提及时间，确认入账时记录此刻"
 ) {
-    val isValid: Boolean get() = Formatters.yuanTextToFen(amountText) != null && !timeNeedsReview
+    /** A visible suggested timestamp can be accepted by confirming the whole draft. */
+    val requiresTimeInput: Boolean get() = timeNeedsReview && timestamp == null
+    val isValid: Boolean get() = Formatters.yuanTextToFen(amountText) != null && !requiresTimeInput
 }
 
 object BillTypeSerializer : KSerializer<BillType> {

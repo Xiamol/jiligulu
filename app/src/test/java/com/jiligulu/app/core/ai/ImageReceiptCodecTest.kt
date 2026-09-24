@@ -39,4 +39,23 @@ class ImageReceiptCodecTest {
     @Test fun invalidSideCannotSilentlyBecomeExpense() {
         assertTrue(runCatching { render(card("unknown", "已收款")) }.isFailure)
     }
+    @Test fun transferClassificationIsNotInOcrTextAndIsCreatedOnlyWhenMissing() {
+        val text = render(card("left", "已被接收") + "," + card("right", "已收款"))
+        assertFalse(text.contains("分类"))
+        val parsed = ImageReceiptCodec.parseText(text)
+        val fresh = ImageReceiptCodec.classify(parsed, emptyList()).bills.single()
+        assertEquals("转账", fresh.category)
+        assertTrue(fresh.isNewCategory)
+        val existing = com.jiligulu.app.data.local.entity.CategoryEntity(id = 5, name = "转账", colorHue = 30f, colorIndex = 1)
+        assertFalse(ImageReceiptCodec.classify(parsed, listOf(existing)).bills.single().isNewCategory)
+        val legacy = text.replace("；已收款", "；分类其他；已收款")
+        assertEquals("转账", ImageReceiptCodec.parseText(legacy).bills.single().category)
+    }
+    @Test fun orderCategoryUsesCurrentLedgerKeywordsAndMainItem() {
+        val text = render("""{"kind":"order","amount":"17.85","status":"待支付","detail":"炸鸡套餐+可乐","category":"其他"}""")
+        val food = com.jiligulu.app.data.local.entity.CategoryEntity(name = "吃饭", keywords = "餐", colorHue = 30f, colorIndex = 1)
+        val drink = com.jiligulu.app.data.local.entity.CategoryEntity(name = "饮品", keywords = "可乐", colorHue = 60f, colorIndex = 2)
+        assertEquals("吃饭", ImageReceiptCodec.classify(ImageReceiptCodec.parseText(text), listOf(food, drink)).bills.single().category)
+        assertFalse(text.contains("分类其他"))
+    }
 }

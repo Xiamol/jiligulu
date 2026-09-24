@@ -416,7 +416,12 @@ class ChatViewModel(
         val confirmedAt = System.currentTimeMillis()
         val generation = history.conversationGeneration.value
         val finalCard = card.copy(drafts = card.drafts.map {
-            if (it.checked && it.timestamp == null) it.copy(timestamp = confirmedAt, timeHint = "按确认入账的时间记录") else it
+            when {
+                !it.checked -> it
+                it.timestamp == null -> it.copy(timestamp = confirmedAt, timeHint = "按确认入账的时间记录")
+                it.timeNeedsReview -> it.copy(timeNeedsReview = false, timeHint = "已确认草稿显示的日期和时间")
+                else -> it
+            }
         })
         _error.value = null
         viewModelScope.launch {

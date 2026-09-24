@@ -139,7 +139,10 @@ class AiRepository(
      * [parseRaw] 保留「未经动作分派」的结果，供降级路径（本地规则）复用。
      */
     suspend fun parse(input: String, requestMillis: Long, zone: ZoneId): Result<AiParseResult> {
-        if (com.jiligulu.app.core.ai.ImageReceiptCodec.isImageText(input)) return runCatching { com.jiligulu.app.core.ai.ImageReceiptCodec.parseText(input) }
+        if (com.jiligulu.app.core.ai.ImageReceiptCodec.isImageText(input)) return runCatching {
+            com.jiligulu.app.core.ai.ImageReceiptCodec.classify(
+                com.jiligulu.app.core.ai.ImageReceiptCodec.parseText(input), categoryRepository.getAll())
+        }
         val categories = categoryRepository.getAll()
         val pending = PromptRenderer.pendingOf(chatHistoryRepository.latestPending())
         val chatContext = buildContext(categories, requestMillis, zone)
@@ -483,6 +486,7 @@ class AiRepository(
         chatHistoryRepository.confirmDraftAtomically(cardId, finalPayload) {
             val selected = items.filter { it.checked }
             require(selected.isNotEmpty()) { "请至少选择一条账单" }
+            require(selected.none { it.timeNeedsReview && it.timestamp == null }) { "请填写缺失的账单时间" }
             val valid = selected.map { item ->
                 item to requireNotNull(Formatters.yuanTextToFen(item.amountText)) { "请填写有效的金额" }
             }

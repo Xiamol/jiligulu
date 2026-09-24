@@ -31,4 +31,12 @@ class DraftHistoryCodecTest {
         assertFalse(DraftUi(amountText = "9", timeNeedsReview = true).isValid)
         assertTrue(DraftUi(amountText = "9", timestamp = null).isValid)
     }
+    @Test fun visibleSuggestedTimeCanBeAcceptedWithoutOpeningPicker() {
+        val draft = DraftUi(amountText = "9", timestamp = 1790000000000L, timeNeedsReview = true)
+        assertTrue(draft.isValid)
+        assertFalse(draft.requiresTimeInput)
+        assertTrue(DraftHistoryCodec.decode(DraftHistoryCodec.encode(listOf(draft))).single().isValid)
+        assertFalse(draft.copy(timestamp = null).isValid)
+        assertFalse(draft.copy(amountText = "0").isValid)
+    }
 }

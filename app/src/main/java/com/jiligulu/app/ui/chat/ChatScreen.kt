@@ -487,11 +487,11 @@ internal fun DraftCardView(
                                 timeHint = if (timestamp == null) "确认入账时记录此刻" else "已手动调整时间") }
                         },
                         enabled = editing,
-                        allowCurrentTime = !draft.timeNeedsReview,
-                        label = if (draft.timeNeedsReview) "请先选择账单时间" else "账单时间"
+                        allowCurrentTime = !draft.requiresTimeInput,
+                        label = if (draft.requiresTimeInput) "请先选择账单时间" else "账单时间"
                     )
-                    Text(draft.timeHint, style = MaterialTheme.typography.labelSmall,
-                        color = if (draft.timeNeedsReview) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(if (draft.timeNeedsReview && !draft.requiresTimeInput) draft.timeHint + "；确认入账即接受此时间" else draft.timeHint, style = MaterialTheme.typography.labelSmall,
+                        color = if (draft.requiresTimeInput) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(Modifier.height(6.dp))
                     // 分类选择：现有分类 + AI 建议的新分类
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
