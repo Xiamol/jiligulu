@@ -26,6 +26,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -616,38 +617,46 @@ class UiSmokeScreenshotTest {
     }
 
     @Test(timeout = 75_000)
-    fun dailyHomeAndInlineCategoryDrawerRender() {
-        val app = RuntimeEnvironment.getApplication() as JiliguluApp
-        val c = app.container
+    fun compactStatisticsSelectsThenOpensCategoryDialog() {
+        val c = (RuntimeEnvironment.getApplication() as JiliguluApp).container
         val today = com.jiligulu.app.core.util.Formatters.dayStart(System.currentTimeMillis())
-        var food = 0L
         runBlocking {
-            c.userPrefs.setNickname("路陌"); c.userPrefs.setWaterEnabled(false)
-            c.userPrefs.setThemeMode(UserPrefs.THEME_LIGHT); c.userPrefs.setUpdateRepository("")
+            c.userPrefs.setWaterEnabled(false)
+            c.userPrefs.setThemeMode(UserPrefs.THEME_LIGHT)
+            c.userPrefs.setUpdateRepository("")
             c.userPrefs.setAnnouncementSource(""); c.announcements.initialize()
-            food = c.categoryRepository.getAll().first { it.name == "吃饭" }.id
-            c.billRepository.addManual(900, BillType.EXPENSE, food, "午餐验收", "", today + 12 * 3600000L)
-            c.billRepository.addManual(1200, BillType.EXPENSE, food, "昨天晚餐", "", com.jiligulu.app.ui.components.shiftLocalDay(today, -1) + 18 * 3600000L)
+            listOf("交通", "零食", "购物", "住房", "宠物", "数码", "学习", "生活服务").forEach {
+                c.categoryRepository.createCategory(it)
+            }
+            c.budgetRepository.setBudget(100000, com.jiligulu.app.data.local.entity.BudgetPeriod.MONTHLY, 1)
+            val categories = c.categoryRepository.getAll()
+            val food = categories.first { it.name == "吃饭" }
+            c.billRepository.addManual(9000, BillType.EXPENSE, food.id, "午餐验收", "", today + 12 * 3600000L)
+            categories.filter { it.id != food.id }.take(8).forEachIndexed { i, category ->
+                c.billRepository.addManual(100L + i * 100L, BillType.EXPENSE, category.id, "其他验收$i", "", today + 13 * 3600000L)
+            }
         }
         val store = ViewModelStore()
-        val home = com.jiligulu.app.ui.home.HomeViewModel(c.billRepository, c.categoryRepository)
         val stats = com.jiligulu.app.ui.stats.StatsViewModel(c.billRepository, c.categoryRepository, c.budgetRepository)
-        store.put("home-preview", home); store.put("stats-preview", stats)
+        store.put("stats-preview", stats)
+        val active = androidx.compose.runtime.mutableStateOf(true)
         try {
             ActivityScenario.launch(MainActivity::class.java).use { scenario ->
-                scenario.onActivity { activity = it; it.setContent { GuluTheme { com.jiligulu.app.ui.home.HomeScreen({}, {}, home) } } }
-                awaitText("午餐验收")
-                capture("home-daily-browser")
-                compose.onNodeWithContentDescription("前一天").performClick()
-                awaitText("昨天晚餐")
-                compose.onNodeWithText("午餐验收").assertDoesNotExist()
-                compose.runOnIdle { activity.setContent { GuluTheme { com.jiligulu.app.ui.stats.StatsScreen(stats) } } }
+                scenario.onActivity { activity = it; it.setContent { GuluTheme { com.jiligulu.app.ui.stats.StatsScreen(stats, active.value) } } }
                 awaitText("每日收支")
-                compose.onAllNodes(hasScrollToIndexAction()).onFirst().performScrollToIndex(3)
-                awaitText("吃饭", substring = true)
-                compose.runOnIdle { stats.toggleCategory(food) }
+                awaitText("吃饭")
+                compose.waitUntil(8000) { shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(16)); stats.dayDonut.value.slices.size == 7 }
+                compose.waitUntil(8000) { shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(16)); stats.budgetUi.value.visible }
+                capture("statistics-compact")
+                compose.onNodeWithText("吃饭").performClick()
+                awaitText("再点一次选中分类，看看小账单 ♡")
+                compose.onNodeWithText("午餐验收").assertDoesNotExist()
+                compose.onAllNodesWithText("吃饭").onLast().performClick()
                 awaitText("午餐验收")
-                capture("statistics-inline-drawer")
+                capture("statistics-category-dialog", dialog = true)
+                compose.onNodeWithText("关闭").performClick()
+                compose.runOnIdle { active.value = false }
+                awaitText("轻点分类看占比 · 左右滑动换一天")
                 compose.runOnIdle { activity.setContent {} }
             }
         } finally { store.clear() }

@@ -101,7 +101,7 @@ fun MainScreen(
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
-                    GuluCompanionHeader(
+                    if (selectedTab == 0) GuluCompanionHeader(
                         message = message,
                         onRefresh = personaVm::onMascotClick,
                         onWaterClick = personaVm::startDrinking
@@ -143,7 +143,7 @@ fun MainScreen(
                 pageState.SaveableStateProvider(page) {
                     when (page) {
                         0 -> HomeScreen(onOpenChat = onOpenChat, onAddBill = onAddBill, vm = homeVm, active = selectedTab == 0)
-                        1 -> StatsScreen()
+                        1 -> StatsScreen(active = selectedTab == 1)
                     }
                 }
                 }

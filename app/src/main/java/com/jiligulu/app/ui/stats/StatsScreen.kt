@@ -1,21 +1,32 @@
 package com.jiligulu.app.ui.stats
 
 
+import androidx.compose.material3.Surface
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.outlined.Restaurant
+import androidx.compose.material.icons.outlined.DirectionsBus
+import androidx.compose.material.icons.outlined.LocalCafe
+import androidx.compose.material.icons.outlined.Cookie
+import androidx.compose.material.icons.outlined.Category
+import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.Devices
+import androidx.compose.material.icons.outlined.Pets
+import androidx.compose.material.icons.outlined.ShoppingBag
+import androidx.compose.material.icons.outlined.School
+import androidx.compose.material.icons.outlined.WorkOutline
+import androidx.compose.material.icons.outlined.CardGiftcard
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import com.jiligulu.app.ui.components.LedgerScrollBar
 import androidx.compose.foundation.lazy.rememberLazyListState
-import com.jiligulu.app.ui.components.DayBrowser
 import com.jiligulu.app.ui.components.CompactChoice
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.relocation.BringIntoViewRequester
-import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -35,14 +46,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.outlined.CalendarMonth
+import androidx.compose.material.icons.Icons
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.DatePicker
@@ -52,7 +60,6 @@ import androidx.compose.material3.SelectableDates
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -91,14 +98,13 @@ import java.time.YearMonth
 import java.time.ZoneId
 import java.time.ZoneOffset
 
-/** 统计内容只负责账本展示，常驻桌宠由主框架统一承载。 */
+/** 紧凑统计：共享日期与收支筛选，分类二次点击打开明细。 */
 @OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun StatsScreen(
-    vm: StatsViewModel = viewModel(factory = StatsViewModel.Factory)
+    vm: StatsViewModel = viewModel(factory = StatsViewModel.Factory),
+    active: Boolean = true
 ) {
-    val monthLabel by vm.monthLabel.collectAsStateWithLifecycle()
-    val monthOffset by vm.monthOffset.collectAsStateWithLifecycle()
     val flowType by vm.flowType.collectAsStateWithLifecycle()
     val bars by vm.cashFlowBars.collectAsStateWithLifecycle()
     val selectedDay by vm.selectedDay.collectAsStateWithLifecycle()
@@ -111,6 +117,17 @@ fun StatsScreen(
     var selectedBillId by rememberSaveable { mutableStateOf<Long?>(null) }
     var showDateFilter by rememberSaveable { mutableStateOf(false) }
 
+    var showCategoryDetails by remember { mutableStateOf(false) }
+    LaunchedEffect(active) {
+        vm.toggleCategory(null)
+        showCategoryDetails = false
+    }
+    LaunchedEffect(selectedDay, flowType) { showCategoryDetails = false }
+    val selectCategory: (Any?) -> Unit = { key ->
+        val id = key as? Long
+        if (id != null && id == dayDonut.selectedCategoryId) showCategoryDetails = true
+        else { showCategoryDetails = false; vm.toggleCategory(id) }
+    }
     val scroll = rememberLazyListState()
     Box(Modifier.fillMaxSize()) {
     LazyColumn(
@@ -119,41 +136,25 @@ fun StatsScreen(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background),
         contentPadding = PaddingValues(start = 20.dp, top = 12.dp, end = 20.dp, bottom = 28.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        item(key = "title") {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("收支统计", style = MaterialTheme.typography.headlineSmall)
-                Text(
-                    "每一笔生活，都有迹可循。",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-
-        item(key = "month") {
-            LedgerCard {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    IconButton(onClick = { vm.prevMonth() }) {
-                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "查看上个月")
-                    }
-                    Column(
-                        modifier = Modifier.weight(1f),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Text(monthLabel, style = MaterialTheme.typography.titleMedium)
-                        Text(
-                            if (monthOffset == 0) "本月账本" else "往月账本",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    IconButton(onClick = { vm.nextMonth() }, enabled = monthOffset < 0) {
-                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "查看下个月")
+        item(key = "filters") {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Surface(Modifier.weight(1f).clickable { showDateFilter = true },
+                    shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surface) {
+                    val date = Instant.ofEpochMilli(selectedDay).atZone(ZoneId.systemDefault()).toLocalDate()
+                    Text("${date.year}/${date.monthValue}/${date.dayOfMonth} ⌄", Modifier.padding(12.dp),
+                        color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
+                }
+                Row(Modifier.background(MaterialTheme.colorScheme.surface, RoundedCornerShape(24.dp)).padding(3.dp)) {
+                    listOf(BillType.EXPENSE to "支出", BillType.INCOME to "收入").forEach { (type, label) ->
+                        Surface(onClick = { vm.setFlowType(type) }, shape = RoundedCornerShape(24.dp),
+                            color = if (flowType == type) MaterialTheme.colorScheme.primaryContainer else Color.Transparent) {
+                            Text(label, Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                                style = MaterialTheme.typography.labelLarge,
+                                color = if (flowType == type) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
                     }
                 }
             }
@@ -161,22 +162,9 @@ fun StatsScreen(
 
         // ---------- 收支长河 ----------
         item(key = "cash_flow") {
-            ChartCard(title = "每日收支", subtitle = "一日一格，记下生活的小脚印 ♡", action = {
-                TextButton(onClick = { showDateFilter = true }) { Icon(Icons.Outlined.CalendarMonth, null, Modifier.size(18.dp)); Spacer(Modifier.width(4.dp)); Text("选日期") }
+            ChartCard(title = "每日收支", action = {
+                Text("单位：元", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(
-                        selected = flowType == BillType.EXPENSE,
-                        onClick = { vm.setFlowType(BillType.EXPENSE) },
-                        label = { Text("支出", style = MaterialTheme.typography.labelMedium) }
-                    )
-                    FilterChip(
-                        selected = flowType == BillType.INCOME,
-                        onClick = { vm.setFlowType(BillType.INCOME) },
-                        label = { Text("收入", style = MaterialTheme.typography.labelMedium) }
-                    )
-                }
-                Spacer(Modifier.height(12.dp))
                 CashFlowBarChart(
                     bars = bars,
                     selectedDayMillis = selectedDay,
@@ -185,123 +173,109 @@ fun StatsScreen(
                     trackColor = MaterialTheme.colorScheme.outlineVariant,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(250.dp)
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    "左右滑一滑，轻点柱子看看当天的小账单。",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                        .height(202.dp)
                 )
             }
         }
 
         // ---------- 当日分类 ----------
         item(key = "day_categories") {
-            ChartCard(title = if (flowType == BillType.EXPENSE) "支出分布" else "收入分布", subtitle = "左右滑动换一天 · 点分类展开账单") {
-                DayBrowser(selectedDay, vm::selectCalendarDate,
-                    latest = YearMonth.now().atEndOfMonth().atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli())
+            ChartCard(title = if (flowType == BillType.EXPENSE) "支出分布" else "收入分布") {
                 val pageData = dayDonut
-                Column(Modifier.fillMaxWidth().testTag("statistics-day-swipe").pointerInput(selectedDay) {
+                BoxWithConstraints(Modifier.fillMaxWidth().testTag("statistics-day-swipe").pointerInput(selectedDay) {
                     var drag = 0f
                     detectHorizontalDragGestures(onDragStart = { drag = 0f }, onDragCancel = { drag = 0f },
                         onDragEnd = { if (drag > 48.dp.toPx()) vm.shiftDay(-1) else if (drag < -48.dp.toPx()) vm.shiftDay(1) },
                         onHorizontalDrag = { change, delta -> drag += delta; change.consume() })
                 }) {
-                    AdaptiveChartDetails(
-                        chart = {
-                            DonutChart(
-                                slices = pageData.slices,
-                                animateOnDataChange = true,
-                                replayKey = selectedDay to flowType,
-                                selectedKey = pageData.selectedCategoryId,
-                                onSelect = { key -> vm.toggleCategory(key as? Long) },
-                                modifier = Modifier.size(176.dp).testTag("daily-donut")
-                            ) {
-                                RingLabel(if (pageData.slices.isEmpty()) "暂无" + if (flowType == BillType.EXPENSE) "支出" else "收入" else pageData.selectedLabel,
-                                    "¥${pageData.selectedAmountText.ifBlank { "0" }}")
-                            }
-                        },
-                        details = {
-                            Column(Modifier.fillMaxWidth().heightIn(min = 64.dp)) {
-                            if (pageData.slices.isEmpty()) {
-                                Text("这一天先留个小空位 ♡", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp), textAlign = TextAlign.Center)
-                            }
-                            pageData.slices.forEach { slice ->
-                                CategoryDrawer(
-                                    color = slice.color,
-                                    label = "${slice.label} · ${String.format(java.util.Locale.ROOT, "%.1f", slice.valueFen.toDouble() / pageData.slices.sumOf { it.valueFen }.coerceAtLeast(1) * 100)}%",
-                                    amountText = "¥${Formatters.fenToYuanText(slice.valueFen)}",
-                                    selected = slice.key == pageData.selectedCategoryId,
-                                    onClick = { vm.toggleCategory(slice.key as? Long) },
-                                    details = if (slice.key == pageData.selectedCategoryId) dayDetails else emptyList(),
-                                    sort = sort, onSort = vm::setSort, onBill = { selectedBillId = it }
-                                )
-                            }
+                    val ringSize = (maxWidth * .45f).coerceIn(112.dp, 166.dp)
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        DonutChart(slices = pageData.slices, animateOnDataChange = true,
+                            replayKey = selectedDay to flowType, selectedKey = pageData.selectedCategoryId,
+                            selectedBoost = 1f, dimUnselected = true, toggleSelection = false,
+                            onSelect = selectCategory,
+                            modifier = Modifier.size(ringSize).testTag("daily-donut")) {
+                            Column(Modifier.width(ringSize * .61f), horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text("¥${pageData.selectedAmountText.ifBlank { "0" }}", maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall)
+                                Text(if (pageData.slices.isEmpty()) "暂无记录" else pageData.selectedLabel,
+                                    style = MaterialTheme.typography.labelSmall, maxLines = 2,
+                                    textAlign = TextAlign.Center, overflow = TextOverflow.Ellipsis)
                             }
                         }
-                    )
+                        val legendState = rememberLazyListState()
+                        LaunchedEffect(selectedDay, flowType) { legendState.scrollToItem(0) }
+                        Box(Modifier.weight(1f).height(190.dp)) {
+                            LazyColumn(state = legendState, modifier = Modifier.fillMaxSize()) {
+                                if (pageData.slices.isEmpty()) item {
+                                    Text("这一天先留个\n小空位 ♡", Modifier.padding(top = 60.dp),
+                                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                                itemsIndexed(pageData.slices, key = { _, slice -> slice.key }) { _, slice ->
+                                    val selected = slice.key == pageData.selectedCategoryId
+                                    Row(Modifier.fillMaxWidth().background(
+                                        if (selected) slice.color.copy(alpha = .13f) else Color.Transparent,
+                                        RoundedCornerShape(12.dp)).clickable { selectCategory(slice.key) }.padding(horizontal = 6.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        CategoryGlyph(slice.label, slice.color)
+                                        Column(Modifier.weight(1f)) {
+                                            Text(slice.label, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                                style = MaterialTheme.typography.labelMedium)
+                                            Text("¥${Formatters.fenToYuanText(slice.valueFen)}", maxLines = 1,
+                                                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                        Text(String.format(java.util.Locale.ROOT, "%.0f%%", slice.valueFen.toDouble() /
+                                            pageData.slices.sumOf { it.valueFen }.coerceAtLeast(1) * 100),
+                                            style = MaterialTheme.typography.labelMedium, color = slice.color)
+                                    }
+                                }
+                            }
+                            LedgerScrollBar(legendState, Modifier.align(Alignment.CenterEnd))
+                        }
+                    }
                 }
+                Text(if (dayDonut.selectedCategoryId == null) "轻点分类看占比 · 左右滑动换一天" else "再点一次选中分类，看看小账单 ♡",
+                    Modifier.padding(top = 6.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
 
-        // 预算始终对应当前周期，与上方所选账本月份独立。
+        // 预算周期独立于日期筛选，用紧凑进度卡代替第二个圆环。
         item(key = "budget") {
-            ChartCard(title = "预算余量", subtitle = "余粮环 · 当前预算周期") {
-                if (!budget.visible) {
-                    Text(
-                        "给日常开销留一个舒服的边界，叽里咕噜帮你记着。",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(Modifier.height(16.dp))
-                    Button(onClick = { showBudgetDialog = true }) {
-                        Text("设置预算")
+            LedgerCard {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("预算已用", style = MaterialTheme.typography.titleMedium)
+                        Text(if (budget.visible) budget.usedPercentText else "还没设预算",
+                            style = MaterialTheme.typography.headlineSmall,
+                            color = if (budget.overspendPercentText.isNotBlank()) ExpenseCoral else MaterialTheme.colorScheme.primary)
                     }
-                } else {
-                    AdaptiveChartDetails(
-                        chart = {
-                            DonutChart(
-                                slices = budget.usedSlices,
-                                onSelect = null,
-                                modifier = Modifier.size(176.dp)
-                            ) {
-                                RingLabel(
-                                    label = if (budget.overspendPercentText.isNotBlank()) "已超支" else "剩余预算",
-                                    amountText = "¥${budget.remainText}",
-                                    amountColor = if (budget.overspendPercentText.isNotBlank()) MaterialTheme.colorScheme.error
-                                        else MaterialTheme.colorScheme.onSurface
-                                )
-                            }
-                        },
-                        details = {
-                            Text(
-                                budget.periodLabel,
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Text("预算  ¥${budget.totalText}", style = MaterialTheme.typography.bodyLarge)
-                            Text("已用  ¥${budget.spentText} · ${budget.usedPercentText}", style = MaterialTheme.typography.bodyLarge)
-                            if (budget.overspendPercentText.isNotBlank()) {
-                                Text(
-                                    budget.overspendPercentText,
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    color = MaterialTheme.colorScheme.error,
-                                    fontWeight = FontWeight.Medium
-                                )
-                            }
-                        }
-                    )
-                    Spacer(Modifier.height(16.dp))
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        TextButton(onClick = { showBudgetDialog = true }) { Text("调整预算") }
-                        TextButton(onClick = { vm.clearBudget() }) {
-                            Text("停用预算", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
+                    androidx.compose.material3.IconButton(onClick = { showBudgetDialog = true }) {
+                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "设置或调整预算",
+                            tint = MaterialTheme.colorScheme.primary)
                     }
                 }
+                val fraction = (budget.usedPercentText.removeSuffix("%").toFloatOrNull() ?: 0f) / 100f
+                androidx.compose.material3.LinearProgressIndicator(
+                    progress = { fraction.coerceIn(0f, 1f) },
+                    modifier = Modifier.fillMaxWidth().height(10.dp).padding(vertical = 1.dp),
+                    color = if (budget.overspendPercentText.isNotBlank()) ExpenseCoral else MaterialTheme.colorScheme.primary,
+                    trackColor = MaterialTheme.colorScheme.primaryContainer,
+                    strokeCap = androidx.compose.ui.graphics.StrokeCap.Round)
+                Spacer(Modifier.height(10.dp))
+                if (budget.visible) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("${budget.periodLabel} ¥${budget.totalText}", style = MaterialTheme.typography.labelMedium,
+                            modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("已用 ¥${budget.spentText}", style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    if (budget.overspendPercentText.isNotBlank()) {
+                        Text("超出 ¥${budget.remainText.removePrefix("-")}", Modifier.padding(top = 4.dp),
+                            style = MaterialTheme.typography.labelSmall, color = ExpenseCoral)
+                    }
+                } else Text("留一点余量，日子慢慢过 ♡", style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
 
@@ -310,9 +284,34 @@ fun StatsScreen(
     LedgerScrollBar(scroll, Modifier.align(Alignment.CenterEnd))
     }
 
+    if (showCategoryDetails && dayDonut.selectedCategoryId != null) {
+        Dialog(onDismissRequest = { showCategoryDetails = false }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+            Surface(Modifier.fillMaxWidth(.88f).widthIn(max = 380.dp), shape = RoundedCornerShape(26.dp),
+                color = MaterialTheme.colorScheme.surface, tonalElevation = 2.dp) {
+                Column(Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("${dayDonut.selectedLabel}的小账单", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+                        TextButton(onClick = { showCategoryDetails = false }) { Text("关闭") }
+                    }
+                    Text("${dayDonut.dayLabel} · ${dayDetails.size} 笔 · ¥${dayDonut.selectedAmountText}",
+                        style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                    CompactChoice(listOf("时间↓", "时间↑", "金额↓", "金额↑"), sort.ordinal) { vm.setSort(DetailSort.entries[it]) }
+                    LazyColumn(Modifier.fillMaxWidth().heightIn(max = 360.dp)) {
+                        itemsIndexed(dayDetails, key = { _, bill -> bill.id }) { index, d ->
+                            LedgerBillRow(icon = d.icon, colorHue = d.colorHue, categoryName = d.categoryName,
+                                title = d.detail.ifBlank { d.categoryName }, subtitle = d.timeLabel,
+                                amountText = d.amountText, isExpense = d.isExpense,
+                                onClick = { selectedBillId = d.id }, showDivider = index < dayDetails.lastIndex)
+                        }
+                    }
+                }
+            }
+        }
+    }
     if (showBudgetDialog) {
         BudgetDialog(
             onDismiss = { showBudgetDialog = false },
+            onDisable = if (budget.visible) ({ vm.clearBudget(); showBudgetDialog = false }) else null,
             onSave = { amountFen, period, anchorDay ->
                 vm.saveBudget(amountFen, period, anchorDay)
                 showBudgetDialog = false
@@ -371,147 +370,28 @@ private fun ChartCard(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(10.dp))
         content()
     }
 }
 
-/** 小屏和大字体时纵向排布，避免固定大小的圆环挤掉图例文字。 */
 @Composable
-private fun AdaptiveChartDetails(
-    chart: @Composable () -> Unit,
-    details: @Composable ColumnScope.() -> Unit
-) {
-    val fontScale = LocalDensity.current.fontScale
-    BoxWithConstraints(Modifier.fillMaxWidth()) {
-        if (maxWidth < 360.dp || fontScale > 1.15f) {
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                chart()
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                    content = details
-                )
-            }
-        } else {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(20.dp)
-            ) {
-                chart()
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                    content = details
-                )
-            }
-        }
+private fun CategoryGlyph(label: String, color: Color) {
+    val glyph = when (label) {
+        "吃饭", "餐饮" -> Icons.Outlined.Restaurant
+        "交通" -> Icons.Outlined.DirectionsBus
+        "饮品" -> Icons.Outlined.LocalCafe
+        "零食" -> Icons.Outlined.Cookie
+        "住房" -> Icons.Outlined.Home
+        "数码" -> Icons.Outlined.Devices
+        "宠物" -> Icons.Outlined.Pets
+        "购物", "日用品" -> Icons.Outlined.ShoppingBag
+        "学习" -> Icons.Outlined.School
+        "工资", "生活服务" -> Icons.Outlined.WorkOutline
+        "红包", "人情" -> Icons.Outlined.CardGiftcard
+        else -> Icons.Outlined.Category
     }
-}
-
-@Composable
-private fun RingLabel(
-    label: String,
-    amountText: String,
-    amountColor: Color = MaterialTheme.colorScheme.onSurface
-) {
-    Column(
-        modifier = Modifier.width(112.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(4.dp)
-    ) {
-        Text(
-            label,
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.Center
-        )
-        Text(
-            amountText,
-            style = MaterialTheme.typography.titleMedium,
-            color = amountColor,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-    }
-}
-
-@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
-@Composable
-private fun CategoryDrawer(color: Color, label: String, amountText: String, selected: Boolean, onClick: () -> Unit,
-    details: List<DayDetailUi>, sort: DetailSort, onSort: (DetailSort) -> Unit, onBill: (Long) -> Unit) {
-    val bringIntoView = remember { BringIntoViewRequester() }
-    LaunchedEffect(selected) {
-        if (selected) { kotlinx.coroutines.delay(250); bringIntoView.bringIntoView() }
-    }
-    Column(Modifier.fillMaxWidth().bringIntoViewRequester(bringIntoView)) {
-        LegendRow(color, label + if (selected) " ▴" else " ▾", amountText, selected, onClick)
-        AnimatedVisibility(selected) {
-            Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = .22f), MaterialTheme.shapes.medium).padding(8.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("${details.size} 笔小账单", Modifier.weight(1f), style = MaterialTheme.typography.labelMedium)
-                    CompactChoice(listOf("时间↓", "时间↑", "金额↓", "金额↑"), sort.ordinal) { onSort(DetailSort.entries[it]) }
-                }
-                if (details.isEmpty()) Text("这一天该分类没有账单", style = MaterialTheme.typography.bodySmall)
-                else LazyColumn(Modifier.fillMaxWidth().heightIn(max = 260.dp)) {
-                    itemsIndexed(details, key = { _, bill -> bill.id }) { index, d ->
-                        LedgerBillRow(icon = d.icon, colorHue = d.colorHue, categoryName = d.categoryName,
-                            title = d.detail.ifBlank { d.categoryName }, subtitle = d.timeLabel,
-                            amountText = d.amountText, isExpense = d.isExpense,
-                            onClick = { onBill(d.id) }, showDivider = index < details.lastIndex)
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun LegendRow(
-    color: Color,
-    label: String,
-    amountText: String,
-    selected: Boolean,
-    onClick: () -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(
-                if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
-                MaterialTheme.shapes.small
-            )
-            .clickable(onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(Modifier.size(10.dp).background(color, CircleShape))
-        Spacer(Modifier.width(8.dp))
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(label, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            Text(
-                amountText,
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-    }
-}
-
-@Composable
-private fun SortChip(label: String, selected: Boolean, onClick: () -> Unit) {
-    FilterChip(
-        selected = selected,
-        onClick = onClick,
-        label = { Text(label, style = MaterialTheme.typography.labelMedium) }
-    )
+    Icon(glyph, contentDescription = null, tint = color, modifier = Modifier.size(22.dp))
 }
 
 /** 预算金额必须为正；超支后的剩余金额仍可显示为负数。 */
@@ -519,6 +399,7 @@ private fun SortChip(label: String, selected: Boolean, onClick: () -> Unit) {
 @Composable
 private fun BudgetDialog(
     onDismiss: () -> Unit,
+    onDisable: (() -> Unit)? = null,
     onSave: (amountFen: Long, period: BudgetPeriod, anchorDay: Int) -> Unit
 ) {
     var amountText by rememberSaveable { mutableStateOf("") }
@@ -538,6 +419,7 @@ private fun BudgetDialog(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
+                if (onDisable != null) TextButton(onClick = onDisable) { Text("停用预算") }
                 OutlinedTextField(
                     value = amountText,
                     onValueChange = { value ->

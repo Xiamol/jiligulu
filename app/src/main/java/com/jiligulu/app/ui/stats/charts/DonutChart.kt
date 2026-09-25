@@ -63,6 +63,8 @@ fun DonutChart(
     gapDeg: Float = 3f,
     thicknessFraction: Float = 0.15f,
     selectedBoost: Float = 1.14f,
+    dimUnselected: Boolean = false,
+    toggleSelection: Boolean = true,
     animateOnDataChange: Boolean = true,
     replayKey: Any? = null,
     centerContent: (@Composable () -> Unit)? = null
@@ -109,7 +111,7 @@ fun DonutChart(
                 .fillMaxSize()
                 .then(
                     if (onSelect != null) {
-                        Modifier.pointerInput(arcs, selectedKey, thicknessFraction) {
+                        Modifier.pointerInput(arcs, selectedKey, thicknessFraction, toggleSelection) {
                             detectTapGestures { offset ->
                                 val w = size.width.toFloat()
                                 val h = size.height.toFloat()
@@ -127,7 +129,7 @@ fun DonutChart(
                                     while (deg < -90f) deg += 360f
                                     while (deg >= 270f) deg -= 360f
                                     val hit = arcs.firstOrNull { deg >= it.hitStartDeg && deg < it.hitEndDeg }
-                                    onSelect(if (hit == null || hit.key == selectedKey) null else hit.key)
+                                    onSelect(if (hit == null || (toggleSelection && hit.key == selectedKey)) null else hit.key)
                                 }
                             }
                         }
@@ -153,7 +155,7 @@ fun DonutChart(
             arcs.forEach { arc ->
                 val boost = if (arc.key == selectedKey) selectedBoost else 1f
                 drawArc(
-                    color = arc.color,
+                    color = if (dimUnselected && selectedKey != null && arc.key != selectedKey) arc.color.copy(alpha = .28f) else arc.color,
                     startAngle = arc.startDeg,
                     sweepAngle = arc.sweepDeg * p,
                     useCenter = false,

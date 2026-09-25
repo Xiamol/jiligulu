@@ -201,7 +201,13 @@ class StatsViewModel(
                         else CategoryLabels.displayName(cat?.name ?: "未分类"),
                     valueFen = fen,
                     color = if (catId == OTHER_KEY) OTHER_COLOR
-                    else GoldenAnglePalette.colorForHue(cat?.colorHue ?: 0f)
+                    else when (CategoryLabels.displayName(cat?.name.orEmpty())) {
+                        "吃饭", "餐饮" -> Color(0xFFEF8D87)
+                        "交通" -> Color(0xFF69B89A)
+                        "零食" -> Color(0xFFEAB567)
+                        "饮品" -> Color(0xFFDB92B8)
+                        else -> GoldenAnglePalette.colorForHue(cat?.colorHue ?: 0f)
+                    }
                 )
             }
             val total = dayBills.sumOf { it.amountFen }
