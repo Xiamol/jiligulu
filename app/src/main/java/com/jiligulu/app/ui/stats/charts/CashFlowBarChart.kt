@@ -52,7 +52,7 @@ fun CashFlowBarChart(bars: List<DayBar>, selectedDayMillis: Long?, onSelectDay: 
     fun tick(value: Double): String = java.math.BigDecimal.valueOf(value).setScale(if (top < 1) 3 else if (top < 100) 2 else 0, java.math.RoundingMode.HALF_UP).stripTrailingZeros().toPlainString()
     Column(modifier) {
         Row(Modifier.fillMaxWidth()) {
-            Column(Modifier.width(42.dp).padding(top = 20.dp).height(154.dp), verticalArrangement = Arrangement.SpaceBetween) {
+            Column(Modifier.width(34.dp).padding(top = 20.dp).height(154.dp), verticalArrangement = Arrangement.SpaceBetween) {
                 for (i in axis.intervals downTo 0) Text((if (i == axis.intervals) "¥" else "") + tick(axis.step * i), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             BoxWithConstraints(Modifier.weight(1f)) {
@@ -79,7 +79,7 @@ fun CashFlowBarChart(bars: List<DayBar>, selectedDayMillis: Long?, onSelectDay: 
                 Row(Modifier.horizontalScroll(scroll)) {
                     bars.forEach { bar ->
                         val selectedBar = bar.dayStartMillis == selectedDayMillis
-                        Column(Modifier.width(slot).clickable { onSelectDay(bar.dayStartMillis) }
+                        Column(Modifier.width(slot).offset(x = (-5).dp).clickable { onSelectDay(bar.dayStartMillis) }
                             .semantics { contentDescription = "${bar.day}日，${Formatters.fenToYuanText(bar.amountFen)}元${if (selectedBar) "，已选中" else ""}" }, horizontalAlignment = Alignment.CenterHorizontally) {
                             Box(Modifier.height(174.dp).width(slot - 2.dp).background(if (selectedBar) MaterialTheme.colorScheme.primaryContainer.copy(alpha = .3f) else Color.Transparent, RoundedCornerShape(22.dp)), contentAlignment = Alignment.BottomCenter) {
                                 if (bar.amountFen > 0) {
