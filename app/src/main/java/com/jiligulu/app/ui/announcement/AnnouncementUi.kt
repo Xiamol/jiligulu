@@ -61,18 +61,18 @@ fun AnnouncementDialogHost(repository: AnnouncementRepository, enabled: Boolean)
     val scope = rememberCoroutineScope()
     if (!enabled || state.loading) return
     if (state.emptyMailboxOpen) {
-        GuluDialog(title = "💌 阿噜的小信箱", onDismiss = repository::close, confirmLabel = "收好信笺") {
+        GuluDialog(compact = true, title = "💌 阿噜的小信箱", onDismiss = repository::close, confirmLabel = "收好信笺") {
             Text(if (state.offline) "这次暂时没连上公告服务，可以回到首页下拉刷新，再看看新来信。"
                 else "信箱里暂时还没有新消息。\n有新的公告或节日祝福时，阿噜会把来信放在这里。",
-                style = MaterialTheme.typography.bodyLarge, modifier = Modifier.testTag("announcement-empty"))
+                style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag("announcement-empty"))
         }
         return
     }
     val entry = state.opened ?: return
-    GuluDialog(title = "${entry.emoji.ifBlank { "💌" }} ${entry.title}",
+    GuluDialog(compact = true, title = "${entry.emoji.ifBlank { "💌" }} ${entry.title}",
         onDismiss = repository::close, dismissLabel = "关闭", confirmLabel = "这条不再弹出",
         onConfirm = { scope.launch { repository.muteOpened() } }, busy = state.saving) {
-        Text(entry.body, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.testTag("announcement-body"))
+        Text(entry.body, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag("announcement-body"))
         state.error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
         if (state.entries.size > 1) {
             val index = state.entries.indexOfFirst { it.id == entry.id }

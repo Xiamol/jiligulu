@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -30,15 +31,17 @@ fun GuluDialog(
     onConfirm: () -> Unit = onDismiss,
     dismissLabel: String? = null,
     busy: Boolean = false,
+    compact: Boolean = false,
     content: @Composable ColumnScope.() -> Unit
 ) {
     Dialog(onDismissRequest = { if (!busy) onDismiss() },
-        properties = DialogProperties(dismissOnBackPress = !busy, dismissOnClickOutside = !busy)) {
-        LedgerCard(Modifier.heightIn(max = (LocalConfiguration.current.screenHeightDp * 0.82f).dp)) {
+        properties = DialogProperties(dismissOnBackPress = !busy, dismissOnClickOutside = !busy, usePlatformDefaultWidth = !compact)) {
+        LedgerCard(Modifier.fillMaxWidth(if (compact) .84f else 1f).then(if (compact) Modifier.widthIn(max = 330.dp) else Modifier).heightIn(max = (LocalConfiguration.current.screenHeightDp * if (compact) .62f else .82f).dp)) {
             Text(title, modifier = Modifier.padding(bottom = 16.dp),
                 style = MaterialTheme.typography.titleLarge.copy(fontFamily = GuluBrandFont, fontWeight = FontWeight.Normal),
                 color = MaterialTheme.colorScheme.primary)
-            Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()),
+            val bodyScroll = rememberScrollState()
+            Column(Modifier.weight(1f, fill = false).edgeSpring({ bodyScroll.canScrollBackward }, { bodyScroll.canScrollForward }).verticalScroll(bodyScroll),
                 verticalArrangement = Arrangement.spacedBy(12.dp), content = content)
             Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.End) {
                 dismissLabel?.let { TextButton(onClick = onDismiss, enabled = !busy) { Text(it) } }

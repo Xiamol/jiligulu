@@ -43,23 +43,32 @@ internal fun cashFlowAxisTop(maxYuan: Double): Double = cashFlowAxis(maxYuan).to
 /** Fixed value axis and scrollable 44dp day slots. Selection uses outline, label and color. */
 @Composable
 fun CashFlowBarChart(bars: List<DayBar>, selectedDayMillis: Long?, onSelectDay: (Long) -> Unit,
-    color: Color, trackColor: Color, modifier: Modifier = Modifier) {
+    color: Color, trackColor: Color, modifier: Modifier = Modifier, onVisibleRange: (Long, Long) -> Unit = { _, _ -> }) {
     val maxYuan = (bars.maxOfOrNull { it.amountFen } ?: 0L) / 100.0
     val axis = cashFlowAxis(maxYuan)
     val top = axis.top
     val scroll = rememberScrollState()
     val density = LocalDensity.current
-    LaunchedEffect(selectedDayMillis, bars.size) {
-        val index = bars.indexOfFirst { it.dayStartMillis == selectedDayMillis }
-        if (index >= 0) scroll.animateScrollTo(with(density) { ((index - 2).coerceAtLeast(0) * 60).dp.roundToPx() })
-    }
     fun tick(value: Double): String = java.math.BigDecimal.valueOf(value).setScale(if (top < 1) 3 else if (top < 100) 2 else 0, java.math.RoundingMode.HALF_UP).stripTrailingZeros().toPlainString()
     Column(modifier) {
         Row(Modifier.fillMaxWidth()) {
             Column(Modifier.width(42.dp).padding(top = 20.dp).height(154.dp), verticalArrangement = Arrangement.SpaceBetween) {
                 for (i in axis.intervals downTo 0) Text((if (i == axis.intervals) "¥" else "") + tick(axis.step * i), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            Box(Modifier.weight(1f)) {
+            BoxWithConstraints(Modifier.weight(1f)) {
+                val slot = maxWidth / 5
+                val slotPx = with(density) { slot.toPx() }
+                val notifyRange by rememberUpdatedState(onVisibleRange)
+                LaunchedEffect(selectedDayMillis, bars.size, slotPx) {
+                    val index = bars.indexOfFirst { it.dayStartMillis == selectedDayMillis }
+                    if (index >= 0) scroll.animateScrollTo(((index - 2).coerceAtLeast(0) * slotPx).roundToInt())
+                }
+                LaunchedEffect(bars, slotPx) {
+                    snapshotFlow { (scroll.value / slotPx).roundToInt().coerceIn(0, (bars.size - 5).coerceAtLeast(0)) }
+                        .collect { first ->
+                            if (bars.isNotEmpty()) notifyRange(bars[first].dayStartMillis, bars[(first + 4).coerceAtMost(bars.lastIndex)].dayStartMillis)
+                        }
+                }
                 Canvas(Modifier.fillMaxWidth().padding(top = 20.dp).height(154.dp)) {
                     repeat(axis.intervals + 1) { index ->
                         val y = size.height * index / axis.intervals
@@ -70,12 +79,12 @@ fun CashFlowBarChart(bars: List<DayBar>, selectedDayMillis: Long?, onSelectDay: 
                 Row(Modifier.horizontalScroll(scroll)) {
                     bars.forEach { bar ->
                         val selectedBar = bar.dayStartMillis == selectedDayMillis
-                        Column(Modifier.width(60.dp).clickable { onSelectDay(bar.dayStartMillis) }
+                        Column(Modifier.width(slot).clickable { onSelectDay(bar.dayStartMillis) }
                             .semantics { contentDescription = "${bar.day}日，${Formatters.fenToYuanText(bar.amountFen)}元${if (selectedBar) "，已选中" else ""}" }, horizontalAlignment = Alignment.CenterHorizontally) {
-                            Box(Modifier.height(174.dp).width(58.dp).background(if (selectedBar) MaterialTheme.colorScheme.primaryContainer.copy(alpha = .3f) else Color.Transparent, RoundedCornerShape(22.dp)), contentAlignment = Alignment.BottomCenter) {
+                            Box(Modifier.height(174.dp).width(slot - 2.dp).background(if (selectedBar) MaterialTheme.colorScheme.primaryContainer.copy(alpha = .3f) else Color.Transparent, RoundedCornerShape(22.dp)), contentAlignment = Alignment.BottomCenter) {
                                 if (bar.amountFen > 0) {
                                     val ink = color
-                                    Box(Modifier.width(30.dp).height((bar.amountFen / 100.0 / top * 154).toFloat().coerceAtLeast(4f).dp)
+                                    Box(Modifier.width((slot * .56f).coerceAtMost(30.dp)).height((bar.amountFen / 100.0 / top * 154).toFloat().coerceAtLeast(4f).dp)
                                         .clip(RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp, bottomStart = 5.dp, bottomEnd = 5.dp))
                                         .background(Brush.verticalGradient(listOf(ink.copy(alpha = if (selectedBar) .72f else .42f), ink)))) {
                                         if (selectedBar) Box(Modifier.padding(top = 7.dp).width(10.dp).height(3.dp).align(Alignment.TopCenter)
@@ -89,7 +98,7 @@ fun CashFlowBarChart(bars: List<DayBar>, selectedDayMillis: Long?, onSelectDay: 
                             }
                             Surface(Modifier.padding(top = 7.dp), shape = RoundedCornerShape(50),
                                 color = if (selectedBar) MaterialTheme.colorScheme.primaryContainer else Color.Transparent) {
-                                Text(if (bar.isToday) "今天" else "${bar.day}日", Modifier.padding(horizontal = 7.dp, vertical = 4.dp), style = MaterialTheme.typography.labelSmall,
+                                Text(if (bar.isToday) "今天" else "${bar.day}日", Modifier.padding(horizontal = 3.dp, vertical = 4.dp), style = MaterialTheme.typography.labelSmall,
                                     color = if (selectedBar) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }

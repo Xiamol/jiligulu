@@ -1,5 +1,7 @@
 package com.jiligulu.app.ui.home
 
+import com.jiligulu.app.ui.components.edgeSpring
+
 
 import com.jiligulu.app.ui.components.*
 import androidx.compose.runtime.*
@@ -277,7 +279,7 @@ private fun HomeContent(
                         DailyTotals(snapshot.bills, rows.size)
                         Spacer(Modifier.height(10.dp))
                         Box(Modifier.fillMaxWidth().weight(1f)) {
-                            LazyColumn(Modifier.fillMaxSize().testTag(if (pageDay == selectedDay) "home-day-bills" else "home-neighbor-bills"), state = inner) {
+                            LazyColumn(Modifier.fillMaxSize().edgeSpring({ inner.canScrollBackward }, { inner.canScrollForward }, topEnabled = false).testTag(if (pageDay == selectedDay) "home-day-bills" else "home-neighbor-bills"), state = inner) {
                                 if (rows.isEmpty()) item {
                                     Column(Modifier.fillParentMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally,
                                         verticalArrangement = Arrangement.Center) {

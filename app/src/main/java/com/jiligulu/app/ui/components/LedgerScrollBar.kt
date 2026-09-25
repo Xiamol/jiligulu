@@ -15,12 +15,12 @@ import kotlinx.coroutines.delay
 import com.jiligulu.app.ui.theme.GuluBlushPink
 
 @Composable
-fun LedgerScrollBar(state: LazyListState, modifier: Modifier = Modifier) {
+fun LedgerScrollBar(state: LazyListState, modifier: Modifier = Modifier, forceVisible: Boolean = false) {
     var visible by remember { mutableStateOf(false) }
     LaunchedEffect(state.isScrollInProgress) {
         if (state.isScrollInProgress) visible = true else { delay(800); visible = false }
     }
-    val opacity by animateFloatAsState(if (visible) 1f else 0f, label = "scrollbar")
+    val opacity by animateFloatAsState(if (visible || forceVisible) 1f else 0f, label = "scrollbar")
     val ink = MaterialTheme.colorScheme.primary
     Canvas(modifier.width(8.dp).fillMaxHeight().padding(vertical = 8.dp)) {
         val info = state.layoutInfo

@@ -1,6 +1,8 @@
 package com.jiligulu.app.ui.stats
 
 
+import com.jiligulu.app.ui.components.edgeSpring
+import com.jiligulu.app.ui.components.EdgeSpringState
 import androidx.compose.material3.Surface
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.outlined.Restaurant
@@ -128,13 +130,15 @@ fun StatsScreen(
         if (id != null && id == dayDonut.selectedCategoryId) showCategoryDetails = true
         else { showCategoryDetails = false; vm.toggleCategory(id) }
     }
+    var visibleRange by remember { mutableStateOf<Pair<Long, Long>?>(null) }
     val scroll = rememberLazyListState()
     Box(Modifier.fillMaxSize()) {
     LazyColumn(
         state = scroll,
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background),
+            .background(MaterialTheme.colorScheme.background)
+            .edgeSpring({ scroll.canScrollBackward }, { scroll.canScrollForward }, interceptPre = false),
         contentPadding = PaddingValues(start = 20.dp, top = 12.dp, end = 20.dp, bottom = 28.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
@@ -144,8 +148,10 @@ fun StatsScreen(
                 Surface(Modifier.weight(1f).clickable { showDateFilter = true },
                     shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surface) {
                     val date = Instant.ofEpochMilli(selectedDay).atZone(ZoneId.systemDefault()).toLocalDate()
-                    Text("${date.year}/${date.monthValue}/${date.dayOfMonth} ⌄", Modifier.padding(12.dp),
-                        color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
+                    val range = visibleRange
+                    fun shortDate(value: Long) = Instant.ofEpochMilli(value).atZone(ZoneId.systemDefault()).toLocalDate().let { "${it.monthValue}月${it.dayOfMonth}日" }
+                    Text(if (range == null) "${date.monthValue}月${date.dayOfMonth}日 ⌄" else "${shortDate(range.first)}–${shortDate(range.second)} ⌄", Modifier.padding(horizontal = 10.dp, vertical = 12.dp),
+                        color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium, maxLines = 1)
                 }
                 Row(Modifier.background(MaterialTheme.colorScheme.surface, RoundedCornerShape(24.dp)).padding(3.dp)) {
                     listOf(BillType.EXPENSE to "支出", BillType.INCOME to "收入").forEach { (type, label) ->
@@ -167,6 +173,7 @@ fun StatsScreen(
             }) {
                 CashFlowBarChart(
                     bars = bars,
+                    onVisibleRange = { first, last -> visibleRange = first to last },
                     selectedDayMillis = selectedDay,
                     onSelectDay = { vm.selectDay(it) },
                     color = if (flowType == BillType.EXPENSE) ExpenseCoral else IncomeGreen,
@@ -205,9 +212,11 @@ fun StatsScreen(
                             }
                         }
                         val legendState = rememberLazyListState()
+                        val edge = remember(selectedDay, flowType) { EdgeSpringState() }
                         LaunchedEffect(selectedDay, flowType) { legendState.scrollToItem(0) }
                         Box(Modifier.weight(1f).height(190.dp)) {
-                            LazyColumn(state = legendState, modifier = Modifier.fillMaxSize()) {
+                            LazyColumn(state = legendState, modifier = Modifier.fillMaxSize().edgeSpring(
+                                { legendState.canScrollBackward }, { legendState.canScrollForward }, handOffOnRepeat = true, state = edge)) {
                                 if (pageData.slices.isEmpty()) item {
                                     Text("这一天先留个\n小空位 ♡", Modifier.padding(top = 60.dp),
                                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -231,7 +240,7 @@ fun StatsScreen(
                                     }
                                 }
                             }
-                            LedgerScrollBar(legendState, Modifier.align(Alignment.CenterEnd))
+                            LedgerScrollBar(legendState, Modifier.align(Alignment.CenterEnd), forceVisible = edge.visible)
                         }
                     }
                 }
@@ -296,7 +305,8 @@ fun StatsScreen(
                     Text("${dayDonut.dayLabel} · ${dayDetails.size} 笔 · ¥${dayDonut.selectedAmountText}",
                         style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
                     CompactChoice(listOf("时间↓", "时间↑", "金额↓", "金额↑"), sort.ordinal) { vm.setSort(DetailSort.entries[it]) }
-                    LazyColumn(Modifier.fillMaxWidth().heightIn(max = 360.dp)) {
+                    val detailsScroll = rememberLazyListState()
+                    LazyColumn(Modifier.fillMaxWidth().heightIn(max = 360.dp).edgeSpring({ detailsScroll.canScrollBackward }, { detailsScroll.canScrollForward }), state = detailsScroll) {
                         itemsIndexed(dayDetails, key = { _, bill -> bill.id }) { index, d ->
                             LedgerBillRow(icon = d.icon, colorHue = d.colorHue, categoryName = d.categoryName,
                                 title = d.detail.ifBlank { d.categoryName }, subtitle = d.timeLabel,
@@ -320,34 +330,11 @@ fun StatsScreen(
     }
     selectedBillId?.let { id -> BillDetailSheet(id, onDismiss = { selectedBillId = null }) }
     if (showDateFilter) {
-        val zone = ZoneId.systemDefault()
-        val initialDate = Instant.ofEpochMilli(selectedDay).atZone(zone).toLocalDate()
-        val latestMonth = YearMonth.now(zone)
-        val pickerState = rememberDatePickerState(
-            initialSelectedDateMillis = initialDate.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli(),
-            yearRange = billDatePickerYearRange(initialDate.year).first..latestMonth.year,
-            selectableDates = object : SelectableDates {
-                override fun isSelectableDate(utcTimeMillis: Long): Boolean =
-                    YearMonth.from(Instant.ofEpochMilli(utcTimeMillis).atZone(ZoneOffset.UTC)) <= latestMonth
-            }
-        )
-        DatePickerDialog(onDismissRequest = { showDateFilter = false },
-            confirmButton = {
-                TextButton(onClick = {
-                    pickerState.selectedDateMillis?.let { utcDay ->
-                        val localDate = Instant.ofEpochMilli(utcDay).atZone(ZoneOffset.UTC).toLocalDate()
-                        vm.selectCalendarDate(localDate.atStartOfDay(zone).toInstant().toEpochMilli())
-                    }
-                    showDateFilter = false
-                }, enabled = pickerState.selectedDateMillis != null) { Text("查看这一天") }
-            },
-            dismissButton = { TextButton(onClick = { showDateFilter = false }) { Text("取消") } }) {
-            DatePicker(state = pickerState, title = {
-                Text("选择统计日期", modifier = Modifier.padding(start = 24.dp, top = 16.dp),
-                    style = MaterialTheme.typography.labelLarge)
-            })
-        }
+        com.jiligulu.app.ui.components.CompactCalendarDialog(selectedDay,
+            onDismiss = { showDateFilter = false },
+            onSelect = { vm.selectCalendarDate(it); showDateFilter = false })
     }
+
 }
 
 @Composable
