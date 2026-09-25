@@ -617,6 +617,37 @@ class UiSmokeScreenshotTest {
     }
 
     @Test(timeout = 75_000)
+    fun pinnedLedgerKeepsPositionAcrossStatisticsTab() {
+        val c = (RuntimeEnvironment.getApplication() as JiliguluApp).container
+        runBlocking {
+            c.userPrefs.setWaterEnabled(false)
+            c.userPrefs.setUpdateRepository("")
+            c.userPrefs.setAnnouncementSource(""); c.announcements.initialize()
+        }
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { activity = it; it.setContent { GuluTheme {
+                com.jiligulu.app.ui.main.MainScreen({}, {}, {})
+            } } }
+            awaitTag("home-outer")
+            compose.onNodeWithTag("home-outer").performScrollToIndex(3)
+            compose.waitForIdle()
+            compose.mainClock.advanceTimeBy(350)
+            compose.waitForIdle()
+            val before = compose.onNodeWithTag("home-ledger-heading").getUnclippedBoundsInRoot().top
+            compose.onNodeWithText("统计").performClick()
+            awaitText("每日收支")
+            compose.onNodeWithText("账本").performClick()
+            awaitTag("home-ledger-heading")
+            compose.waitForIdle()
+            compose.mainClock.advanceTimeBy(350)
+            compose.waitForIdle()
+            val after = compose.onNodeWithTag("home-ledger-heading").getUnclippedBoundsInRoot().top
+            assertTrue("Pinned heading must keep its viewport anchor: $before -> $after", kotlin.math.abs(before.value - after.value) < 2f)
+            compose.runOnIdle { activity.setContent {} }
+        }
+    }
+
+    @Test(timeout = 75_000)
     fun compactStatisticsSelectsThenOpensCategoryDialog() {
         val c = (RuntimeEnvironment.getApplication() as JiliguluApp).container
         val today = com.jiligulu.app.core.util.Formatters.dayStart(System.currentTimeMillis())
@@ -687,7 +718,10 @@ class UiSmokeScreenshotTest {
                 compose.onNodeWithTag("home-outer").performScrollToIndex(2)
                 compose.mainClock.advanceTimeBy(300)
                 compose.waitForIdle()
-                val before = compose.onNodeWithTag("home-ledger-heading").fetchSemanticsNode().boundsInRoot.top
+                compose.waitForIdle()
+            compose.mainClock.advanceTimeBy(350)
+            compose.waitForIdle()
+            val before = compose.onNodeWithTag("home-ledger-heading").fetchSemanticsNode().boundsInRoot.top
                 compose.onNodeWithTag("home-day-pager").performTouchInput {
                     down(Offset(width * .15f, height * .6f))
                     moveTo(Offset(width * .25f, height * .6f), delayMillis = 70)

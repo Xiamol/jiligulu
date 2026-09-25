@@ -101,11 +101,6 @@ fun MainScreen(
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
-                    if (selectedTab == 0) GuluCompanionHeader(
-                        message = message,
-                        onRefresh = personaVm::onMascotClick,
-                        onWaterClick = personaVm::startDrinking
-                    )
                     Spacer(Modifier.height(12.dp))
                 }
             },
@@ -142,7 +137,15 @@ fun MainScreen(
                     }) { page ->
                 pageState.SaveableStateProvider(page) {
                     when (page) {
-                        0 -> HomeScreen(onOpenChat = onOpenChat, onAddBill = onAddBill, vm = homeVm, active = selectedTab == 0)
+                        0 -> Column(Modifier.fillMaxSize()) {
+                            // The companion belongs to this page, including while it exits.
+                            // Switching tabs must not resize the outgoing ledger viewport.
+                            GuluCompanionHeader(message = message,
+                                onRefresh = personaVm::onMascotClick, onWaterClick = personaVm::startDrinking,
+                                modifier = Modifier.padding(horizontal = 20.dp))
+                            Spacer(Modifier.height(12.dp))
+                            HomeScreen(onOpenChat = onOpenChat, onAddBill = onAddBill, vm = homeVm, active = selectedTab == 0)
+                        }
                         1 -> StatsScreen(active = selectedTab == 1)
                     }
                 }

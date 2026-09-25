@@ -5,6 +5,8 @@ import com.jiligulu.app.ui.components.edgeSpring
 import com.jiligulu.app.ui.components.EdgeSpringState
 import androidx.compose.material3.Surface
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.outlined.KeyboardArrowDown
+import androidx.compose.ui.unit.sp
 import androidx.compose.material.icons.outlined.Restaurant
 import androidx.compose.material.icons.outlined.DirectionsBus
 import androidx.compose.material.icons.outlined.LocalCafe
@@ -145,21 +147,28 @@ fun StatsScreen(
         item(key = "filters") {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Surface(Modifier.weight(1f).clickable { showDateFilter = true },
+                Surface(Modifier.weight(1f).height(44.dp).clickable { showDateFilter = true },
                     shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surface) {
                     val date = Instant.ofEpochMilli(selectedDay).atZone(ZoneId.systemDefault()).toLocalDate()
                     val range = visibleRange
                     fun shortDate(value: Long) = Instant.ofEpochMilli(value).atZone(ZoneId.systemDefault()).toLocalDate().let { "${it.monthValue}月${it.dayOfMonth}日" }
-                    Text(if (range == null) "${date.monthValue}月${date.dayOfMonth}日 ⌄" else "${shortDate(range.first)}–${shortDate(range.second)} ⌄", Modifier.padding(horizontal = 10.dp, vertical = 12.dp),
-                        color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium, maxLines = 1)
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center) {
+                        Text(if (range == null) "${date.monthValue}月${date.dayOfMonth}日" else "${shortDate(range.first)} - ${shortDate(range.second)}",
+                            color = MaterialTheme.colorScheme.primary, fontSize = 14.sp, fontWeight = FontWeight.Medium,
+                            maxLines = 1, modifier = Modifier.weight(1f, fill = false))
+                        Spacer(Modifier.width(5.dp))
+                        Icon(Icons.Outlined.KeyboardArrowDown, contentDescription = "选择统计日期", Modifier.size(20.dp),
+                            tint = MaterialTheme.colorScheme.primary)
+                    }
                 }
-                Row(Modifier.background(MaterialTheme.colorScheme.surface, RoundedCornerShape(24.dp)).padding(3.dp)) {
+                Row(Modifier.height(44.dp).background(MaterialTheme.colorScheme.surface, RoundedCornerShape(24.dp)).padding(3.dp), verticalAlignment = Alignment.CenterVertically) {
                     listOf(BillType.EXPENSE to "支出", BillType.INCOME to "收入").forEach { (type, label) ->
                         Surface(onClick = { vm.setFlowType(type) }, shape = RoundedCornerShape(24.dp),
-                            color = if (flowType == type) MaterialTheme.colorScheme.primaryContainer else Color.Transparent) {
-                            Text(label, Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                            color = if (flowType == type) MaterialTheme.colorScheme.primary.copy(alpha = .78f) else Color.Transparent) {
+                            Text(label, Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
                                 style = MaterialTheme.typography.labelLarge,
-                                color = if (flowType == type) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                                color = if (flowType == type) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 }
