@@ -29,6 +29,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
@@ -349,11 +350,15 @@ private fun UserBubble(text: String) {
                 )
                 .padding(horizontal = 14.dp, vertical = 10.dp)
         ) {
-            Text(
-                text,
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onPrimaryContainer
-            )
+            // Each bubble owns its selection, so dragging selection handles never includes
+            // another message or intercepts the editable ledger cards beside it.
+            SelectionContainer {
+                Text(
+                    text,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+            }
         }
     }
 }
@@ -373,7 +378,9 @@ private fun GuluBubble(msg: ChatItem.GuluMsg) {
             if (msg.loading) {
                 CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
             } else {
-                Text(msg.text, style = MaterialTheme.typography.bodyLarge)
+                SelectionContainer {
+                    Text(msg.text, style = MaterialTheme.typography.bodyLarge)
+                }
             }
         }
     }

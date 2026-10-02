@@ -213,7 +213,7 @@ fun SettingsScreen(
                 }
 
                 if (state.isLoaded) {
-                    SettingsCompanionHeader()
+                    SettingsCompanionHeader(state.nickname, state.suffix)
 
                     Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(26.dp), color = MaterialTheme.colorScheme.surface,
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .5f))) {
@@ -471,9 +471,9 @@ private fun String.minutesOfDayOr(fallback: Int): Int {
 }
 
 @Composable
-private fun SettingsCompanionHeader() {
-    val notes = listOf("把日子过成\n自己喜欢的样子 ♡", "小小的账本，\n也装得下大大的生活。", "今天也要记得\n好好照顾自己呀。")
-    var noteIndex by rememberSaveable { mutableStateOf(0) }
+private fun SettingsCompanionHeader(nickname: String, suffix: String) {
+    var noteIndex by rememberSaveable { mutableStateOf(CompanionCornerNotes.randomIndex()) }
+    val nextNote = { noteIndex = CompanionCornerNotes.nextIndex(noteIndex) }
     Surface(color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
         shape = MaterialTheme.shapes.extraLarge, modifier = Modifier.fillMaxWidth()) {
         Row(Modifier.padding(start = 20.dp, end = 10.dp, top = 16.dp, bottom = 16.dp),
@@ -481,11 +481,13 @@ private fun SettingsCompanionHeader() {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text("你的专属小角落", style = MaterialTheme.typography.titleLarge.copy(fontFamily = GuluBrandFont, fontWeight = FontWeight.Normal),
                     color = MaterialTheme.colorScheme.primary)
-                PaperNote(notes[noteIndex], modifier = Modifier.padding(vertical = 2.dp))
-                Text("戳戳阿噜，听句悄悄话", style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                PaperNote(CompanionCornerNotes.render(noteIndex, nickname, suffix),
+                    modifier = Modifier.padding(vertical = 2.dp))
+                TextButton(onClick = nextNote, contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)) {
+                    Text("再听一句悄悄话 ♡", style = MaterialTheme.typography.labelSmall)
+                }
             }
-            GuluMascot(modifier = Modifier.size(116.dp), onClick = { noteIndex = (noteIndex + 1) % notes.size })
+            GuluMascot(modifier = Modifier.size(116.dp), onClick = nextNote)
         }
     }
 }

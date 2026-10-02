@@ -163,8 +163,13 @@ class StatsDateNavigationTest {
                 BillEntity(id = 3, amountFen = 20000, type = BillType.INCOME, categoryId = 2, detail = "收入", timestamp = today + 3000),
                 BillEntity(id = 4, amountFen = 300, type = BillType.EXPENSE, categoryId = 1, detail = "旧账", timestamp = old + 1000))
             val sources = repositories(bills) { System.currentTimeMillis() }
-            val vm = com.jiligulu.app.ui.home.HomeViewModel(sources.first, sources.second); store.put("home", vm)
-            backgroundScope.launch { vm.dailyBills.collect {} }; runCurrent()
+            val vm = com.jiligulu.app.ui.home.HomeViewModel(sources.first, sources.second, StandardTestDispatcher(testScheduler)); store.put("home", vm)
+            backgroundScope.launch { vm.dailyBills.collect {} }
+            backgroundScope.launch { vm.uiState.collect {} }; runCurrent()
+            assertEquals("21", vm.uiState.value.expenseText)
+            assertEquals("200", vm.uiState.value.incomeText)
+            assertEquals(2, vm.uiState.value.expenseCount)
+            assertEquals(1, vm.uiState.value.incomeCount)
             assertEquals(3, vm.dailyBills.value.size)
             assertEquals(listOf(2L, 1L), com.jiligulu.app.ui.home.filterHomeBills(vm.dailyBills.value, today, 1, 2).map { it.id })
             assertEquals(listOf(3L), com.jiligulu.app.ui.home.filterHomeBills(vm.dailyBills.value, today, 2, 0).map { it.id })

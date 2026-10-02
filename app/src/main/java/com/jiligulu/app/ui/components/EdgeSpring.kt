@@ -53,6 +53,8 @@ fun Modifier.edgeSpring(
         val edge = (direction == 1 && topEnabled && !backward()) || (direction == -1 && !forward())
         if (!edge || (handOffOnRepeat && direction == allowDirection)) return Offset.Zero
         if (source == NestedScrollSource.UserInput && touched) {
+            // Re-grab the displacement at its current position, without snapping to zero.
+            job?.cancel()
             blocked = direction
             gate.visible = true
             offset = (offset + delta * .23f).coerceIn(-limit, limit)
@@ -71,17 +73,23 @@ fun Modifier.edgeSpring(
             touched = true
             blocked = 0
             allowDirection = if (handOffOnRepeat) gate.begin(SystemClock.uptimeMillis()) else 0
-            job?.cancel(); hideJob?.cancel()
-            offset = 0f
+            hideJob?.cancel()
             do { val event = awaitPointerEvent(PointerEventPass.Initial) } while (event.changes.any { it.pressed })
             touched = false
             gate.finish(blocked, SystemClock.uptimeMillis())
             val distance = offset
-            job = scope.launch {
-                rebound.snapTo(distance); offset = 0f
-                rebound.animateTo(0f, spring(dampingRatio = .72f, stiffness = 500f, visibilityThreshold = .5f))
+            if (blocked != 0 && distance != 0f) {
+                job?.cancel()
+                job = scope.launch {
+                    rebound.snapTo(distance)
+                    rebound.animateTo(0f, spring(dampingRatio = .72f, stiffness = 500f, visibilityThreshold = .5f)) {
+                        offset = value
+                    }
+                }
             }
-            hideJob = scope.launch { kotlinx.coroutines.delay(800); gate.visible = false }
+            if (gate.visible) hideJob = scope.launch { kotlinx.coroutines.delay(800); gate.visible = false }
         }
-    }.nestedScroll(connection).graphicsLayer { translationY = if (touched) offset else rebound.value }
+    // Both drag and rebound use one value, read only in the layer phase. A release no longer
+    // shows one frame of the old rebound value, and taps/normal scrolling launch no animation.
+    }.nestedScroll(connection).graphicsLayer { translationY = offset }
 }

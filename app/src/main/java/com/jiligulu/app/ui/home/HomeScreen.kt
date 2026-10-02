@@ -148,7 +148,10 @@ private fun HomeContent(
     val rebound = remember { Animatable(0f) }
     var reboundJob by remember { mutableStateOf<Job?>(null) }
     fun pullFeedback(delta: Float) {
-        if (delta > 0) stretch = (stretch + delta * .24f).coerceAtMost(40f * density)
+        if (delta > 0) {
+            reboundJob?.cancel()
+            stretch = (stretch + delta * .24f).coerceAtMost(40f * density)
+        }
     }
     fun releaseFeedback() {
         val distance = stretch
@@ -156,8 +159,9 @@ private fun HomeContent(
         reboundJob?.cancel()
         reboundJob = effectScope.launch {
             rebound.snapTo(distance)
-            stretch = 0f
-            rebound.animateTo(0f, spring(dampingRatio = .72f, stiffness = 500f, visibilityThreshold = .5f))
+            rebound.animateTo(0f, spring(dampingRatio = .72f, stiffness = 500f, visibilityThreshold = .5f)) {
+                stretch = value
+            }
         }
     }
     var resumeIndex by rememberSaveable { mutableIntStateOf(-1) }
@@ -207,9 +211,6 @@ private fun HomeContent(
     val observeGesture = Modifier.pointerInput(gate) {
         awaitEachGesture {
             val first = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-            reboundJob?.cancel()
-            effectScope.launch { rebound.snapTo(0f) }
-            stretch = 0f
             gate.begin(pinned(), innerAtTop())
             var finalPosition = first.position
             do {
@@ -236,6 +237,8 @@ private fun HomeContent(
         item(key = "announcements") { com.jiligulu.app.ui.announcement.AnnouncementBoard(announcements, onOpenAnnouncement) }
         item(key = "monthly_summary") { MonthlySummary(state) }
         item(key = "record_actions") {
+            // Keep quick actions in the same lazy item so the manual pin anchor stays at 3.
+            Column {
             Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Button(
                     onClick = onOpenChat,
@@ -258,10 +261,12 @@ private fun HomeContent(
                     Text("记一笔")
                 }
             }
+            com.jiligulu.app.ui.quicktools.WeChatQuickActions()
+            }
         }
         item(key = "ledger_page") {
             Column(Modifier.fillMaxWidth().height(viewport).nestedScroll(nested).graphicsLayer {
-                translationY = if (stretch > 0f) stretch else rebound.value
+                translationY = stretch
             }) {
                 Row(Modifier.fillMaxWidth().testTag("home-ledger-heading").padding(top = 16.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("每日账单", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
@@ -316,17 +321,23 @@ private fun HomeContent(
 
 @Composable
 private fun DailyTotals(bills: List<BillUi>, visibleCount: Int) {
+    val totals = remember(bills) {
+        var expense = 0L
+        var income = 0L
+        bills.forEach { if (it.isExpense) expense += it.entity.amountFen else income += it.entity.amountFen }
+        Formatters.fenToYuanText(expense) to Formatters.fenToYuanText(income)
+    }
     androidx.compose.material3.Surface(shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surface,
         modifier = Modifier.fillMaxWidth()) {
         Row(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Text("当日支出", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text("¥${Formatters.fenToYuanText(bills.filter { it.isExpense }.sumOf { it.entity.amountFen })}",
+                Text("¥${totals.first}",
                     style = MaterialTheme.typography.titleSmall, color = ExpenseCoral, maxLines = 1)
             }
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Text("当日收入", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text("¥${Formatters.fenToYuanText(bills.filter { !it.isExpense }.sumOf { it.entity.amountFen })}",
+                Text("¥${totals.second}",
                     style = MaterialTheme.typography.titleSmall, color = IncomeGreen, maxLines = 1)
             }
             androidx.compose.material3.Surface(shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = .45f)) {
