@@ -126,7 +126,11 @@ data class ChatTurn(val role: String, val content: String)
  * DeepSeek 官方 API（OpenAI 兼容格式）。
  * 强制 response_format=json_object，本地再做 schema 解析兜底（PRD §8 风险 4）。
  */
-class DeepSeekClient(private val apiKey: String, private val client: OkHttpClient = sharedClient) {
+class DeepSeekClient(
+    private val apiKey: String,
+    private val client: OkHttpClient = sharedClient,
+    private val onUsage: suspend (AiTokenUsage?) -> Unit = {}
+) {
 
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -178,6 +182,7 @@ class DeepSeekClient(private val apiKey: String, private val client: OkHttpClien
         val requestJson = buildJsonObject {
             put("model", AiConfig.MODEL)
             put("temperature", 0.7)
+            put("thinking", buildJsonObject { put("type", "disabled") })
             put("response_format", buildJsonObject { put("type", "json_object") })
             put("messages", buildJsonArray {
                 addJsonObject {
@@ -210,29 +215,41 @@ class DeepSeekClient(private val apiKey: String, private val client: OkHttpClien
             .post(requestJson.toRequestBody("application/json".toMediaType()))
             .build()
 
-        return client.newCall(request).awaitResponse().use { response ->
-            val body = response.body?.string().orEmpty()
-            if (!response.isSuccessful) {
-                throw DeepSeekHttpException(response.code, body.take(400))
+        var reportedUsage: AiTokenUsage? = null
+        try {
+            return client.newCall(request).awaitResponse().use { response ->
+                val body = response.body?.string().orEmpty()
+                if (!response.isSuccessful) {
+                    throw DeepSeekHttpException(response.code, body.take(400))
+                }
+                val root = json.parseToJsonElement(body).jsonObject
+                reportedUsage = AiTokenUsage.fromResponse(root)
+                logCacheUsage(root)
+                // 逐步取，不用 !!：DeepSeek 对触发内容审核的请求会返回 200 但内容为空
+                // （finish_reason = content_filter），也有过 choices 为空的形态。
+                // 用 !! 会炸成 NPE / 下标越界，最后被 UI 当成「没连上」——那是误导。
+                val choice = root["choices"]?.jsonArray?.firstOrNull()?.jsonObject
+                val finishReason = choice?.get("finish_reason")?.jsonPrimitive?.contentOrNull
+                val content = choice?.get("message")?.jsonObject?.get("content")?.jsonPrimitive?.contentOrNull
+                if (content.isNullOrBlank()) {
+                    Log.w(TAG, "响应没有内容：finish_reason=$finishReason")
+                    throw DeepSeekEmptyResponseException(finishReason)
+                }
+                try {
+                    json.decodeFromString(AiParseResult.serializer(), unwrapJsonFence(content))
+                } catch (parseFailure: Exception) {
+                    // Never retain conversation/ledger text in device logs. A format failure can be retried.
+                    Log.w(TAG, "回复格式校验失败：${parseFailure.javaClass.simpleName}，长度=${content.length}")
+                    throw DeepSeekMalformedResponseException()
+                }
             }
-            val root = json.parseToJsonElement(body).jsonObject
-            logCacheUsage(root)
-            // 逐步取，不用 !!：DeepSeek 对触发内容审核的请求会返回 200 但内容为空
-            // （finish_reason = content_filter），也有过 choices 为空的形态。
-            // 用 !! 会炸成 NPE / 下标越界，最后被 UI 当成「没连上」——那是误导。
-            val choice = root["choices"]?.jsonArray?.firstOrNull()?.jsonObject
-            val finishReason = choice?.get("finish_reason")?.jsonPrimitive?.contentOrNull
-            val content = choice?.get("message")?.jsonObject?.get("content")?.jsonPrimitive?.contentOrNull
-            if (content.isNullOrBlank()) {
-                Log.w(TAG, "响应没有内容：finish_reason=$finishReason")
-                throw DeepSeekEmptyResponseException(finishReason)
-            }
-            try {
-                json.decodeFromString(AiParseResult.serializer(), unwrapJsonFence(content))
-            } catch (parseFailure: Exception) {
-                // Never retain conversation/ledger text in device logs. A format failure can be retried.
-                Log.w(TAG, "回复格式校验失败：${parseFailure.javaClass.simpleName}，长度=${content.length}")
-                throw DeepSeekMalformedResponseException()
+        } finally {
+            // Count reported usage even when content is empty/malformed and this attempt retries.
+            // The optional observer is metadata-only and must never trigger another API call.
+            withContext(kotlinx.coroutines.NonCancellable) {
+                try { onUsage(reportedUsage) } catch (_: Exception) {
+                    Log.w(TAG, "Local usage observer failed")
+                }
             }
         }
     }

@@ -72,19 +72,25 @@ object ImageBillImport {
             })
         }.toString()
         val call = client.newCall(Request.Builder().url(AiConfig.BASE_URL).header("Authorization", "Bearer $key").post(body.toRequestBody("application/json".toMediaType())).build())
-        val response = suspendCancellableCoroutine<Response> { continuation ->
-            continuation.invokeOnCancellation { call.cancel() }
-            call.enqueue(object : Callback {
-                override fun onFailure(call: Call, e: IOException) { if (continuation.isActive) continuation.resumeWithException(e) }
-                override fun onResponse(call: Call, response: Response) { continuation.resume(response) { _, value, _ -> value.close() } }
-            })
-        }
-        response.use {
-            check(it.isSuccessful) { when(it.code) { 401 -> "AI 密钥无效，请检查设置"; 402 -> "AI 余额不足"; 429 -> "请求有点多，请稍后重试"; else -> "图片识别暂不可用（${it.code}），请稍后重试" } }
-            val root = Json.parseToJsonElement(it.body!!.string()).jsonObject
-            val content = root["choices"]?.jsonArray?.firstOrNull()?.jsonObject?.get("message")?.jsonObject?.get("content")?.jsonPrimitive?.contentOrNull?.takeIf { text -> text.isNotBlank() && text.length <= 8000 }
-                ?: error("这次没读到内容，可以换张清晰的图片重试")
-            com.jiligulu.app.core.ai.ImageReceiptCodec.render(content, requestMillis, zone)
+        var reportedUsage: com.jiligulu.app.core.ai.AiTokenUsage? = null
+        try {
+            val response = suspendCancellableCoroutine<Response> { continuation ->
+                continuation.invokeOnCancellation { call.cancel() }
+                call.enqueue(object : Callback {
+                    override fun onFailure(call: Call, e: IOException) { if (continuation.isActive) continuation.resumeWithException(e) }
+                    override fun onResponse(call: Call, response: Response) { continuation.resume(response) { _, value, _ -> value.close() } }
+                })
+            }
+            response.use {
+                check(it.isSuccessful) { when(it.code) { 401 -> "AI 密钥无效，请检查设置"; 402 -> "AI 余额不足"; 429 -> "请求有点多，请稍后重试"; else -> "图片识别暂不可用（${it.code}），请稍后重试" } }
+                val root = Json.parseToJsonElement(it.body!!.string()).jsonObject
+                reportedUsage = com.jiligulu.app.core.ai.AiTokenUsage.fromResponse(root)
+                val content = root["choices"]?.jsonArray?.firstOrNull()?.jsonObject?.get("message")?.jsonObject?.get("content")?.jsonPrimitive?.contentOrNull?.takeIf { text -> text.isNotBlank() && text.length <= 8000 }
+                    ?: error("这次没读到内容，可以换张清晰的图片重试")
+                com.jiligulu.app.core.ai.ImageReceiptCodec.render(content, requestMillis, zone)
+            }
+        } finally {
+            (context.applicationContext as JiliguluApp).container.aiUsage.record(reportedUsage)
         }
     }
 }

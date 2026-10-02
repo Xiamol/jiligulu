@@ -22,25 +22,25 @@ class CacheHistoryWindowTest {
             val repo = ChatHistoryRepository(db)
             repeat(60) { i -> repo.insert(ChatMessageEntity(kind = if (i % 2 == 0) "USER" else "ASSISTANT", content = "message$i", createdAt = 1000)) }
             val initial = repo.recentForAi(500)
-            repeat(18) { i -> repo.insert(ChatMessageEntity(kind = if (i % 2 == 0) "USER" else "ASSISTANT", content = "next$i", createdAt = 1001)) }
+            repeat(78) { i -> repo.insert(ChatMessageEntity(kind = if (i % 2 == 0) "USER" else "ASSISTANT", content = "next$i", createdAt = 1001)) }
             val growing = repo.recentForAi(500)
             assertEquals(initial, growing.take(60))
-            assertEquals(78, growing.size)
+            assertEquals(138, growing.size)
             repo.insert(ChatMessageEntity(kind = "DRAFT", content = "not history", createdAt = 1002))
             repo.insert(ChatMessageEntity(kind = "ASSISTANT", status = "PENDING", content = "not history", createdAt = 1002))
             assertEquals(growing, repo.recentForAi(500))
             repo.insert(ChatMessageEntity(kind = "USER", content = "last user", createdAt = 1003))
             val current = repo.recentForAi(500)
-            assertEquals(78, AiRepository.chatTurnsFor(current, 1004, current.size).size)
+            assertEquals(138, AiRepository.chatTurnsFor(current, 1004, current.size).size)
             repo.insert(ChatMessageEntity(kind = "ASSISTANT", content = "last answer", createdAt = 1003))
             val trimmed = repo.recentForAi(500)
             assertEquals(60, trimmed.size)
-            assertEquals(initial[20], trimmed.first())
-            assertEquals(82, repo.getAll().size)
+            assertEquals(growing[80], trimmed.first())
+            assertEquals(142, repo.getAll().size)
             assertTrue(repo.recentForAi(1005).isEmpty())
         } finally { db.close() }
     }
     @Test fun windowNeverShrinksBelowOriginalRetentionOrGrowsWithoutBound() {
-        for (count in 60..10000) assertTrue(ChatContextBuilder.historyWindowSize(count) in 60..79)
+        for (count in 60..10000) assertTrue(ChatContextBuilder.historyWindowSize(count) in 60..139)
     }
 }

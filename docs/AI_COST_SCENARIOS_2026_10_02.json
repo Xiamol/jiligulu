@@ -1,0 +1,114 @@
+{
+  "assumptions": "600 rounds, 40 tokens/history message, stable prefix 2400, dynamic 600, output80; warm prefix reuse assumed",
+  "continuous": [
+    {
+      "batch": 2,
+      "max_history": 60,
+      "yuan_per_600_rounds": 1.951848,
+      "input_hit_percent": 46.0
+    },
+    {
+      "batch": 20,
+      "max_history": 78,
+      "yuan_per_600_rounds": 0.789595,
+      "input_hit_percent": 84.1
+    },
+    {
+      "batch": 40,
+      "max_history": 98,
+      "yuan_per_600_rounds": 0.730414,
+      "input_hit_percent": 86.9
+    },
+    {
+      "batch": 60,
+      "max_history": 118,
+      "yuan_per_600_rounds": 0.712318,
+      "input_hit_percent": 88.3
+    },
+    {
+      "batch": 80,
+      "max_history": 138,
+      "yuan_per_600_rounds": 0.707544,
+      "input_hit_percent": 89.1
+    },
+    {
+      "batch": 100,
+      "max_history": 158,
+      "yuan_per_600_rounds": 0.705043,
+      "input_hit_percent": 89.9
+    },
+    {
+      "batch": 120,
+      "max_history": 178,
+      "yuan_per_600_rounds": 0.704816,
+      "input_hit_percent": 90.4
+    },
+    {
+      "batch": 160,
+      "max_history": 218,
+      "yuan_per_600_rounds": 0.709549,
+      "input_hit_percent": 91.4
+    },
+    {
+      "batch": 240,
+      "max_history": 298,
+      "yuan_per_600_rounds": 0.719368,
+      "input_hit_percent": 92.8
+    }
+  ],
+  "cold_every_10_rounds": [
+    {
+      "batch": 20,
+      "max_history": 78,
+      "yuan_per_600_rounds": 0.932832,
+      "input_hit_percent": 79.9
+    },
+    {
+      "batch": 40,
+      "max_history": 98,
+      "yuan_per_600_rounds": 0.959264,
+      "input_hit_percent": 80.5
+    },
+    {
+      "batch": 60,
+      "max_history": 118,
+      "yuan_per_600_rounds": 0.98664,
+      "input_hit_percent": 81.1
+    },
+    {
+      "batch": 80,
+      "max_history": 138,
+      "yuan_per_600_rounds": 1.012128,
+      "input_hit_percent": 81.5
+    },
+    {
+      "batch": 100,
+      "max_history": 158,
+      "yuan_per_600_rounds": 1.037616,
+      "input_hit_percent": 82.0
+    },
+    {
+      "batch": 120,
+      "max_history": 178,
+      "yuan_per_600_rounds": 1.063104,
+      "input_hit_percent": 82.3
+    },
+    {
+      "batch": 160,
+      "max_history": 218,
+      "yuan_per_600_rounds": 1.117856,
+      "input_hit_percent": 83.1
+    },
+    {
+      "batch": 240,
+      "max_history": 298,
+      "yuan_per_600_rounds": 1.216032,
+      "input_hit_percent": 84.0
+    }
+  ],
+  "illustration": {
+    "10k_input_55pct_hit_300_output": 0.00581,
+    "20k_input_90pct_hit_300_output": 0.00356,
+    "100k_input_95pct_hit_300_output": 0.0081
+  }
+}

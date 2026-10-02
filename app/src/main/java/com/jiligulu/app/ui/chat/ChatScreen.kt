@@ -104,6 +104,9 @@ fun ChatScreen(
     val error by vm.error.collectAsStateWithLifecycle()
     val pending by vm.pending.collectAsStateWithLifecycle()
     val expandedDrafts by vm.expandedDrafts.collectAsStateWithLifecycle()
+    val hasOlderHistory by vm.hasOlderHistory.collectAsStateWithLifecycle()
+    val loadingOlderHistory by vm.loadingOlderHistory.collectAsStateWithLifecycle()
+    val newestFirst = remember(items) { items.asReversed() }
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(vm, lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -141,7 +144,8 @@ fun ChatScreen(
 
     // A pending bubble is replaced in place: list size alone misses the actual reply/card.
     // Follow each new message or last-message replacement, even after a taller card changes anchors.
-    LaunchedEffect(items.size, items.lastOrNull()?.messageArrivalKey()) {
+    // Loading an older page changes the size, but must leave the reader at their current message.
+    LaunchedEffect(items.lastOrNull()?.messageArrivalKey()) {
         listState.animateScrollToItem(0)
     }
 
@@ -187,7 +191,7 @@ fun ChatScreen(
             contentPadding = PaddingValues(horizontal = 18.dp, vertical = 14.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            items(items.asReversed(), key = { it.id }) { item ->
+            items(newestFirst, key = { it.id }, contentType = { it.javaClass }) { item ->
                 // 设计稿动效③：对话气泡从底部上滑+渐显
                 Box(Modifier.animateItem()) {
                     when (item) {
@@ -234,6 +238,19 @@ fun ChatScreen(
                                 }
                             }
                         )
+                    }
+                }
+            }
+            if (hasOlderHistory) {
+                item(key = "older-history", contentType = "history-control") {
+                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                        TextButton(onClick = vm::loadOlderHistory, enabled = !loadingOlderHistory) {
+                            if (loadingOlderHistory) {
+                                CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+                                Spacer(Modifier.width(8.dp))
+                            }
+                            Text(if (loadingOlderHistory) "翻翻以前的小对话…" else "查看更早的对话 ♡")
+                        }
                     }
                 }
             }

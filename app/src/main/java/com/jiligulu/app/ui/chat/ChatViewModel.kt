@@ -31,6 +31,7 @@ import com.jiligulu.app.domain.persona.QuipLibrary
 import com.jiligulu.app.domain.time.BillTimeResolver
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -127,6 +128,10 @@ class ChatViewModel(
     val items: StateFlow<List<ChatItem>> = _items
     private val _ready = MutableStateFlow(false)
     val ready: StateFlow<Boolean> = _ready
+    private val _hasOlderHistory = MutableStateFlow(false)
+    val hasOlderHistory: StateFlow<Boolean> = _hasOlderHistory
+    private val _loadingOlderHistory = MutableStateFlow(false)
+    val loadingOlderHistory: StateFlow<Boolean> = _loadingOlderHistory
     private val _sending = MutableStateFlow(false)
     val sending: StateFlow<Boolean> = _sending
     private val _error = MutableStateFlow<String?>(null)
@@ -154,7 +159,7 @@ class ChatViewModel(
                 writes.withLock {
                     _pending.value = null
                     collapseDrafts()
-                    _items.value = history.getAll().map { it.toUi() }
+                    _items.value = readHistoryPage(Long.MAX_VALUE)
                     if (_items.value.isEmpty()) appendReply("新的一页，阿噜继续陪你记账 ♡")
                 }
             }
@@ -169,7 +174,7 @@ class ChatViewModel(
                 writes.withLock {
                     history.markPendingInterrupted()
                     // Deleted drafts are immutable tombstones; they never become editable again.
-                    _items.value = history.getAll().map { it.toUi() }
+                    _items.value = readHistoryPage(Long.MAX_VALUE)
                     _pending.value = PromptRenderer.pendingOf(history.latestPending())
                     if (_items.value.isEmpty()) {
                         val name = aiRepository.nicknameWithSuffix()
@@ -186,6 +191,38 @@ class ChatViewModel(
                 loadingHistory = false
             }
         }
+    }
+
+    /** Load only when requested; prepending old rows must not move the latest-message anchor. */
+    fun loadOlderHistory() {
+        if (!_ready.value || !_hasOlderHistory.value || _loadingOlderHistory.value) return
+        _loadingOlderHistory.value = true
+        viewModelScope.launch {
+            try {
+                writes.withLock {
+                    val beforeId = _items.value.firstOrNull()?.id ?: return@withLock
+                    val older = readHistoryPage(beforeId)
+                    _items.value = older + _items.value
+                }
+                _error.value = null
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                _error.value = "更早的对话暂时没读出来，可以再点一次；历史记录仍然保留。"
+            } finally {
+                _loadingOlderHistory.value = false
+            }
+        }
+    }
+
+    private suspend fun readHistoryPage(beforeId: Long): List<ChatItem> {
+        // One extra row tells us whether a next page exists, without COUNT(*) or OFFSET scans.
+        val rows = history.uiPageBefore(beforeId, HISTORY_PAGE_SIZE + 1)
+        val decoded = withContext(Dispatchers.Default) {
+            rows.takeLast(HISTORY_PAGE_SIZE).map { it.toUi() }
+        }
+        _hasOlderHistory.value = rows.size > HISTORY_PAGE_SIZE
+        return decoded
     }
 
     fun send(text: String) {
@@ -715,13 +752,15 @@ class ChatViewModel(
         detail, note, checked, timestamp, timeNeedsReview, timeHint
     )
 
-    private fun findCard(id: Long) = _items.value.filterIsInstance<ChatItem.DraftCard>().find { it.id == id }
-    private fun findCommandCard(id: Long) = _items.value.filterIsInstance<ChatItem.CommandCard>().find { it.id == id }
+    private fun findCard(id: Long) = _items.value.firstOrNull { it.id == id } as? ChatItem.DraftCard
+    private fun findCommandCard(id: Long) = _items.value.firstOrNull { it.id == id } as? ChatItem.CommandCard
     private fun append(item: ChatItem) { _items.value = _items.value + item }
     private fun replace(item: ChatItem) { _items.value = _items.value.map { if (it.id == item.id) item else it } }
     private fun trimAmount(value: Double) = java.math.BigDecimal.valueOf(value).stripTrailingZeros().toPlainString()
 
     companion object {
+        private const val HISTORY_PAGE_SIZE = 80
+
         internal fun offlineResult(input: String, cause: Throwable? = null, categories: List<CategoryEntity> = emptyList()): AiParseResult {
             localGreeting(input)?.let { greeting ->
                 return AiParseResult(reply = "$greeting\n（在线回复暂时没接上，这是阿噜的本地问候。）")

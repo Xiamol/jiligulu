@@ -540,6 +540,7 @@ class R9WireFormatTest {
         assertTrue(tail.contains("用户这轮说：hi"))
         val (raw, ok) = invoke(listOf(ChatTurn("user", "早")), okBody, first.renderStableContext())
         assertTrue(ok)
+        assertEquals("disabled", Json.parseToJsonElement(raw).jsonObject["thinking"]!!.jsonObject["type"]!!.jsonPrimitive.content)
         val messages = Json.parseToJsonElement(raw).jsonObject["messages"]!!.jsonArray
         assertEquals("SYS-PROMPT", messages[0].jsonObject["content"]!!.jsonPrimitive.content)
         assertEquals(first.renderStableContext(), messages[1].jsonObject["content"]!!.jsonPrimitive.content)
@@ -562,6 +563,24 @@ class R9WireFormatTest {
         val logged = ShadowLog.getLogs().filter { it.tag == "DeepSeekClient" }.map { it.msg }
         assertTrue("应打印命中/未命中 token，实际日志：$logged",
             logged.any { it.contains("prompt cache: hit=1234 miss=5678") })
+    }
+
+    @Test fun `usage observer counts retries without turning recording failure into another request`() = runBlocking {
+        val usages = mutableListOf<com.jiligulu.app.core.ai.AiTokenUsage?>()
+        var calls = 0
+        val http = OkHttpClient.Builder().addInterceptor { chain ->
+            calls++
+            val body = if (calls == 1) """{"choices":[{"message":{"content":""}}],"usage":{"prompt_cache_hit_tokens":10,"prompt_cache_miss_tokens":20,"completion_tokens":30}}""" else okBody
+            Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200).message("OK")
+                .body(body.toResponseBody("application/json".toMediaType())).build()
+        }.build()
+        val result = DeepSeekClient("test", http, onUsage = { usages += it; if (usages.size == 2) error("disk failure") })
+            .parseBill("SYS", "JSON please")
+        assertTrue(result.isSuccess)
+        assertEquals(2, calls)
+        assertEquals(2, usages.size)
+        assertEquals(30L, usages[0]?.output)
+        assertEquals(1234L, usages[1]?.cacheHit)
     }
 
     @Test

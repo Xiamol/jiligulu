@@ -1,0 +1,118 @@
+[
+  {
+    "case": "chat",
+    "mode": "default",
+    "seconds": 0.96,
+    "hit": 2304,
+    "miss": 198,
+    "output": 62,
+    "reasoning_tokens": 24,
+    "nonempty": true,
+    "bills": [],
+    "yuan": 0.00049208
+  },
+  {
+    "case": "chat",
+    "mode": "disabled",
+    "seconds": 1.02,
+    "hit": 2176,
+    "miss": 301,
+    "output": 28,
+    "reasoning_tokens": null,
+    "nonempty": true,
+    "bills": [],
+    "yuan": 0.00045651999999999997
+  },
+  {
+    "case": "meal",
+    "mode": "default",
+    "seconds": 1.91,
+    "hit": 2304,
+    "miss": 195,
+    "output": 237,
+    "reasoning_tokens": 120,
+    "nonempty": true,
+    "bills": [
+      [
+        9,
+        "EXPENSE",
+        "昨天中午"
+      ]
+    ],
+    "yuan": 0.00118908
+  },
+  {
+    "case": "meal",
+    "mode": "disabled",
+    "seconds": 0.86,
+    "hit": 2304,
+    "miss": 170,
+    "output": 101,
+    "reasoning_tokens": null,
+    "nonempty": true,
+    "bills": [
+      [
+        9,
+        "EXPENSE",
+        "昨天中午"
+      ]
+    ],
+    "yuan": 0.00062008
+  },
+  {
+    "case": "multi",
+    "mode": "default",
+    "seconds": 2.07,
+    "hit": 2304,
+    "miss": 200,
+    "output": 380,
+    "reasoning_tokens": 144,
+    "nonempty": true,
+    "bills": [
+      [
+        8,
+        "EXPENSE",
+        ""
+      ],
+      [
+        3,
+        "EXPENSE",
+        ""
+      ],
+      [
+        2000,
+        "INCOME",
+        ""
+      ]
+    ],
+    "yuan": 0.00176608
+  },
+  {
+    "case": "multi",
+    "mode": "disabled",
+    "seconds": 1.57,
+    "hit": 2304,
+    "miss": 175,
+    "output": 220,
+    "reasoning_tokens": null,
+    "nonempty": true,
+    "bills": [
+      [
+        8,
+        "EXPENSE",
+        ""
+      ],
+      [
+        3,
+        "EXPENSE",
+        ""
+      ],
+      [
+        2000,
+        "INCOME",
+        ""
+      ]
+    ],
+    "yuan": 0.00110108
+  }
+]

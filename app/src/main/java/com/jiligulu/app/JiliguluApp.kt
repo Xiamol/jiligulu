@@ -26,6 +26,9 @@ class AppContainer(private val app: Application) {
     private val database: AppDatabase by lazy { AppDatabase.build(app) }
 
     val userPrefs: UserPrefs by lazy { UserPrefs(app) }
+    val aiUsage: com.jiligulu.app.data.prefs.AiUsageRepository by lazy {
+        com.jiligulu.app.data.prefs.AiUsageRepository(app)
+    }
     val updates: ReleaseUpdateRepository by lazy { ReleaseUpdateRepository(userPrefs) }
     val announcements: AnnouncementRepository by lazy { AnnouncementRepository(userPrefs) }
 
@@ -36,7 +39,8 @@ class AppContainer(private val app: Application) {
     val aiRepository: AiRepository by lazy {
         AiRepository(
             app, categoryRepository, billRepository, userPrefs,
-            chatHistoryRepository, categoryAdminRepository
+            chatHistoryRepository, categoryAdminRepository,
+            clientFactory = { key -> com.jiligulu.app.core.ai.DeepSeekClient(key, onUsage = aiUsage::record) }
         )
     }
 

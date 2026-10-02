@@ -32,6 +32,11 @@ class ChatHistoryRepository(private val database: AppDatabase) {
 
     fun observeAll(): Flow<List<ChatMessageEntity>> = dao.observeAll()
     suspend fun getAll(): List<ChatMessageEntity> = dao.getAll()
+
+    /** UI pages never trim the stored conversation or change the independent AI context window. */
+    suspend fun uiPageBefore(beforeId: Long, limit: Int): List<ChatMessageEntity> =
+        dao.uiPageBefore(beforeId, limit).asReversed()
+
     suspend fun recentForAi(cutoff: Long): List<ChatMessageEntity> = database.withTransaction {
         val count = dao.aiTurnCount()
         val limit = com.jiligulu.app.domain.chat.ChatContextBuilder.historyWindowSize(count)

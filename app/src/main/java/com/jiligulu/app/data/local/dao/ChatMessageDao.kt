@@ -15,6 +15,10 @@ interface ChatMessageDao {
     @Query("SELECT * FROM chat_messages ORDER BY id ASC")
     suspend fun getAll(): List<ChatMessageEntity>
 
+    /** Keyset pagination keeps opening a long conversation independent of its total length. */
+    @Query("SELECT * FROM chat_messages WHERE id < :beforeId AND kind != 'PENDING_DRAFT' ORDER BY id DESC LIMIT :limit")
+    suspend fun uiPageBefore(beforeId: Long, limit: Int): List<ChatMessageEntity>
+
     @Query("SELECT * FROM chat_messages WHERE id = :id")
     suspend fun getById(id: Long): ChatMessageEntity?
 

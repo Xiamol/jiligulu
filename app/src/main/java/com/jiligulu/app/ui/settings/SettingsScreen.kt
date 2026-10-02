@@ -325,6 +325,7 @@ fun SettingsScreen(
                     if (settingsTab == "提醒") SettingsSection("悬浮记账", "阿噜陪你跨应用记一笔", "📷") { com.jiligulu.app.ui.capture.FloatingCaptureSettings() }
 
                     if (settingsTab == "数据") SettingsSection("AI 服务", "让每一句生活，都有回应", "✨") {
+                        AiUsageSettings()
                         OutlinedTextField(
                             value = state.apiKey,
                             onValueChange = vm::setApiKey,
