@@ -491,7 +491,7 @@ class R9WireFormatTest {
     private val noUsageBody = """{"choices":[{"message":{"content":"{\"bills\":[],\"reply\":\"ok\"}"}}]}"""
 
     /** 用拦截器截获发往 DeepSeek 的请求体，返回 (capturedRequestJson, success)。 */
-    private fun invoke(history: List<ChatTurn>, responseBody: String): Pair<String, Boolean> {
+    private fun invoke(history: List<ChatTurn>, responseBody: String, stable: String = ""): Pair<String, Boolean> {
         val captured = AtomicReference("")
         val client = OkHttpClient.Builder().addInterceptor { chain ->
             val req = chain.request()
@@ -502,7 +502,7 @@ class R9WireFormatTest {
                 .body(responseBody.toResponseBody("application/json".toMediaType())).build()
         }.build()
         val result = runBlocking {
-            DeepSeekClient("test-key", client).parseBill("SYS-PROMPT", "USER-CONTEXT", history)
+            DeepSeekClient("test-key", client).parseBill("SYS-PROMPT", "USER-CONTEXT", history, stableContext = stable)
         }
         return captured.get() to result.isSuccess
     }
@@ -526,6 +526,24 @@ class R9WireFormatTest {
             "USER-CONTEXT" + DeepSeekClient.OUTPUT_CONTRACT, messages.last().jsonObject["content"]!!.jsonPrimitive.content)
         val assistantWire = messages[2].jsonObject["content"]!!.jsonPrimitive.content
         assertEquals("好呀", Json.parseToJsonElement(assistantWire).jsonObject["reply"]!!.jsonPrimitive.content)
+    }
+
+    @Test fun `stable profile precedes history and clock stays at the end`() {
+        val ctx: Context = RuntimeEnvironment.getApplication()
+        val categories = listOf(R9.category(2, "交通"), R9.category(1, "吃饭"))
+        val first = newRenderer(ctx, categories = categories)
+        val next = newRenderer(ctx, categories = categories.reversed(), context = ChatContext("2026-10-02 15:00", R9.zone.id, emptyList()))
+        assertEquals(first.renderStableContext(), next.renderStableContext())
+        val tail = next.renderContext("hi", includeStableContext = false)
+        assertFalse(tail.contains("现有分类列表"))
+        assertTrue(tail.contains("2026-10-02 15:00"))
+        assertTrue(tail.contains("用户这轮说：hi"))
+        val (raw, ok) = invoke(listOf(ChatTurn("user", "早")), okBody, first.renderStableContext())
+        assertTrue(ok)
+        val messages = Json.parseToJsonElement(raw).jsonObject["messages"]!!.jsonArray
+        assertEquals("SYS-PROMPT", messages[0].jsonObject["content"]!!.jsonPrimitive.content)
+        assertEquals(first.renderStableContext(), messages[1].jsonObject["content"]!!.jsonPrimitive.content)
+        assertEquals("早", messages[2].jsonObject["content"]!!.jsonPrimitive.content)
     }
 
     @Test

@@ -18,6 +18,12 @@ interface ChatMessageDao {
     @Query("SELECT * FROM chat_messages WHERE id = :id")
     suspend fun getById(id: Long): ChatMessageEntity?
 
+    @Query("SELECT COUNT(*) FROM chat_messages WHERE content != '' AND (kind = 'USER' OR (kind = 'ASSISTANT' AND status NOT IN ('PENDING', 'INTERRUPTED')))")
+    suspend fun aiTurnCount(): Int
+
+    @Query("SELECT * FROM chat_messages WHERE createdAt >= :cutoff AND content != '' AND (kind = 'USER' OR (kind = 'ASSISTANT' AND status NOT IN ('PENDING', 'INTERRUPTED'))) ORDER BY id DESC LIMIT :limit")
+    suspend fun recentAiTurns(cutoff: Long, limit: Int): List<ChatMessageEntity>
+
     @Insert
     suspend fun insert(message: ChatMessageEntity): Long
 

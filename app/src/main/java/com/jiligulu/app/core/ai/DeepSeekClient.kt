@@ -141,12 +141,13 @@ class DeepSeekClient(private val apiKey: String, private val client: OkHttpClien
     suspend fun parseBill(
         systemPrompt: String,
         userInput: String,
-        history: List<ChatTurn> = emptyList()
+        history: List<ChatTurn> = emptyList(),
+        stableContext: String = ""
     ): Result<AiParseResult> = withContext(Dispatchers.IO) {
         var lastFailure: Exception? = null
         for (attempt in 1..MAX_ATTEMPTS) {
             try {
-                return@withContext Result.success(executeOnce(systemPrompt, userInput, history))
+                return@withContext Result.success(executeOnce(systemPrompt, userInput, history, stableContext))
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (failure: Exception) {
@@ -171,7 +172,8 @@ class DeepSeekClient(private val apiKey: String, private val client: OkHttpClien
     private suspend fun executeOnce(
         systemPrompt: String,
         userInput: String,
-        history: List<ChatTurn>
+        history: List<ChatTurn>,
+        stableContext: String
     ): AiParseResult {
         val requestJson = buildJsonObject {
             put("model", AiConfig.MODEL)
@@ -181,6 +183,10 @@ class DeepSeekClient(private val apiKey: String, private val client: OkHttpClien
                 addJsonObject {
                     put("role", "system")
                     put("content", systemPrompt)
+                }
+                if (stableContext.isNotBlank()) addJsonObject {
+                    put("role", "system")
+                    put("content", stableContext)
                 }
                 // 历史被时间窗裁过之后，最早的几条可能是 assistant 轮（它对应的 user 轮滚出去了）。
                 // OpenAI 兼容接口要求首条必须是 user，所以把开头连续的 assistant 轮整体丢掉，
@@ -287,7 +293,10 @@ class DeepSeekClient(private val apiKey: String, private val client: OkHttpClien
         val usage = root["usage"]?.jsonObject ?: return
         val hit = usage["prompt_cache_hit_tokens"]?.jsonPrimitive?.contentOrNull
         val miss = usage["prompt_cache_miss_tokens"]?.jsonPrimitive?.contentOrNull
-        Log.d(TAG, "prompt cache: hit=$hit miss=$miss")
+        val hits = hit?.toLongOrNull() ?: 0L
+        val misses = miss?.toLongOrNull() ?: 0L
+        val ratio = if (hits + misses > 0) "%.1f%%".format(java.util.Locale.ROOT, hits * 100.0 / (hits + misses)) else "unknown"
+        Log.d(TAG, "prompt cache: hit=$hit miss=$miss rate=$ratio")
     }
 }
 

@@ -7,15 +7,19 @@ import com.jiligulu.app.data.local.entity.BudgetPeriod
 import com.jiligulu.app.domain.budget.BudgetEngine
 import com.jiligulu.app.domain.budget.BudgetStatus
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 
 /** 预算仓库：设置/清除预算 + 实时状态（周期内账单 → BudgetEngine 计算） */
 class BudgetRepository(
     private val budgetDao: BudgetDao,
-    private val billDao: BillDao
+    private val billDao: BillDao,
+    private val nowMillis: () -> Long = System::currentTimeMillis
 ) {
 
     /** 预算实时状态；未设预算发 null（PRD：默认隐藏余粮环） */
@@ -25,10 +29,18 @@ class BudgetRepository(
             if (budget == null) {
                 flowOf(null)
             } else {
-                // 只查当前周期的账单，范围最小化
-                val (start, end) = BudgetEngine.currentPeriod(budget)
-                billDao.observeBetween(start, end).map { bills ->
-                    BudgetEngine.statusOf(budget, bills)
+                // A long-lived statistics page must move its query when the budget rolls over.
+                // Unchanged ticks do not requery Room; a new subscription resolves the range immediately.
+                flow {
+                    while (true) {
+                        emit(BudgetEngine.currentPeriod(budget, nowMillis()))
+                        delay(60_000L)
+                    }
+                }.distinctUntilChanged().flatMapLatest { (start, end) ->
+                    billDao.observeBetween(start, end).map { bills ->
+                        // Use the same period as the query, including an emission at the midnight boundary.
+                        BudgetEngine.statusOf(budget, bills, start)
+                    }
                 }
             }
         }

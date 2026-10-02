@@ -144,7 +144,8 @@ fun MainScreen(
                                 onRefresh = personaVm::onMascotClick, onWaterClick = personaVm::startDrinking,
                                 modifier = Modifier.padding(horizontal = 20.dp))
                             Spacer(Modifier.height(12.dp))
-                            HomeScreen(onOpenChat = onOpenChat, onAddBill = onAddBill, vm = homeVm, active = selectedTab == 0)
+                            HomeScreen(onOpenChat = onOpenChat, onAddBill = onAddBill, vm = homeVm,
+                                active = selectedTab == 0, onOpenStats = { selectedTab = 1 })
                         }
                         1 -> StatsScreen(active = selectedTab == 1)
                     }

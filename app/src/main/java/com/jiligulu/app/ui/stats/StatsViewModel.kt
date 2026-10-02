@@ -150,9 +150,11 @@ class StatsViewModel(
             val days = calendar.getActualMaximum(Calendar.DAY_OF_MONTH)
             val todayStart = Formatters.dayStart(System.currentTimeMillis())
             val sums = LongArray(days + 1)
+            val billCalendar = calendar.clone() as Calendar
             bills.forEach { b ->
                 if (b.type == type && b.timestamp in range.first until range.second) {
-                    val day = dayOfMonthOf(b.timestamp)
+                    billCalendar.timeInMillis = b.timestamp
+                    val day = billCalendar.get(Calendar.DAY_OF_MONTH)
                     if (day in 1..days) sums[day] += b.amountFen
                 }
             }
@@ -180,8 +182,9 @@ class StatsViewModel(
 
     private fun distribution(bills: List<BillEntity>, day: Long, cats: List<com.jiligulu.app.data.local.entity.CategoryEntity>,
         type: BillType, selectedId: Long?): DayDonutUi {
+            val dayEnd = com.jiligulu.app.ui.components.shiftLocalDay(day, 1)
             val dayBills = bills.filter {
-                Formatters.dayStart(it.timestamp) == day && it.type == type
+                it.timestamp >= day && it.timestamp < dayEnd && it.type == type
             }
             val catMap = cats.associateBy { it.id }
             val byCat = dayBills.groupBy { it.categoryId }
@@ -229,8 +232,11 @@ class StatsViewModel(
             Quad(bills, day, catId, sort)
         }.combine(categoryRepository.categories) { q, cats ->
             val catMap = cats.associateBy { it.id }
-            val daily = q.bills.filter { Formatters.dayStart(it.timestamp) == q.day }
-            val leading = daily.groupBy { it.categoryId }.entries.sortedByDescending { entry -> entry.value.sumOf { it.amountFen } }.take(6).map { it.key }.toSet()
+            val dayEnd = com.jiligulu.app.ui.components.shiftLocalDay(q.day, 1)
+            val daily = q.bills.filter { it.timestamp >= q.day && it.timestamp < dayEnd }
+            val leading = if (q.catId == OTHER_KEY) daily.groupBy { it.categoryId }.entries
+                .sortedByDescending { entry -> entry.value.sumOf { it.amountFen } }.take(6).map { it.key }.toSet()
+                else emptySet()
             daily.asSequence()
                 .filter { q.catId == null || if (q.catId == OTHER_KEY) it.categoryId !in leading else it.categoryId == q.catId }
                 .sortedWith(
@@ -328,11 +334,6 @@ class StatsViewModel(
     }
 
     // ---------- 内部 ----------
-
-    private fun dayOfMonthOf(timestamp: Long): Int {
-        val cal = java.util.Calendar.getInstance().apply { timeInMillis = timestamp }
-        return cal.get(java.util.Calendar.DAY_OF_MONTH)
-    }
 
     private fun BudgetStatus.toUi(): BudgetUi {
         val overspend = overspendRatio > 0f

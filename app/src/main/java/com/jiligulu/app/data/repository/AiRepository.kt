@@ -19,6 +19,7 @@ import com.jiligulu.app.data.local.entity.IconType
 import com.jiligulu.app.data.prefs.UserPrefs
 import com.jiligulu.app.data.reminder.WaterReminderScheduler
 import com.jiligulu.app.domain.category.CategoryLabels
+import com.jiligulu.app.domain.chat.ChatIntent
 import com.jiligulu.app.domain.chat.ChatContext
 import com.jiligulu.app.domain.chat.ChatContextBuilder
 import com.jiligulu.app.domain.chat.PromptRenderer
@@ -154,15 +155,15 @@ class AiRepository(
                 if (suggestions == null) fallback else
                     com.jiligulu.app.core.ai.ImageCategoryClassifier.apply(fallback, suggestions, categories)
             }
-        }
+        }.onFailure { if (it is CancellationException) throw it }
         val categories = categoryRepository.getAll()
         val pending = PromptRenderer.pendingOf(chatHistoryRepository.latestPending())
         val chatContext = buildContext(categories, requestMillis, zone)
         val candidates = PromptRenderer.candidatesFrom(
-            billRepository.recent(BillRepository.CANDIDATE_SCAN_LIMIT), requestMillis, zone
+            if (ChatIntent.needsCandidates(input)) billRepository.recent(BillRepository.CANDIDATE_SCAN_LIMIT) else emptyList(), requestMillis, zone
         )
         // R4：回收站候选（情况六 restore 的 target_id 来源）。是否注入由 ChatIntent.needsTrash 决定。
-        val trashCandidates = billRepository.trashCandidates(BillRepository.TRASH_CANDIDATE_LIMIT)
+        val trashCandidates = if (ChatIntent.needsTrash(input)) billRepository.trashCandidates(BillRepository.TRASH_CANDIDATE_LIMIT) else emptyList()
         val water = userPrefs.waterReminderState.first()
         fun clock(minutes: Int) = "%02d:%02d".format(Locale.ROOT, minutes / 60, minutes % 60)
         val appSettings = "【当前提醒设置】\n喝水提醒：${if (water.enabled) "开启" else "关闭"}；间隔：${water.intervalMinutes} 分钟；" +
@@ -182,9 +183,9 @@ class AiRepository(
             appSettings = appSettings
         )
         val system = renderer.renderSystem()
-        val contextBlock = renderer.renderContext(input)
+        val contextBlock = renderer.renderContext(input, includeStableContext = false)
         return clientFactory(effectiveApiKey())
-            .parseBill(system, contextBlock, history = recentTurns(requestMillis))
+            .parseBill(system, contextBlock, history = recentTurns(requestMillis), stableContext = renderer.renderStableContext())
     }
 
     /**
@@ -226,7 +227,7 @@ class AiRepository(
         }
         val categories = categoryRepository.getAll()
         val candidates = PromptRenderer.candidatesFrom(
-            billRepository.recent(BillRepository.CANDIDATE_SCAN_LIMIT), requestMillis, zone
+            if (parsed.bills.any { it.isUpdate || it.isDelete }) billRepository.recent(BillRepository.CANDIDATE_SCAN_LIMIT) else emptyList(), requestMillis, zone
         )
         val byId = (candidates.latest + candidates.today + candidates.yesterday +
             candidates.beforeYesterday + candidates.thisWeek).associateBy { it.id }
@@ -449,7 +450,8 @@ class AiRepository(
      * 因此这里必须把「本轮刚落库的那条 USER」剔掉，否则模型会把同一句话看到两遍（见 [chatTurnsFor]）。
      */
     private suspend fun recentTurns(requestMillis: Long): List<ChatTurn> = try {
-        chatTurnsFor(chatHistoryRepository.getAll(), requestMillis)
+        val messages = chatHistoryRepository.recentForAi(requestMillis - ChatContextBuilder.MESSAGE_WINDOW_HOURS * 3_600_000L)
+        chatTurnsFor(messages, requestMillis, messages.size)
     } catch (cancelled: CancellationException) { throw cancelled
     } catch (_: Exception) { emptyList() }
 
@@ -469,7 +471,7 @@ class AiRepository(
          * 也能在异常恢复后自洽；它同样不改动 [ChatContextBuilder.MAX_MESSAGES] 的窗口语义，
          * 更不引入任何按轮数的裁切。
          */
-        internal fun chatTurnsFor(messages: List<ChatMessageEntity>, requestMillis: Long): List<ChatTurn> {
+        internal fun chatTurnsFor(messages: List<ChatMessageEntity>, requestMillis: Long, windowSize: Int = ChatContextBuilder.MAX_MESSAGES): List<ChatTurn> {
             val cutoff = requestMillis - ChatContextBuilder.MESSAGE_WINDOW_HOURS * 3_600_000L
             val turns = messages
                 .filter { it.createdAt >= cutoff }
@@ -484,7 +486,7 @@ class AiRepository(
                         else -> null
                     }
                 }
-                .takeLast(ChatContextBuilder.MAX_MESSAGES)
+                .takeLast(windowSize)
             return if (turns.lastOrNull()?.role == "user") turns.dropLast(1) else turns
         }
     }

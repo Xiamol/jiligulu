@@ -87,7 +87,8 @@ fun HomeScreen(
     onOpenChat: () -> Unit,
     onAddBill: () -> Unit,
     vm: HomeViewModel = viewModel(factory = HomeViewModel.Factory),
-    active: Boolean = true
+    active: Boolean = true,
+    onOpenStats: (() -> Unit)? = null
 ) {
     val state by vm.uiState.collectAsStateWithLifecycle()
     val day by vm.selectedDay.collectAsStateWithLifecycle()
@@ -110,7 +111,7 @@ fun HomeScreen(
             refreshMessage = if (app.container.announcements.state.value.offline) "暂时连不上，已保留原来的信笺" else "信箱已刷新 💌"
         } }, modifier = Modifier.fillMaxSize()
     ) {
-        HomeContent(state, onOpenChat, onAddBill, notices, app.container.announcements::open, day, vm::observeDay, vm::selectDay, active) { selectedBillId = it }
+        HomeContent(state, onOpenChat, onAddBill, notices, app.container.announcements::open, day, vm::observeDay, vm::selectDay, active, onOpenStats) { selectedBillId = it }
         refreshMessage?.let { message ->
             androidx.compose.material3.Snackbar(Modifier.align(Alignment.BottomCenter).padding(16.dp)) { Text(message) }
         }
@@ -132,11 +133,13 @@ private fun HomeContent(
     daySource: (Long) -> kotlinx.coroutines.flow.Flow<DailyLedgerSnapshot> = { kotlinx.coroutines.flow.flowOf(DailyLedgerSnapshot(it, loaded = true)) },
     onSelectDay: (Long) -> Unit = {},
     active: Boolean = true,
+    onOpenStats: (() -> Unit)? = null,
     onBillClick: (Long) -> Unit
 ) {
     var typeFilter by rememberSaveable { mutableIntStateOf(0) }
     var sort by rememberSaveable { mutableIntStateOf(0) }
     val outer = androidx.compose.foundation.lazy.rememberLazyListState()
+    val headerPinned by remember { derivedStateOf { outer.firstVisibleItemIndex >= 3 } }
     var activeInner by remember { mutableStateOf<LazyListState?>(null) }
     val gate = remember { StickyPullGate() }
     val effectScope = rememberCoroutineScope()
@@ -266,7 +269,8 @@ private fun HomeContent(
                     CompactChoice(listOf("时间↓", "时间↑", "金额↓", "金额↑"), sort) { sort = it }
                 }
                 DayPager(selectedDay, Formatters.dayStart(System.currentTimeMillis()), onSelectDay,
-                    modifier = Modifier.fillMaxWidth().weight(1f), tag = "home-day-pager") { pageDay ->
+                    modifier = Modifier.fillMaxWidth().weight(1f), tag = "home-day-pager",
+                    onSwipePastToday = onOpenStats.takeIf { active && headerPinned }) { pageDay ->
                     val flow = remember(pageDay, daySource) { daySource(pageDay) }
                     val snapshot by rememberPageData(flow, DailyLedgerSnapshot(pageDay))
                     val rows = remember(snapshot, typeFilter, sort) { filterHomeBills(snapshot.bills, pageDay, typeFilter, sort) }

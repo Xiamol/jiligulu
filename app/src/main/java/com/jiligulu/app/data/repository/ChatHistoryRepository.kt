@@ -32,6 +32,11 @@ class ChatHistoryRepository(private val database: AppDatabase) {
 
     fun observeAll(): Flow<List<ChatMessageEntity>> = dao.observeAll()
     suspend fun getAll(): List<ChatMessageEntity> = dao.getAll()
+    suspend fun recentForAi(cutoff: Long): List<ChatMessageEntity> = database.withTransaction {
+        val count = dao.aiTurnCount()
+        val limit = com.jiligulu.app.domain.chat.ChatContextBuilder.historyWindowSize(count)
+        dao.recentAiTurns(cutoff, limit).asReversed()
+    }
     suspend fun getById(id: Long): ChatMessageEntity? = dao.getById(id)
     suspend fun insert(message: ChatMessageEntity): Long = dao.insert(message)
     suspend fun update(message: ChatMessageEntity) = dao.update(message)

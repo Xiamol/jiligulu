@@ -5,6 +5,9 @@ import com.jiligulu.app.data.local.entity.BillType
 import com.jiligulu.app.data.local.entity.BudgetEntity
 import com.jiligulu.app.data.local.entity.BudgetPeriod
 import java.util.Calendar
+import java.time.Instant
+import java.time.ZoneId
+import java.time.temporal.ChronoUnit
 
 /** 预算实时状态（已用/剩余/超支） */
 data class BudgetStatus(
@@ -23,22 +26,25 @@ data class BudgetStatus(
  */
 object BudgetEngine {
 
-    private const val DAY_MILLIS = 24L * 60 * 60 * 1000
-
     /** 当前预算周期 [start, end) */
     fun currentPeriod(budget: BudgetEntity, now: Long = System.currentTimeMillis()): Pair<Long, Long> =
         when (budget.periodType) {
             BudgetPeriod.DAILY -> {
-                val start = dayStart(now)
-                start to start + DAY_MILLIS
+                val zone = ZoneId.systemDefault()
+                val day = Instant.ofEpochMilli(now).atZone(zone).toLocalDate()
+                day.atStartOfDay(zone).toInstant().toEpochMilli() to
+                    day.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
             }
             BudgetPeriod.WEEKLY -> {
                 // 以预算更新日为锚，每 7 天滚动
-                val anchor = dayStart(budget.updatedAt)
-                val elapsed = ((dayStart(now) - anchor) / DAY_MILLIS).coerceAtLeast(0)
+                val zone = ZoneId.systemDefault()
+                val anchor = Instant.ofEpochMilli(budget.updatedAt).atZone(zone).toLocalDate()
+                val day = Instant.ofEpochMilli(now).atZone(zone).toLocalDate()
+                val elapsed = ChronoUnit.DAYS.between(anchor, day).coerceAtLeast(0)
                 val cycles = elapsed / 7
-                val start = anchor + cycles * 7 * DAY_MILLIS
-                start to start + 7 * DAY_MILLIS
+                val start = anchor.plusDays(cycles * 7)
+                start.atStartOfDay(zone).toInstant().toEpochMilli() to
+                    start.plusDays(7).atStartOfDay(zone).toInstant().toEpochMilli()
             }
             BudgetPeriod.MONTHLY -> {
                 val anchorDay = budget.anchorDay.coerceIn(1, 28)
@@ -68,13 +74,6 @@ object BudgetEngine {
         } else 0f
         return BudgetStatus(budget, start, end, spent, remain, overspend)
     }
-
-    /** 某天 0 点 */
-    private fun dayStart(t: Long): Long = Calendar.getInstance().apply {
-        timeInMillis = t
-        set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0)
-        set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
-    }.timeInMillis
 
     /** now 所在月偏移 monthOffset 后的 anchorDay 号 0 点 */
     private fun monthAnchor(now: Long, anchorDay: Int, monthOffset: Int): Long =

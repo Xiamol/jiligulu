@@ -47,9 +47,15 @@ object ChatContextBuilder {
      *
      * ⚠️ **刻意不收敛到 12 轮**：用户明确要求「历史对话是刚需，否则他可能无法接着跟我聊」；
      * 而且 append-only 下历史越长，`[system + 历史]` 这个前缀命中得越多，裁切是双重损失。
-     * 所以这里保持 60。
+     * 所以 60 保留为最低窗口；请求允许逐批增长到 79，再一次性裁切。
      */
     const val MAX_MESSAGES = 60
+    const val HISTORY_BATCH_SIZE = 20
+
+    /** Keep at least the original window; evict a batch instead of breaking the prefix each turn. */
+    fun historyWindowSize(eligibleCount: Int): Int =
+        if (eligibleCount <= MAX_MESSAGES) MAX_MESSAGES
+        else MAX_MESSAGES + (eligibleCount - MAX_MESSAGES) % HISTORY_BATCH_SIZE
 
     private val dateFormat = DateTimeFormatter.ofPattern("M月d日 HH:mm")
 
@@ -92,7 +98,7 @@ object ChatContextBuilder {
         val when_ = Instant.ofEpochMilli(bill.timestamp).atZone(zone).format(dateFormat)
         val category = categoryName?.ifBlank { null } ?: "未分类"
         val name = bill.detail.ifBlank { category }
-        val amount = "%.2f".format(bill.amountFen / 100.0)
+        val amount = "%.2f".format(java.util.Locale.ROOT, bill.amountFen / 100.0)
         val type = if (bill.type == BillType.EXPENSE) "支出" else "收入"
         val note = if (bill.note.isNotBlank()) " · ${bill.note}" else ""
         return "[${bill.id}] $when_ · $category · $name · $amount 元 · $type$note"
