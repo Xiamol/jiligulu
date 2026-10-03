@@ -39,6 +39,13 @@ class BillRepository(
         check(billDao.updateDetails(id, amountFen, detail.trim(), timestamp) == 1) { "这条账单已不存在" }
     }
 
+    suspend fun updateWithMemory(id: Long, amountFen: Long, detail: String, timestamp: Long, note: String, photoUri: String?) {
+        require(amountFen > 0 && detail.trim().isNotEmpty())
+        check(billDao.updateWithMemory(id, amountFen, detail.trim(), timestamp, note.trim(), photoUri) == 1) { "这条账单已不存在" }
+    }
+
+    fun observePhotoMemories(): Flow<List<BillEntity>> = billDao.observePhotoMemories()
+
     /**
      * AI 改账：一次改金额/细则/时间/分类/备注。
      * 只在账单仍然存活时才生效（deletedAt IS NULL），避免改到回收站里的东西。

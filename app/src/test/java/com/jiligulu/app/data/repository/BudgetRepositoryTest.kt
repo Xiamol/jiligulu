@@ -96,6 +96,8 @@ class BudgetRepositoryTest {
         override fun observeById(id: Long): Flow<BillEntity?> = error("unused")
         override suspend fun getById(id: Long): BillEntity? = error("unused")
         override suspend fun updateDetails(id: Long, amountFen: Long, detail: String, timestamp: Long): Int = error("unused")
+        override suspend fun updateWithMemory(id: Long, amountFen: Long, detail: String, timestamp: Long, note: String, photoUri: String?): Int = error("unused")
+        override fun observePhotoMemories(): Flow<List<BillEntity>> = error("unused")
         override suspend fun updateFromAi(id: Long, amountFen: Long, detail: String, timestamp: Long, categoryId: Long, note: String): Int = error("unused")
         override suspend fun deleteById(id: Long): Int = error("unused")
         override suspend fun insert(bill: BillEntity): Long = error("unused")

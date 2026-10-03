@@ -17,7 +17,7 @@ import java.time.YearMonth
 import java.time.ZoneId
 
 @Composable
-fun CompactCalendarDialog(selected: Long, onDismiss: () -> Unit, onSelect: (Long) -> Unit) {
+fun CompactCalendarDialog(selected: Long, onDismiss: () -> Unit, onSelect: (Long) -> Unit, latestMonth: YearMonth = YearMonth.now()) {
     val zone = ZoneId.systemDefault()
     val date = Instant.ofEpochMilli(selected).atZone(zone).toLocalDate()
     var month by remember { mutableStateOf(YearMonth.from(date)) }
@@ -28,7 +28,7 @@ fun CompactCalendarDialog(selected: Long, onDismiss: () -> Unit, onSelect: (Long
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     TextButton(onClick = { month = month.minusMonths(1) }, enabled = month.year > 1900) { Text("‹") }
                     Text("${month.year}年${month.monthValue}月", Modifier.weight(1f), textAlign = TextAlign.Center)
-                    TextButton(onClick = { month = month.plusMonths(1) }, enabled = month < YearMonth.now(zone)) { Text("›") }
+                    TextButton(onClick = { month = month.plusMonths(1) }, enabled = month < latestMonth) { Text("›") }
                 }
                 Row { listOf("一", "二", "三", "四", "五", "六", "日").forEach {
                     Text(it, Modifier.weight(1f).padding(vertical = 6.dp), textAlign = TextAlign.Center,

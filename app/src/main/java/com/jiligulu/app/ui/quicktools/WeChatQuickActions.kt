@@ -25,11 +25,15 @@ internal object WeChatLauncher {
     fun intent(action: WeChatAction): Intent = Intent(Intent.ACTION_VIEW).apply {
         component = ComponentName(PACKAGE, when (action) {
             WeChatAction.SCAN -> "com.tencent.mm.ui.LauncherUI"
-            WeChatAction.PAY_CODE -> "com.tencent.mm.plugin.offline.ui.WalletOfflineCoinPurseUI"
+            WeChatAction.PAY_CODE -> "com.tencent.mm.ui.LauncherUI"
         })
         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         if (action == WeChatAction.SCAN) putExtra("LauncherUI.From.Scaner.Shortcut", true)
-        else putExtra("key_entry_scene", 2)
+        else {
+            addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            this.action = "com.tencent.mm.ui.ShortCutDispatchAction"
+            putExtra("LauncherUI.Shortcut.LaunchType", "launch_type_offline_wallet")
+        }
     }
 
     /** REQUESTED means Android accepted the launch, not that WeChat exposed a particular screen. */

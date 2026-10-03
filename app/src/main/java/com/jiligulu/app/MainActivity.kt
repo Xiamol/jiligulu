@@ -28,6 +28,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.isActive
 import com.jiligulu.app.data.reminder.recoverRemindersWhileVisible
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
@@ -66,12 +67,17 @@ object Routes {
     const val ONBOARDING = "onboarding"
     const val WELCOME_PREVIEW = "welcome_preview"
     const val TRASH = "trash"
+    const val LITTLE_WORLD = "little_world"
+    const val WISH_BOOK = "wish_book"
+    const val FUTURE_NOTES = "future_notes"
+    const val MEMORIES = "memories"
 
     /** 回收站的草稿页签——跳转卡里的「我自己去回收站」直达这里。 */
     const val TRASH_DRAFT = "trash_draft"
 }
 
 class MainActivity : ComponentActivity() {
+    private val futureNoteRequests = MutableStateFlow<String?>(null)
     private val waterRequests = MutableStateFlow(0)
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -80,6 +86,7 @@ class MainActivity : ComponentActivity() {
             com.jiligulu.app.ui.capture.FloatingCaptureService.hiddenForSession.value = false
         }
         handleWaterIntent(intent)
+        handleFutureNoteIntent(intent)
         lifecycleScope.launch {
             lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
                 // A vendor may remove alarms while keeping this process alive. Cold-start-only
@@ -107,12 +114,13 @@ class MainActivity : ComponentActivity() {
             val themeMode by app.container.userPrefs.themeMode
                 .collectAsStateWithLifecycle(initialValue = UserPrefs.THEME_SYSTEM)
             val request by waterRequests.collectAsStateWithLifecycle()
+            val futureNote by futureNoteRequests.collectAsStateWithLifecycle()
             val darkTheme = when (themeMode) {
                 UserPrefs.THEME_LIGHT -> false
                 UserPrefs.THEME_DARK -> true
                 else -> isSystemInDarkTheme()
             }
-            GuluTheme(darkTheme = darkTheme) { JiliguluRoot(request) }
+            GuluTheme(darkTheme = darkTheme) { JiliguluRoot(request, futureNote) { futureNoteRequests.value = null } }
         }
     }
 
@@ -120,8 +128,15 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         handleWaterIntent(intent)
+        handleFutureNoteIntent(intent)
     }
 
+    private fun handleFutureNoteIntent(intent: Intent?) {
+        intent?.getStringExtra(com.jiligulu.app.ui.futurenotes.FutureNoteReminder.EXTRA_ID)?.let {
+            futureNoteRequests.value = it
+            intent.removeExtra(com.jiligulu.app.ui.futurenotes.FutureNoteReminder.EXTRA_ID)
+        }
+    }
     private fun handleWaterIntent(intent: Intent?) {
         if ((intent?.getLongExtra(WaterReminderNotifications.EXTRA_WATER_REMINDER, 0L) ?: 0L) > 0L) {
             waterRequests.value += 1
@@ -131,8 +146,9 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun JiliguluRoot(waterRequest: Int) {
+private fun JiliguluRoot(waterRequest: Int, futureNoteId: String? = null, onNoteConsumed: () -> Unit = {}) {
     val app = LocalContext.current.applicationContext as JiliguluApp
+    val rootScope = androidx.compose.runtime.rememberCoroutineScope()
     val startup: StartupViewModel = viewModel(factory = viewModelFactory {
         initializer { StartupViewModel(app.container) }
     })
@@ -190,6 +206,15 @@ private fun JiliguluRoot(waterRequest: Int) {
             val homeState by homeVm.uiState.collectAsStateWithLifecycle()
             LaunchedEffect(homeState.isLoaded) { if (homeState.isLoaded) mainReady = true }
             val navController = rememberNavController()
+            val recordSticker: (com.jiligulu.app.data.littleworld.Sticker) -> Unit = { sticker ->
+                val json = kotlinx.serialization.json.Json.encodeToString(com.jiligulu.app.data.littleworld.Sticker.serializer(), sticker)
+                navController.navigate(Routes.ADD_BILL) { launchSingleTop = true }
+                navController.currentBackStackEntry?.savedStateHandle?.set("initial_sticker", json)
+            }
+            LaunchedEffect(Unit) { com.jiligulu.app.ui.futurenotes.FutureNoteReminder.restore(app) }
+            LaunchedEffect(futureNoteId) {
+                if (futureNoteId != null && nickname.isNotBlank()) navController.navigate(Routes.MAIN) { popUpTo(Routes.MAIN) { inclusive = false }; launchSingleTop = true }
+            }
             val navigation by navController.currentBackStackEntryAsState()
             val imageImport by com.jiligulu.app.ui.capture.ImageBillImport.pending.collectAsStateWithLifecycle()
             LaunchedEffect(imageImport) {
@@ -223,10 +248,38 @@ private fun JiliguluRoot(waterRequest: Int) {
                         onAddBill = { navController.navigate(Routes.ADD_BILL) },
                         onOpenChat = { navController.navigate(Routes.CHAT) },
                         onOpenSettings = { navController.navigate(Routes.SETTINGS) },
+                        onOpenLittleWorld = { navController.navigate(Routes.LITTLE_WORLD) },
+                        onPickSticker = recordSticker,
                         homeVm = homeVm
                     )
                 }
-                composable(Routes.ADD_BILL) { AddBillScreen(onBack = { navController.popBackStack() }) }
+                composable(Routes.ADD_BILL) { entry ->
+                    val stickerJson by entry.savedStateHandle.getStateFlow<String?>("initial_sticker", null).collectAsStateWithLifecycle()
+                    val initial = stickerJson?.let { runCatching { kotlinx.serialization.json.Json.decodeFromString(com.jiligulu.app.data.littleworld.Sticker.serializer(), it) }.getOrNull() }
+                    AddBillScreen(onBack = { navController.popBackStack() }, initialSticker = initial, onSaved = {
+                        rootScope.launch {
+                            val waitingId = initial?.id?.takeIf { it.startsWith("waiting:") }?.removePrefix("waiting:")
+                            if (waitingId != null) try {
+                                kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { app.container.littleWorld.archiveWaiting(waitingId) }
+                            } catch (_: Exception) {
+                                if (isActive) android.widget.Toast.makeText(app, "账单已保存，候场愿望暂时没收好，可以稍后手动收起。", android.widget.Toast.LENGTH_LONG).show()
+                            }
+                            if (isActive) navController.popBackStack()
+                        }
+                    })
+                }
+                composable(Routes.LITTLE_WORLD) {
+                    com.jiligulu.app.ui.littleworld.LittleWorldScreen(onBack = { navController.popBackStack() },
+                        onOpenWishBook = { navController.navigate(Routes.WISH_BOOK) },
+                        onOpenFutureNotes = { navController.navigate(Routes.FUTURE_NOTES) },
+                        onOpenMemories = { navController.navigate(Routes.MEMORIES) },
+                        onRecordAmount = { amount ->
+                            com.jiligulu.app.core.util.Formatters.yuanTextToFen(amount)?.let { recordSticker(com.jiligulu.app.data.littleworld.Sticker(title = "", amountFen = it)) }
+                        })
+                }
+                composable(Routes.WISH_BOOK) { com.jiligulu.app.ui.littleworld.WishBookScreen(onBack = { navController.popBackStack() }, onRecordWaiting = recordSticker) }
+                composable(Routes.FUTURE_NOTES) { com.jiligulu.app.ui.futurenotes.FutureNotesScreen(onBack = { navController.popBackStack() }) }
+                composable(Routes.MEMORIES) { com.jiligulu.app.ui.memories.MemoriesScreen(onBack = { navController.popBackStack() }) }
                 composable(Routes.CHAT) {
                     ChatScreen(
                         onBack = { navController.popBackStack() },
@@ -275,6 +328,10 @@ private fun JiliguluRoot(waterRequest: Int) {
             LaunchedEffect(showNotice, notices.opened?.id) { noticeWasShowing = showNotice && notices.opened != null }
             UpdatePromptHost(enabled = showUpdate, onDismissed = { dismissedUpdateKey = releaseKey })
             AnnouncementDialogHost(app.container.announcements, enabled = showNotice)
+            com.jiligulu.app.ui.futurenotes.DueFutureNoteHost(
+                enabled = !showSplash && navigation?.destination?.route == Routes.MAIN && !showUpdate &&
+                    !updateState.checking && !(showNotice && (notices.opened != null || notices.emptyMailboxOpen)),
+                requestedId = futureNoteId, onConsumed = onNoteConsumed)
         }
         AnimatedVisibility(visible = showSplash, enter = fadeIn(tween(100)), exit = fadeOut(tween(160))) {
             StartupScreen(state.error, startup::prepare)

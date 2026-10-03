@@ -32,6 +32,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Calculate
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -71,6 +72,8 @@ import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.jiligulu.app.core.util.Formatters
 import com.jiligulu.app.data.local.entity.BillType
+import com.jiligulu.app.data.littleworld.Sticker
+import com.jiligulu.app.ui.calculator.CalculatorDialog
 import com.jiligulu.app.data.repository.CategoryDeletionResult
 import com.jiligulu.app.domain.category.CategoryDefaults
 import com.jiligulu.app.domain.category.CategoryEngine
@@ -86,23 +89,35 @@ import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AddBillScreen(onBack: () -> Unit, vm: AddBillViewModel = viewModel(factory = AddBillViewModel.Factory)) {
+fun AddBillScreen(onBack: () -> Unit, vm: AddBillViewModel = viewModel(factory = AddBillViewModel.Factory),
+    initialSticker: Sticker? = null, onSaved: () -> Unit = onBack) {
     val categories by vm.categories.collectAsStateWithLifecycle()
     val saveState by vm.saveState.collectAsStateWithLifecycle()
-    val currentOnBack by rememberUpdatedState(onBack)
+    val currentOnSaved by rememberUpdatedState(onSaved)
     val lifecycleOwner = LocalLifecycleOwner.current
     LaunchedEffect(vm, lifecycleOwner) {
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-            vm.saved.collect { currentOnBack() }
+            vm.saved.collect { currentOnSaved() }
         }
     }
-    var amountText by rememberSaveable { mutableStateOf("") }
-    var type by rememberSaveable { mutableStateOf(BillType.EXPENSE) }
-    var selectedCategoryId by rememberSaveable { mutableStateOf(-1L) }
-    var userPickedCategory by rememberSaveable { mutableStateOf(false) }
-    var detail by rememberSaveable { mutableStateOf("") }
+    var amountText by rememberSaveable(initialSticker?.id) { mutableStateOf(initialSticker?.amountFen
+        ?.takeIf { it > 0 }?.let(Formatters::fenToYuanText).orEmpty()) }
+    var type by rememberSaveable(initialSticker?.id) { mutableStateOf(if (initialSticker?.type == "INCOME") BillType.INCOME else BillType.EXPENSE) }
+    var selectedCategoryId by rememberSaveable(initialSticker?.id) { mutableStateOf(initialSticker?.categoryId ?: -1L) }
+    var userPickedCategory by rememberSaveable(initialSticker?.id) { mutableStateOf(false) }
+    var detail by rememberSaveable(initialSticker?.id) { mutableStateOf(initialSticker?.title.orEmpty()) }
     var note by rememberSaveable { mutableStateOf("") }
     var timestamp by rememberSaveable { mutableStateOf<Long?>(null) }
+    var calculatorOpen by rememberSaveable { mutableStateOf(false) }
+    // A deleted template category falls back safely; opening a sticker never writes a bill.
+    LaunchedEffect(initialSticker?.id, categories) {
+        if (initialSticker != null && !userPickedCategory && categories.isNotEmpty()) {
+            selectedCategoryId = categories.firstOrNull { it.id == initialSticker.categoryId }?.id
+                ?: CategoryEngine.suggest(initialSticker.title, categories)?.id
+                ?: categories.firstOrNull { !it.deletable }?.id ?: -1L
+            userPickedCategory = true
+        }
+    }
     val suggested = CategoryEngine.suggest(detail, categories)
     val effectiveCategoryId = if (userPickedCategory) selectedCategoryId else suggested?.id ?: selectedCategoryId
     val amountFen = Formatters.yuanTextToFen(amountText)
@@ -186,6 +201,11 @@ fun AddBillScreen(onBack: () -> Unit, vm: AddBillViewModel = viewModel(factory =
                         onValueChange = { if (it.matches(Regex("\\d{0,12}(\\.\\d{0,2})?"))) amountText = it },
                         modifier = Modifier.fillMaxWidth(),
                         prefix = { Text("¥", style = MaterialTheme.typography.headlineMedium) },
+                        trailingIcon = {
+                            IconButton(onClick = { calculatorOpen = true }, enabled = editable) {
+                                Icon(Icons.Default.Calculate, "打开阿噜小算盘", tint = MaterialTheme.colorScheme.primary)
+                            }
+                        },
                         placeholder = { Text("0.00", style = MaterialTheme.typography.displaySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)) },
                         textStyle = MaterialTheme.typography.displaySmall,
@@ -254,6 +274,9 @@ fun AddBillScreen(onBack: () -> Unit, vm: AddBillViewModel = viewModel(factory =
             Spacer(Modifier.height(4.dp))
         }
     }
+
+    if (calculatorOpen) CalculatorDialog(amountText, onDismiss = { calculatorOpen = false },
+        onUse = { amountText = it; calculatorOpen = false })
 
     // ---------- 删除分类的确认框 ----------
     pendingDelete?.let { pending ->

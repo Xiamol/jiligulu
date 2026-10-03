@@ -189,6 +189,7 @@ class StatsDateNavigationTest {
             override fun observeBetween(startMillis: Long, endMillis: Long) = flowOf(
                 bills.filter { it.timestamp >= startMillis && it.timestamp < endMillis })
             override fun observeAll() = flowOf(bills)
+            override fun observePhotoMemories() = flowOf(bills.filter { it.photoUri != null })
             override fun observeById(id: Long) = flowOf(bills.find { it.id == id })
             override suspend fun getById(id: Long) = bills.find { it.id == id }
             override suspend fun insert(bill: BillEntity): Long = error("Date navigation must not write bills")
@@ -197,6 +198,8 @@ class StatsDateNavigationTest {
             override suspend fun updateDetails(id: Long, amountFen: Long, detail: String, timestamp: Long): Int =
                 error("Date navigation must not write bills")
             override suspend fun updateFromAi(id: Long, amountFen: Long, detail: String, timestamp: Long, categoryId: Long, note: String): Int =
+                error("Date navigation must not write bills")
+            override suspend fun updateWithMemory(id: Long, amountFen: Long, detail: String, timestamp: Long, note: String, photoUri: String?): Int =
                 error("Date navigation must not write bills")
             override suspend fun recentSince(startMillis: Long, limit: Int): List<BillEntity> = error("unused")
             override suspend fun recent(limit: Int): List<BillEntity> = error("unused")

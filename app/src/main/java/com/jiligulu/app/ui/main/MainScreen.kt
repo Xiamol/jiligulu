@@ -21,6 +21,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.outlined.BarChart
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Cottage
+import com.jiligulu.app.data.littleworld.Sticker
 import androidx.compose.material.icons.automirrored.outlined.ReceiptLong
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -64,7 +66,9 @@ fun MainScreen(
     onOpenChat: () -> Unit,
     onOpenSettings: () -> Unit,
     homeVm: HomeViewModel = viewModel(factory = HomeViewModel.Factory),
-    personaVm: PersonaViewModel = viewModel(factory = PersonaViewModel.Factory)
+    personaVm: PersonaViewModel = viewModel(factory = PersonaViewModel.Factory),
+    onOpenLittleWorld: () -> Unit = {},
+    onPickSticker: (Sticker) -> Unit = {}
 ) {
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
     val message by personaVm.bubble.collectAsStateWithLifecycle()
@@ -96,6 +100,9 @@ fun MainScreen(
                         Text("叽里咕噜", fontFamily = GuluBrandFont, fontSize = 28.sp,
                             color = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.weight(1f))
+                        IconButton(onClick = onOpenLittleWorld) {
+                            Icon(Icons.Outlined.Cottage, contentDescription = "阿噜的小窝", tint = MaterialTheme.colorScheme.primary)
+                        }
                         IconButton(onClick = onOpenSettings) {
                             Icon(Icons.Outlined.Settings, contentDescription = "设置",
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -145,7 +152,7 @@ fun MainScreen(
                                 modifier = Modifier.padding(horizontal = 20.dp))
                             Spacer(Modifier.height(12.dp))
                             HomeScreen(onOpenChat = onOpenChat, onAddBill = onAddBill, vm = homeVm,
-                                active = selectedTab == 0, onOpenStats = { selectedTab = 1 })
+                                active = selectedTab == 0, onOpenStats = { selectedTab = 1 }, onPickSticker = onPickSticker)
                         }
                         1 -> StatsScreen(active = selectedTab == 1)
                     }

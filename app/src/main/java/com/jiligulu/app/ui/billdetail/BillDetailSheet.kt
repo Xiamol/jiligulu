@@ -50,6 +50,8 @@ import com.jiligulu.app.ui.components.BillDateTimeField
 import com.jiligulu.app.ui.components.LedgerCard
 import com.jiligulu.app.ui.components.CategoryBadge
 import com.jiligulu.app.domain.color.GoldenAnglePalette
+import com.jiligulu.app.ui.memories.LifePhotoField
+import com.jiligulu.app.ui.memories.MemoryPosterButton
 
 /** The ledger and statistics both open this entry point so their details and editing stay identical. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -70,6 +72,8 @@ fun BillDetailSheet(billId: Long, onDismiss: () -> Unit) {
     var initialized by rememberSaveable(billId) { mutableStateOf(false) }
     var amount by rememberSaveable(billId) { mutableStateOf("") }
     var detail by rememberSaveable(billId) { mutableStateOf("") }
+    var note by rememberSaveable(billId) { mutableStateOf("") }
+    var photoPath by rememberSaveable(billId) { mutableStateOf("") }
     var timestamp by rememberSaveable(billId) { mutableStateOf<Long?>(null) }
     var confirmDelete by rememberSaveable(billId) { mutableStateOf(false) }
     val bill = state.bill
@@ -78,6 +82,8 @@ fun BillDetailSheet(billId: Long, onDismiss: () -> Unit) {
         if (!initialized && bill != null) {
             amount = Formatters.fenToYuanText(bill.amountFen)
             detail = bill.detail.ifBlank { state.categoryName }
+            note = bill.note
+            photoPath = bill.photoUri.orEmpty()
             timestamp = bill.timestamp
             initialized = true
         }
@@ -124,27 +130,27 @@ fun BillDetailSheet(billId: Long, onDismiss: () -> Unit) {
                     modifier = Modifier.fillMaxWidth(), enabled = !state.isSaving)
                 BillDateTimeField(timestamp = timestamp, onTimestampChange = { timestamp = it },
                     allowCurrentTime = false, enabled = !state.isSaving)
-                if (bill.note.isNotBlank() || bill.rawText.isNotBlank() || bill.photoUri != null) {
+                OutlinedTextField(value = note, onValueChange = { note = it.take(500) },
+                    label = { Text("备注 · 留一句生活记忆") }, maxLines = 4,
+                    modifier = Modifier.fillMaxWidth(), enabled = !state.isSaving)
+                LedgerCard {
+                    Text("给这一笔夹张生活票根", style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.primary)
+                    Text("生日饭、旅行车窗，值得记住的小片刻。", style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    LifePhotoField(photoPath, onChange = { photoPath = it })
+                    MemoryPosterButton(detail.ifBlank { state.categoryName }, note, photoPath,
+                        amountFen = Formatters.yuanTextToFen(amount), dateMillis = timestamp)
+                }
+                if (bill.rawText.isNotBlank()) {
                     LedgerCard {
-                        if (bill.note.isNotBlank()) {
-                            Text("备注", style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text(bill.note, style = MaterialTheme.typography.bodyMedium)
-                        }
-                        if (bill.rawText.isNotBlank()) {
-                            if (bill.note.isNotBlank()) Spacer(Modifier.height(12.dp))
-                            Text("记账时说的话", style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text(bill.rawText, style = MaterialTheme.typography.bodyMedium)
-                        }
-                        if (bill.photoUri != null) {
-                            Spacer(Modifier.height(8.dp))
-                            Text("📎 这笔账附有图片", style = MaterialTheme.typography.bodySmall)
-                        }
+                        Text("记账时说的话", style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(bill.rawText, style = MaterialTheme.typography.bodyMedium)
                     }
                 }
                 state.error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium) }
-                Button(onClick = { timestamp?.let { vm.save(amount, detail, it) } },
+                Button(onClick = { timestamp?.let { vm.save(amount, detail, it, note, photoPath.takeIf(String::isNotBlank)) } },
                     enabled = !state.isSaving && initialized, modifier = Modifier.fillMaxWidth().height(52.dp)) {
                     Text(if (state.isSaving) "正在保存…" else "保存修改")
                 }

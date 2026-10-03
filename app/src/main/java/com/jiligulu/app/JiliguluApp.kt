@@ -25,6 +25,7 @@ import kotlinx.coroutines.flow.first
 class AppContainer(private val app: Application) {
     private val database: AppDatabase by lazy { AppDatabase.build(app) }
 
+    val littleWorld: com.jiligulu.app.data.littleworld.LittleWorldRepository by lazy { com.jiligulu.app.data.littleworld.LittleWorldRepository(app) }
     val userPrefs: UserPrefs by lazy { UserPrefs(app) }
     val aiUsage: com.jiligulu.app.data.prefs.AiUsageRepository by lazy {
         com.jiligulu.app.data.prefs.AiUsageRepository(app)
@@ -60,7 +61,8 @@ class AppContainer(private val app: Application) {
         awaitAll(
             async { billRepository.observeCurrentMonth().first() },
             async { categoryRepository.categories.first() },
-            async { budgetRepository.observeStatus().first() }
+            async { budgetRepository.observeStatus().first() },
+            async(kotlinx.coroutines.Dispatchers.IO) { com.jiligulu.app.ui.littleworld.LittleWorldArtwork.preload(app.resources) }
         )
     }
 

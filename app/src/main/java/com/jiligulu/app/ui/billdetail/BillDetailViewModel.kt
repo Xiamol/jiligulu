@@ -52,14 +52,17 @@ class BillDetailViewModel(
         }
     }
 
-    fun save(amountText: String, detail: String, timestamp: Long) {
+    fun save(amountText: String, detail: String, timestamp: Long, note: String? = null, photoUri: String? = _state.value.bill?.photoUri) {
         if (_state.value.isSaving || _state.value.isComplete || _state.value.bill == null) return
         val amountFen = parseBillAmount(amountText)
         if (amountFen == null || detail.trim().isEmpty()) {
             _state.update { it.copy(error = if (amountFen == null) "请输入大于 0 的金额，最多两位小数。" else "请填写账单名称。") }
             return
         }
-        write { repository.updateDetails(billId, amountFen, detail, timestamp) }
+        write {
+            if (note == null) repository.updateDetails(billId, amountFen, detail, timestamp)
+            else repository.updateWithMemory(billId, amountFen, detail, timestamp, note, photoUri)
+        }
     }
 
     /** 删除 = 移入回收站（软删除），保留期内可恢复。 */

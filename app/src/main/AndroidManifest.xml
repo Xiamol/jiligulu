@@ -26,11 +26,24 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Jiligulu">
 
+        <provider android:name="androidx.core.content.FileProvider" android:authorities="${applicationId}.memories" android:exported="false" android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/share_paths" />
+        </provider>
+
         <service android:name=".ui.capture.FloatingCaptureService" android:stopWithTask="true" android:exported="false" android:foregroundServiceType="specialUse">
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="User-enabled draggable receipt capture bubble" />
         </service>
         <service android:name=".ui.capture.ScreenCaptureService" android:stopWithTask="true" android:exported="false" android:foregroundServiceType="mediaProjection" />
         <activity android:name=".ui.capture.CapturePermissionActivity" android:taskAffinity="com.jiligulu.app.capture" android:exported="false" android:theme="@style/Theme.Jiligulu.Capture" android:excludeFromRecents="true" />
+        <receiver android:name=".ui.futurenotes.FutureNoteReceiver" android:exported="false" />
+        <receiver android:name=".ui.futurenotes.FutureNoteBootReceiver" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+            </intent-filter>
+        </receiver>
         <receiver android:name=".data.reminder.WaterReminderReceiver" android:exported="false" />
         <receiver android:name=".data.reminder.WaterReminderBootReceiver" android:exported="true">
             <intent-filter>

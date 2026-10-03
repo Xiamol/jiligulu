@@ -1,6 +1,10 @@
 package com.jiligulu.app.ui.home
 
 import com.jiligulu.app.ui.components.edgeSpring
+import com.jiligulu.app.data.littleworld.Sticker
+import com.jiligulu.app.ui.stickers.StickerDrawer
+import androidx.compose.material.icons.outlined.NoteAdd
+import androidx.compose.material3.IconButton
 
 
 import com.jiligulu.app.ui.components.*
@@ -88,7 +92,8 @@ fun HomeScreen(
     onAddBill: () -> Unit,
     vm: HomeViewModel = viewModel(factory = HomeViewModel.Factory),
     active: Boolean = true,
-    onOpenStats: (() -> Unit)? = null
+    onOpenStats: (() -> Unit)? = null,
+    onPickSticker: (Sticker) -> Unit = {}
 ) {
     val state by vm.uiState.collectAsStateWithLifecycle()
     val day by vm.selectedDay.collectAsStateWithLifecycle()
@@ -111,7 +116,7 @@ fun HomeScreen(
             refreshMessage = if (app.container.announcements.state.value.offline) "暂时连不上，已保留原来的信笺" else "信箱已刷新 💌"
         } }, modifier = Modifier.fillMaxSize()
     ) {
-        HomeContent(state, onOpenChat, onAddBill, notices, app.container.announcements::open, day, vm::observeDay, vm::selectDay, active, onOpenStats) { selectedBillId = it }
+        HomeContent(state, onOpenChat, onAddBill, notices, app.container.announcements::open, day, vm::observeDay, vm::selectDay, active, onOpenStats, onPickSticker) { selectedBillId = it }
         refreshMessage?.let { message ->
             androidx.compose.material3.Snackbar(Modifier.align(Alignment.BottomCenter).padding(16.dp)) { Text(message) }
         }
@@ -134,8 +139,11 @@ private fun HomeContent(
     onSelectDay: (Long) -> Unit = {},
     active: Boolean = true,
     onOpenStats: (() -> Unit)? = null,
+    onPickSticker: (Sticker) -> Unit = {},
     onBillClick: (Long) -> Unit
 ) {
+    var showStickers by rememberSaveable { mutableStateOf(false) }
+    if (showStickers) StickerDrawer(onDismiss = { showStickers = false }, onPick = { showStickers = false; onPickSticker(it) })
     var typeFilter by rememberSaveable { mutableIntStateOf(0) }
     var sort by rememberSaveable { mutableIntStateOf(0) }
     val outer = androidx.compose.foundation.lazy.rememberLazyListState()
@@ -250,15 +258,15 @@ private fun HomeContent(
                     Spacer(Modifier.width(7.dp))
                     Text("对话记账")
                 }
-                OutlinedButton(
-                    onClick = onAddBill,
-                    modifier = Modifier.weight(1f).heightIn(min = 48.dp),
-                    shape = MaterialTheme.shapes.large,
-                    contentPadding = PaddingValues(horizontal = 12.dp)
-                ) {
-                    Icon(Icons.Outlined.Add, null, Modifier.size(20.dp))
-                    Spacer(Modifier.width(7.dp))
-                    Text("记一笔")
+                Box(Modifier.weight(1f)) {
+                    OutlinedButton(onClick = onAddBill, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                        shape = MaterialTheme.shapes.large, contentPadding = PaddingValues(start = 12.dp, end = 48.dp)) {
+                        Icon(Icons.Outlined.Add, null, Modifier.size(20.dp))
+                        Spacer(Modifier.width(7.dp)); Text("记一笔")
+                    }
+                    IconButton(onClick = { showStickers = true }, modifier = Modifier.align(Alignment.CenterEnd).size(44.dp)) {
+                        Icon(Icons.Outlined.NoteAdd, "打开常用贴纸", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(21.dp))
+                    }
                 }
             }
             com.jiligulu.app.ui.quicktools.WeChatQuickActions()

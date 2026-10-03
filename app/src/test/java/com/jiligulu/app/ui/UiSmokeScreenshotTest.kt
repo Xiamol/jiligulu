@@ -785,6 +785,95 @@ class UiSmokeScreenshotTest {
         } finally { store.clear() }
     }
 
+    @Test(timeout = 45_000)
+    fun crookedStickerDrawerRender() {
+        val c=(RuntimeEnvironment.getApplication() as JiliguluApp).container
+        runBlocking {
+            c.userPrefs.setWaterEnabled(false);c.userPrefs.setUpdateRepository("")
+            c.userPrefs.setAnnouncementSource("");c.announcements.initialize()
+        }
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { activity=it;it.setContent { GuluTheme { com.jiligulu.app.ui.stickers.StickerDrawer({}, {}) } } }
+            awaitText("阿噜的贴纸墙");awaitText("早餐")
+            compose.mainClock.advanceTimeBy(500);compose.waitForIdle()
+            capture("sticker-drawer",dialog=true)
+            compose.runOnIdle { activity.setContent {} }
+        }
+    }
+
+    @Test(timeout = 75_000)
+    fun littleWorldScreensAndStickerDrawerRender() {
+        val app = RuntimeEnvironment.getApplication() as JiliguluApp
+        val c = app.container
+        val activeId = "ui-travel-wish"
+        runBlocking {
+            c.userPrefs.setThemeMode(UserPrefs.THEME_LIGHT)
+            c.userPrefs.setWaterEnabled(false)
+            c.userPrefs.setUpdateRepository("")
+            c.userPrefs.setAnnouncementSource(""); c.announcements.initialize()
+            c.littleWorld.saveWish(com.jiligulu.app.data.littleworld.Wish(id = activeId, title = "去海边的小旅行", targetFen = 100_000, emoji = "🌊", caption = "把想看的海，一颗颗攒起来。"))
+            c.littleWorld.deposit(activeId, 30_000, "这个月先留一点")
+            c.littleWorld.saveWish(com.jiligulu.app.data.littleworld.Wish(id = "ui-complete-wish", title = "终于买到小相机", targetFen = 12_000, emoji = "📷", caption = "以后的小日子，都想拍下来。"))
+            c.littleWorld.deposit("ui-complete-wish", 12_000, "给自己的小礼物")
+            c.littleWorld.saveWaiting(com.jiligulu.app.data.littleworld.WaitingWish(id = "ui-waiting-wish", title = "一盏暖暖的小台灯", amountFen = 9900, emoji = "💡"))
+            c.littleWorld.saveFutureNote(com.jiligulu.app.data.littleworld.FutureNote(id = "ui-future-note", title = "旅行前给自己的一句话", body = "到海边的时候，记得慢慢走，吹一会儿风。", dueAt = System.currentTimeMillis() + 2 * 86_400_000L))
+        }
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { activity = it }
+            fun render(content: @androidx.compose.runtime.Composable () -> Unit) {
+                compose.runOnIdle { activity.setContent { GuluTheme(darkTheme = false) { content() } } }
+            }
+
+            render { com.jiligulu.app.ui.littleworld.LittleWorldScreen({}, {}, {}, {}) }
+            awaitText("今日小签")
+            capture("little-world-home")
+            compose.onNodeWithText("抽一张，看看今天的小温柔 ✨").performClick()
+            awaitText("今天就这一张，明天再来呀")
+            capture("little-world-fortune")
+
+            render { com.jiligulu.app.ui.littleworld.WishBookScreen({}, {}) }
+            awaitText("去海边的小旅行", substring = true)
+            awaitText("已装满 30%")
+            capture("wishbook-active")
+            compose.onNodeWithText("放进一颗小星星 ✨").performClick()
+            awaitText("这次攒了多少")
+            compose.onNodeWithText("这次攒了多少").performTextReplacement("10")
+            compose.onNodeWithText("装进瓶子").performClick()
+            awaitText("已装满 31%")
+            assertEquals(31_000L, runBlocking { c.littleWorld.snapshot().wishes.first { it.id == activeId }.savedFen })
+            compose.onNodeWithText("纪念 1").performClick()
+            awaitText("终于买到小相机", substring = true)
+            capture("wishbook-completed")
+
+            render { com.jiligulu.app.ui.stickers.StickerDrawer({}, {}) }
+            awaitText("阿噜的贴纸墙")
+            awaitText("早餐")
+            compose.mainClock.advanceTimeBy(400)
+            capture("sticker-drawer", dialog = true)
+
+            render { com.jiligulu.app.ui.futurenotes.FutureNotesScreen({}) }
+            awaitText("旅行前给自己的一句话")
+            capture("future-notes-list")
+            compose.onNodeWithText("读一读").performClick()
+            awaitText("💌 旅行前给自己的一句话")
+            capture("future-note-letter", dialog = true)
+            compose.onNodeWithText("继续等它到达").performClick()
+            compose.onNodeWithContentDescription("写一张便签").performClick()
+            awaitText("写给未来的你 💌")
+            compose.onNodeWithText("信笺标题").performTextReplacement("UI 保存的小信")
+            compose.onNodeWithText("想对那时候的自己说…").performTextReplacement("今天也记得给自己留一点甜。")
+            compose.onNodeWithText("寄出去").performClick()
+            compose.waitUntil(8000) {
+                shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(16))
+                compose.onAllNodesWithText("写给未来的你 💌").fetchSemanticsNodes().isEmpty()
+            }
+            awaitText("UI 保存的小信")
+            assertTrue(runBlocking { c.littleWorld.snapshot().futureNotes.any { it.title == "UI 保存的小信" && !it.notificationEnabled } })
+            compose.runOnIdle { activity.setContent {} }
+            compose.waitForIdle()
+        }
+    }
+
     private fun awaitTag(tag: String, present: Boolean = true) {
         try {
         compose.waitUntil(10_000) {

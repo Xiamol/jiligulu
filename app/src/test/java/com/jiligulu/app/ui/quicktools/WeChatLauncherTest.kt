@@ -18,6 +18,12 @@ class WeChatLauncherTest {
         }
         assertEquals(WeChatLaunch.REQUESTED, result)
     }
+    @Test fun paymentUsesPublicLauncherShortcutDispatch() {
+        val intent = WeChatLauncher.intent(WeChatAction.PAY_CODE)
+        assertEquals("com.tencent.mm.ui.LauncherUI", intent.component?.className)
+        assertEquals("com.tencent.mm.ui.ShortCutDispatchAction", intent.action)
+        assertEquals("launch_type_offline_wallet", intent.getStringExtra("LauncherUI.Shortcut.LaunchType"))
+    }
     @Test fun inaccessiblePaymentIsReportedInsteadOfClaimingSuccess() {
         assertEquals(WeChatLaunch.UNAVAILABLE, WeChatLauncher.attempt(WeChatAction.PAY_CODE, true) { throw SecurityException() })
         assertEquals(WeChatLaunch.UNAVAILABLE, WeChatLauncher.attempt(WeChatAction.PAY_CODE, true) { throw ActivityNotFoundException() })

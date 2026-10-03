@@ -33,6 +33,13 @@ interface BillDao {
     @Query("UPDATE bills SET amountFen = :amountFen, detail = :detail, timestamp = :timestamp WHERE id = :id AND deletedAt IS NULL")
     suspend fun updateDetails(id: Long, amountFen: Long, detail: String, timestamp: Long): Int
 
+    /** Commit the editable bill and its local keepsake together; never revive a deleted row. */
+    @Query("UPDATE bills SET amountFen = :amountFen, detail = :detail, timestamp = :timestamp, note = :note, photoUri = :photoUri WHERE id = :id AND deletedAt IS NULL")
+    suspend fun updateWithMemory(id: Long, amountFen: Long, detail: String, timestamp: Long, note: String, photoUri: String?): Int
+
+    @Query("SELECT * FROM bills WHERE deletedAt IS NULL AND photoUri IS NOT NULL ORDER BY timestamp DESC")
+    fun observePhotoMemories(): Flow<List<BillEntity>>
+
     /** AI 改账用：可同时改分类，且只在账单存活时生效。 */
     @Query(
         """
