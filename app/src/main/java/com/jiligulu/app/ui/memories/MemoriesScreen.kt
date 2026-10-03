@@ -5,8 +5,8 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -18,7 +18,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.jiligulu.app.JiliguluApp
 import com.jiligulu.app.core.util.Formatters
 import com.jiligulu.app.data.littleworld.LittleWorldState
@@ -30,6 +33,10 @@ import com.jiligulu.app.ui.billdetail.BillDetailSheet
 import com.jiligulu.app.ui.components.GuluDialog
 import com.jiligulu.app.ui.components.LedgerCard
 import com.jiligulu.app.ui.components.rememberPageData
+import com.jiligulu.app.ui.components.SpringLazyColumn
+import com.jiligulu.app.ui.theme.GuluBrandFont
+import com.jiligulu.app.ui.theme.IncomeGreen
+import com.jiligulu.app.ui.theme.ExpenseCoral
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -83,12 +90,14 @@ fun MemoriesScreen(onBack: () -> Unit) {
     var selectedCard by remember { mutableStateOf<MemoryCard?>(null) }
     var makeWeek by remember { mutableStateOf(false) }
 
-    LazyColumn(Modifier.fillMaxSize().padding(horizontal = 20.dp), contentPadding = PaddingValues(bottom = 28.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+    SpringLazyColumn(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)
+        .statusBarsPadding().navigationBarsPadding().padding(horizontal = 20.dp),
+        contentPadding = PaddingValues(bottom = 28.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item {
             Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") }
                 Column {
-                    Text("生活纪念册", style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.primary)
+                    Text("生活纪念册", fontFamily = GuluBrandFont, fontWeight = FontWeight.Normal, style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.primary)
                     Text("日子里的小事，都值得被收好。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
@@ -96,21 +105,22 @@ fun MemoriesScreen(onBack: () -> Unit) {
         item {
             LedgerCard {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text("✉ 给这一周起个名字", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                    Text("💌",fontSize=22.sp,modifier=Modifier.padding(end=8.dp))
+                    Text("给这一周起个名字", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
                     Text("${summary.billsCount} 笔", color = MaterialTheme.colorScheme.primary)
                 }
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     TextButton(onClick = { offset-- }) { Text("‹") }
-                    Text(dates, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                    Text(dates, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium,textAlign=TextAlign.Center)
                     TextButton(onClick = { offset++ }, enabled = offset < 0) { Text("›") }
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("支出 ¥${Formatters.fenToYuanText(summary.expenseFen)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-                    Text("收入 ¥${Formatters.fenToYuanText(summary.incomeFen)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                    Text("支出 ¥${Formatters.fenToYuanText(summary.expenseFen)}", style = MaterialTheme.typography.bodySmall, color = ExpenseCoral)
+                    Text("收入 ¥${Formatters.fenToYuanText(summary.incomeFen)}", style = MaterialTheme.typography.bodySmall, color = IncomeGreen)
                 }
                 Spacer(Modifier.height(10.dp))
                 Button(onClick = { makeWeek = true }, enabled = weekRows != null && categoryRows != null,
-                    modifier = Modifier.fillMaxWidth()) { Text("做张${if (offset == 0) "本周" else "这周"}明信片") }
+                    modifier = Modifier.fillMaxWidth()) { Text("做一张周明信片") }
             }
         }
         item {

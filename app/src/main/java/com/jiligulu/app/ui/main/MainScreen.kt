@@ -1,13 +1,8 @@
 package com.jiligulu.app.ui.main
 
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
-import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.spring
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -18,31 +13,31 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.BarChart
-import androidx.compose.material.icons.outlined.BarChart
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Cottage
 import com.jiligulu.app.data.littleworld.Sticker
-import androidx.compose.material.icons.automirrored.outlined.ReceiptLong
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.jiligulu.app.ui.theme.GuluBrandFont
@@ -57,10 +52,16 @@ import com.jiligulu.app.ui.persona.DrinkingOverlay
 import com.jiligulu.app.ui.persona.GuluCompanionHeader
 import com.jiligulu.app.ui.persona.PersonaViewModel
 import com.jiligulu.app.ui.stats.StatsScreen
+import com.jiligulu.app.ui.components.forwardMainPageSwipe
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.receiveAsFlow
 
 /** Main destinations own scroll state; the companion occupies a fixed header slot. */
 @Composable
+@OptIn(ExperimentalFoundationApi::class)
 fun MainScreen(
     onAddBill: () -> Unit,
     onOpenChat: () -> Unit,
@@ -74,7 +75,57 @@ fun MainScreen(
     val message by personaVm.bubble.collectAsStateWithLifecycle()
     val drinkingId by personaVm.drinkingId.collectAsStateWithLifecycle()
     val showDrinking = drinkingId != null
-    val pageState = rememberSaveableStateHolder()
+    // Both real pages keep a stable viewport and their own scroll anchor even while off screen.
+    val pager = rememberPagerState(initialPage = selectedTab) { 2 }
+    val motion = remember { TabMotionSession() }
+    val requests = remember { Channel<TabMotion>(Channel.CONFLATED) }
+    var manipulating by remember { mutableStateOf(false) }
+    var pageWidth by remember { mutableFloatStateOf(1f) }
+    fun moveTo(value: Float) {
+        motion.dragging = true
+        motion.progress = value.coerceIn(0f, 1f)
+        manipulating = true
+        requests.trySend(TabMotion.Position(++motion.sequence, motion.progress))
+    }
+    fun beginDrag() { moveTo((pager.currentPage + pager.currentPageOffsetFraction).coerceIn(0f, 1f)) }
+    fun finishDrag(velocity: Float = 0f) {
+        if (!motion.dragging) return
+        motion.dragging = false
+        requests.trySend(TabMotion.Settle(++motion.sequence, motion.progress,
+            TabScrubPosition.settle(motion.progress, velocity)))
+    }
+    fun navigate(target: Int) {
+        motion.dragging = false
+        manipulating = true
+        requests.trySend(TabMotion.Settle(++motion.sequence,
+            (pager.currentPage + pager.currentPageOffsetFraction).coerceIn(0f, 1f), target))
+    }
+    val pageDrag: (Float) -> Unit = { delta ->
+        if (!motion.dragging) beginDrag()
+        moveTo(TabScrubPosition.fromPixels(motion.progress, -delta, pageWidth))
+    }
+    val pageDragEnd: (Float) -> Unit = { velocity -> finishDrag(velocity) }
+    LaunchedEffect(pager, requests) {
+        requests.receiveAsFlow().collectLatest { request ->
+            val (page, offset) = TabScrubPosition.pageOffset(request.progress)
+            pager.scrollToPage(page, offset)
+            if (request is TabMotion.Settle) {
+                try {
+                    pager.animateScrollToPage(request.target,
+                        animationSpec = spring(dampingRatio = 1f, stiffness = 650f, visibilityThreshold = 1f))
+                } finally {
+                    // A new touch can interrupt settling; only the newest request releases active state.
+                    if (request.sequence == motion.sequence) manipulating = false
+                }
+            }
+        }
+    }
+    LaunchedEffect(pager) {
+        snapshotFlow { Triple(pager.settledPage, pager.isScrollInProgress, manipulating) }
+            .distinctUntilChanged().collect { (page, moving, controlled) ->
+                if (!moving && !controlled) selectedTab = page
+            }
+    }
     LaunchedEffect(selectedTab) { if (selectedTab == 0) homeVm.showToday() }
     val lifecycleOwner = LocalLifecycleOwner.current
     BackHandler(enabled = showDrinking, onBack = personaVm::cancelDrinking)
@@ -114,49 +165,30 @@ fun MainScreen(
             bottomBar = {
                 Column {
                     HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.45f))
-                    NavigationBar(containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp) {
-                        MainTab.entries.forEachIndexed { index, tab ->
-                            NavigationBarItem(
-                                selected = selectedTab == index,
-                                onClick = { selectedTab = index },
-                                icon = {
-                                    Icon(if (selectedTab == index) tab.selectedIcon else tab.icon,
-                                        contentDescription = null)
-                                },
-                                label = { Text(tab.label, style = MaterialTheme.typography.labelMedium) },
-                                colors = NavigationBarItemDefaults.colors(
-                                    indicatorColor = MaterialTheme.colorScheme.primaryContainer,
-                                    selectedIconColor = MaterialTheme.colorScheme.primary,
-                                    selectedTextColor = MaterialTheme.colorScheme.primary
-                                )
-                            )
-                        }
-                    }
+                    MainTabNavigation(pager, selectedTab, ::navigate, ::beginDrag, ::moveTo,
+                        onScrubEnd = { finishDrag() })
                 }
             }
         ) { padding ->
-            Box(Modifier.fillMaxSize().padding(padding)) {
-                AnimatedContent(targetState = selectedTab, modifier = Modifier.fillMaxSize(), label = "main-tab",
-                    transitionSpec = {
-                        val direction = if (targetState > initialState) 1 else -1
-                        (fadeIn(tween(240)) + slideInHorizontally(tween(280)) { direction * it / 12 }) togetherWith
-                            (fadeOut(tween(160)) + slideOutHorizontally(tween(220)) { -direction * it / 12 })
-                    }) { page ->
-                pageState.SaveableStateProvider(page) {
+            Box(Modifier.fillMaxSize().padding(padding).onSizeChanged { pageWidth = it.width.toFloat() }) {
+                HorizontalPager(state = pager, modifier = Modifier.fillMaxSize().testTag("main-pages"),
+                    userScrollEnabled = false, beyondViewportPageCount = 1,
+                    verticalAlignment = Alignment.Top, key = { it }) { page ->
                     when (page) {
                         0 -> Column(Modifier.fillMaxSize()) {
                             // The companion belongs to this page, including while it exits.
                             // Switching tabs must not resize the outgoing ledger viewport.
                             GuluCompanionHeader(message = message,
                                 onRefresh = personaVm::onMascotClick, onWaterClick = personaVm::startDrinking,
-                                modifier = Modifier.padding(horizontal = 20.dp))
+                                modifier = Modifier.padding(horizontal = 20.dp).forwardMainPageSwipe(
+                                    enabled = { selectedTab == 0 }, onDrag = pageDrag, onDragEnd = pageDragEnd))
                             Spacer(Modifier.height(12.dp))
                             HomeScreen(onOpenChat = onOpenChat, onAddBill = onAddBill, vm = homeVm,
-                                active = selectedTab == 0, onOpenStats = { selectedTab = 1 }, onPickSticker = onPickSticker)
+                                active = selectedTab == 0, onOpenStats = { navigate(1) }, onPickSticker = onPickSticker,
+                                onPageDrag = pageDrag, onPageDragEnd = pageDragEnd)
                         }
                         1 -> StatsScreen(active = selectedTab == 1)
                     }
-                }
                 }
             }
         }
@@ -165,7 +197,15 @@ fun MainScreen(
     }
 }
 
-private enum class MainTab(val label: String, val icon: ImageVector, val selectedIcon: ImageVector) {
-    HOME("账本", Icons.AutoMirrored.Outlined.ReceiptLong, Icons.AutoMirrored.Outlined.ReceiptLong),
-    STATS("统计", Icons.Outlined.BarChart, Icons.Filled.BarChart)
+private class TabMotionSession {
+    var sequence = 0L
+    var progress = 0f
+    var dragging = false
+}
+
+private sealed interface TabMotion {
+    val sequence: Long
+    val progress: Float
+    data class Position(override val sequence: Long, override val progress: Float) : TabMotion
+    data class Settle(override val sequence: Long, override val progress: Float, val target: Int) : TabMotion
 }

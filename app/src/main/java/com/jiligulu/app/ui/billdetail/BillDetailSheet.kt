@@ -8,9 +8,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -46,6 +44,7 @@ import com.jiligulu.app.JiliguluApp
 import com.jiligulu.app.core.util.Formatters
 import com.jiligulu.app.data.local.entity.BillSource
 import com.jiligulu.app.data.local.entity.BillType
+import com.jiligulu.app.ui.components.SpringScrollColumn
 import com.jiligulu.app.ui.components.BillDateTimeField
 import com.jiligulu.app.ui.components.LedgerCard
 import com.jiligulu.app.ui.components.CategoryBadge
@@ -92,12 +91,12 @@ fun BillDetailSheet(billId: Long, onDismiss: () -> Unit) {
 
     ModalBottomSheet(onDismissRequest = { if (!state.isSaving) onDismiss() }, sheetState = sheetState,
         containerColor = MaterialTheme.colorScheme.background) {
-        Column(Modifier.fillMaxWidth().imePadding().verticalScroll(rememberScrollState())
+        SpringScrollColumn(Modifier.fillMaxWidth().imePadding()
             .padding(horizontal = 22.dp).padding(bottom = 28.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("这一笔小账", style = MaterialTheme.typography.headlineSmall)
+                    Text("这一笔小账", style = MaterialTheme.typography.titleLarge)
                     Text("把生活的小细节，好好收起来。", style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
@@ -123,15 +122,16 @@ fun BillDetailSheet(billId: Long, onDismiss: () -> Unit) {
                 }
                 OutlinedTextField(value = amount, onValueChange = { amount = it },
                     label = { Text("金额") }, prefix = { Text("¥ ") }, singleLine = true,
+                    shape = MaterialTheme.shapes.large,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     modifier = Modifier.fillMaxWidth(), enabled = !state.isSaving)
                 OutlinedTextField(value = detail, onValueChange = { detail = it },
-                    label = { Text("账单名称") }, singleLine = true,
+                    label = { Text("账单名称") }, singleLine = true, shape = MaterialTheme.shapes.large,
                     modifier = Modifier.fillMaxWidth(), enabled = !state.isSaving)
                 BillDateTimeField(timestamp = timestamp, onTimestampChange = { timestamp = it },
                     allowCurrentTime = false, enabled = !state.isSaving)
                 OutlinedTextField(value = note, onValueChange = { note = it.take(500) },
-                    label = { Text("备注 · 留一句生活记忆") }, maxLines = 4,
+                    label = { Text("备注 · 留一句生活记忆") }, maxLines = 4, shape = MaterialTheme.shapes.large,
                     modifier = Modifier.fillMaxWidth(), enabled = !state.isSaving)
                 LedgerCard {
                     Text("给这一笔夹张生活票根", style = MaterialTheme.typography.titleSmall,

@@ -5,7 +5,9 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.QrCodeScanner
 import androidx.compose.material.icons.outlined.AccountBalanceWallet
@@ -13,6 +15,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.jiligulu.app.ui.components.GuluDialog
@@ -60,24 +65,30 @@ internal object WeChatLauncher {
 }
 
 @Composable
-fun WeChatQuickActions() {
+fun WeChatQuickActions(compact: Boolean = false) {
     val context = LocalContext.current
     var unavailable by remember { mutableStateOf<WeChatAction?>(null) }
     var missing by remember { mutableStateOf(false) }
-    Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceEvenly) {
-        listOf(WeChatAction.SCAN to "微信扫一扫", WeChatAction.PAY_CODE to "微信付款码").forEach { (action, label) ->
-            TextButton(onClick = {
-                when (WeChatLauncher.launch(context, action)) {
-                    WeChatLaunch.MISSING -> missing = true
-                    WeChatLaunch.UNAVAILABLE -> unavailable = action
-                    WeChatLaunch.REQUESTED -> Unit
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        listOf(WeChatAction.SCAN, WeChatAction.PAY_CODE).forEach { action ->
+            val description = if (action == WeChatAction.SCAN) "微信扫一扫" else "微信付款码"
+            val label = when (action) {
+                WeChatAction.SCAN -> if (compact) "扫码" else "微信扫码"
+                WeChatAction.PAY_CODE -> if (compact) "付款" else "付款码"
+            }
+            Surface(shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = .42f)) {
+                Row(Modifier.clickable(role = Role.Button) {
+                    when (WeChatLauncher.launch(context, action)) {
+                        WeChatLaunch.MISSING -> missing = true
+                        WeChatLaunch.UNAVAILABLE -> unavailable = action
+                        WeChatLaunch.REQUESTED -> Unit
+                    }
+                }.semantics { contentDescription = description }.padding(horizontal = 8.dp, vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Icon(if (action == WeChatAction.SCAN) Icons.Outlined.QrCodeScanner else Icons.Outlined.AccountBalanceWallet,
+                        contentDescription = null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
+                    Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, maxLines = 1)
                 }
-            }) {
-                Icon(if (action == WeChatAction.SCAN) Icons.Outlined.QrCodeScanner else Icons.Outlined.AccountBalanceWallet,
-                    contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(6.dp))
-                Text(label, style = MaterialTheme.typography.labelMedium)
             }
         }
     }

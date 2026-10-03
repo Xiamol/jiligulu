@@ -315,12 +315,19 @@ fun StatsScreen(
                         style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
                     CompactChoice(listOf("时间↓", "时间↑", "金额↓", "金额↑"), sort.ordinal) { vm.setSort(DetailSort.entries[it]) }
                     val detailsScroll = rememberLazyListState()
-                    LazyColumn(Modifier.fillMaxWidth().heightIn(max = 360.dp).edgeSpring({ detailsScroll.canScrollBackward }, { detailsScroll.canScrollForward }), state = detailsScroll) {
-                        itemsIndexed(dayDetails, key = { _, bill -> bill.id }) { index, d ->
-                            LedgerBillRow(icon = d.icon, colorHue = d.colorHue, categoryName = d.categoryName,
-                                title = d.detail.ifBlank { d.categoryName }, subtitle = d.timeLabel,
-                                amountText = d.amountText, isExpense = d.isExpense,
-                                onClick = { selectedBillId = d.id }, showDivider = index < dayDetails.lastIndex)
+                    val detailsEdge = remember { EdgeSpringState() }
+                    Box(Modifier.fillMaxWidth()) {
+                        LazyColumn(Modifier.fillMaxWidth().heightIn(max = 360.dp).edgeSpring(
+                            { detailsScroll.canScrollBackward }, { detailsScroll.canScrollForward }, state = detailsEdge), state = detailsScroll) {
+                            itemsIndexed(dayDetails, key = { _, bill -> bill.id }) { index, d ->
+                                LedgerBillRow(icon = d.icon, colorHue = d.colorHue, categoryName = d.categoryName,
+                                    title = d.detail.ifBlank { d.categoryName }, subtitle = d.timeLabel,
+                                    amountText = d.amountText, isExpense = d.isExpense,
+                                    onClick = { selectedBillId = d.id }, showDivider = index < dayDetails.lastIndex)
+                            }
+                        }
+                        Box(Modifier.matchParentSize()) {
+                            LedgerScrollBar(detailsScroll, Modifier.align(Alignment.CenterEnd), forceVisible = detailsEdge.visible)
                         }
                     }
                 }
@@ -329,6 +336,7 @@ fun StatsScreen(
     }
     if (showBudgetDialog) {
         BudgetDialog(
+            initialBudget = budget,
             onDismiss = { showBudgetDialog = false },
             onDisable = if (budget.visible) ({ vm.clearBudget(); showBudgetDialog = false }) else null,
             onSave = { amountFen, period, anchorDay ->
@@ -394,13 +402,14 @@ private fun CategoryGlyph(label: String, color: Color) {
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun BudgetDialog(
+    initialBudget: BudgetUi,
     onDismiss: () -> Unit,
     onDisable: (() -> Unit)? = null,
     onSave: (amountFen: Long, period: BudgetPeriod, anchorDay: Int) -> Unit
 ) {
-    var amountText by rememberSaveable { mutableStateOf("") }
-    var period by rememberSaveable { mutableStateOf(BudgetPeriod.MONTHLY) }
-    var anchorDayText by rememberSaveable { mutableStateOf("1") }
+    var amountText by rememberSaveable { mutableStateOf(initialBudget.totalText.takeIf { initialBudget.visible }.orEmpty()) }
+    var period by rememberSaveable { mutableStateOf(initialBudget.period) }
+    var anchorDayText by rememberSaveable { mutableStateOf(initialBudget.anchorDay.toString()) }
 
     val amountFen = Formatters.yuanTextToFen(amountText)
     val anchorDay = anchorDayText.toIntOrNull()?.takeIf { it in 1..28 }

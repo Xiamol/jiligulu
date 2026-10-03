@@ -1,7 +1,6 @@
 package com.jiligulu.app.ui.components
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -9,7 +8,6 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -41,7 +39,7 @@ fun GuluDialog(
                 style = MaterialTheme.typography.titleLarge.copy(fontFamily = GuluBrandFont, fontWeight = FontWeight.Normal),
                 color = MaterialTheme.colorScheme.primary)
             val bodyScroll = rememberScrollState()
-            Column(Modifier.weight(1f, fill = false).edgeSpring({ bodyScroll.canScrollBackward }, { bodyScroll.canScrollForward }).verticalScroll(bodyScroll),
+            SpringScrollColumn(Modifier.weight(1f, fill = false), state = bodyScroll,
                 verticalArrangement = Arrangement.spacedBy(12.dp), content = content)
             Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.End) {
                 dismissLabel?.let { TextButton(onClick = onDismiss, enabled = !busy) { Text(it) } }

@@ -72,7 +72,9 @@ data class BudgetUi(
     val remainText: String = "",
     val usedSlices: List<DonutSlice> = emptyList(),    // 已用 / 剩余 两段
     val overspendPercentText: String = "",             // "超支 32%"，未超支为空
-    val periodLabel: String = ""
+    val periodLabel: String = "",
+    val period: BudgetPeriod = BudgetPeriod.MONTHLY,
+    val anchorDay: Int = 1
 )
 
 /** 明细流内部用的四元组（combine 最多 5 参，拆成两段避免超限） */
@@ -361,7 +363,9 @@ class StatsViewModel(
             remainText = Formatters.fenToYuanText(remainFen),
             usedSlices = slices,
             overspendPercentText = if (overspend) "超支 ${(overspendRatio * 100).toInt()}%" else "",
-            periodLabel = periodLabel
+            periodLabel = periodLabel,
+            period = budget.periodType,
+            anchorDay = budget.anchorDay
         )
     }
 

@@ -25,7 +25,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
@@ -68,6 +67,7 @@ import com.jiligulu.app.data.prefs.UserPrefs
 import com.jiligulu.app.BuildConfig
 import com.jiligulu.app.ui.components.PaperNote
 import com.jiligulu.app.ui.components.GuluDialog
+import com.jiligulu.app.ui.components.SpringScrollColumn
 import com.jiligulu.app.ui.components.TimePickerDialog
 import com.jiligulu.app.ui.components.TimePickerField
 import com.jiligulu.app.ui.persona.GuluMascot
@@ -92,7 +92,7 @@ fun SettingsScreen(
     }
 
     // Permission launchers belong to the UI; preference writes and scheduling belong to the VM.
-    var settingsTab by rememberSaveable { mutableStateOf("日常") }
+    var settingsTab by rememberSaveable { mutableStateOf(if (checkUpdatesOnOpen) "关于" else "日常") }
     val context = LocalContext.current
     val notificationPermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -192,13 +192,13 @@ fun SettingsScreen(
                 CircularProgressIndicator()
             }
         } else {
-            Column(
+            SpringScrollColumn(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(padding)
-                    .verticalScroll(settingsScroll)
                     .testTag("settings-list")
                     .padding(horizontal = 20.dp, vertical = 8.dp),
+                state = settingsScroll,
                 verticalArrangement = Arrangement.spacedBy(20.dp)
             ) {
                 state.error?.let { error ->
@@ -314,7 +314,7 @@ fun SettingsScreen(
                                 onClick = { showQuietEnd = true }
                             )
                             Text(
-                                "支持跨午夜；开始和结束相同则不免打扰。账本和统计页由桌宠提醒，其他页面及后台通过通知提醒。",
+                                "支持跨午夜；开始和结束相同则不免打扰。喝水时间到了，阿噜会提醒你；账本页也能点水杯开始。",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -476,9 +476,9 @@ private fun SettingsCompanionHeader(nickname: String, suffix: String) {
     val nextNote = { noteIndex = CompanionCornerNotes.nextIndex(noteIndex) }
     Surface(color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
         shape = MaterialTheme.shapes.extraLarge, modifier = Modifier.fillMaxWidth()) {
-        Row(Modifier.padding(start = 20.dp, end = 10.dp, top = 16.dp, bottom = 16.dp),
+        Row(Modifier.padding(start = 20.dp, end = 10.dp, top = 12.dp, bottom = 12.dp),
             verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("你的专属小角落", style = MaterialTheme.typography.titleLarge.copy(fontFamily = GuluBrandFont, fontWeight = FontWeight.Normal),
                     color = MaterialTheme.colorScheme.primary)
                 PaperNote(CompanionCornerNotes.render(noteIndex, nickname, suffix),

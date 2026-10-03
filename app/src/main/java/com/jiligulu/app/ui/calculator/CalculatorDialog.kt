@@ -27,12 +27,15 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.jiligulu.app.ui.theme.GuluBrandFont
+import com.jiligulu.app.ui.components.SpringScrollColumn
 
 @Composable
 fun CalculatorDialog(initial: String = "", onDismiss: () -> Unit, onUse: (String) -> Unit) {
@@ -49,10 +52,10 @@ fun CalculatorDialog(initial: String = "", onDismiss: () -> Unit, onUse: (String
             color = MaterialTheme.colorScheme.surface,
             border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = .14f))
         ) {
-            Column(Modifier.verticalScroll(rememberScrollState()).padding(18.dp),
+            SpringScrollColumn(Modifier.heightIn(max = (LocalConfiguration.current.screenHeightDp * .82f).dp).padding(18.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text("阿噜小算盘 ✿", fontFamily = GuluBrandFont,
+                    Text("阿噜小算盘 ✿", fontFamily = GuluBrandFont, fontWeight = FontWeight.Normal,
                         style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f),
                         color = MaterialTheme.colorScheme.primary)
                     TextButton(onClick = onDismiss) { Text("收起") }

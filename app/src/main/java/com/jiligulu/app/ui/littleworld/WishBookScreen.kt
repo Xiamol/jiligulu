@@ -4,7 +4,6 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -18,6 +17,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -34,7 +34,9 @@ import com.jiligulu.app.data.littleworld.WishDeposit
 import com.jiligulu.app.ui.components.GuluDialog
 import com.jiligulu.app.ui.components.LedgerCard
 import com.jiligulu.app.ui.components.rememberPageData
+import com.jiligulu.app.ui.components.SpringLazyColumn
 import com.jiligulu.app.ui.memories.LifePhotoField
+import com.jiligulu.app.ui.memories.MemoryPhoto
 import com.jiligulu.app.ui.memories.MemoryPosterButton
 import com.jiligulu.app.ui.theme.GuluBrandFont
 import kotlinx.coroutines.launch
@@ -79,7 +81,7 @@ fun WishBookScreen(onBack: () -> Unit, onRecordWaiting: (Sticker) -> Unit) {
         }
     }
 
-    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).navigationBarsPadding()) {
         WorldPageHeader("星星愿望册", "一颗一颗攒，愿望会慢慢亮起来", onBack) {
             IconButton(onClick = { if (tab == 1) createWaiting = true else createWish = true }) { Icon(Icons.Outlined.Add, if (tab == 1) "添加候场愿望" else "添加存钱愿望", tint = MaterialTheme.colorScheme.primary) }
         }
@@ -93,7 +95,7 @@ fun WishBookScreen(onBack: () -> Unit, onRecordWaiting: (Sticker) -> Unit) {
                 }
             }
         }
-        LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(20.dp, 12.dp, 20.dp, 28.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        SpringLazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(20.dp, 12.dp, 20.dp, 28.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             error?.let { message -> item { Text(message, color = MaterialTheme.colorScheme.error) } }
             when (tab) {
                 0 -> {
@@ -118,7 +120,7 @@ fun WishBookScreen(onBack: () -> Unit, onRecordWaiting: (Sticker) -> Unit) {
                             LedgerCard {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Column(Modifier.weight(1f)) {
-                                        Text("${current.emoji} ${current.title}", fontFamily = GuluBrandFont, style = MaterialTheme.typography.headlineSmall)
+                                        Text("${current.emoji} ${current.title}", fontFamily = GuluBrandFont, fontWeight = FontWeight.Normal, style = MaterialTheme.typography.headlineSmall)
                                         Text("阿噜帮你守着这个小愿望", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     }
                                     IconButton(onClick = { editWish = current }) { Icon(Icons.Outlined.Edit, "编辑愿望", tint = MaterialTheme.colorScheme.primary) }
@@ -167,14 +169,15 @@ fun WishBookScreen(onBack: () -> Unit, onRecordWaiting: (Sticker) -> Unit) {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                                 StarWishJar(1f, Modifier.width(92.dp), complete = true)
                                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                                    Text("${wish.emoji} ${wish.title}", fontFamily = GuluBrandFont, style = MaterialTheme.typography.titleLarge)
+                                    Text("${wish.emoji} ${wish.title}", fontFamily = GuluBrandFont, fontWeight = FontWeight.Normal, style = MaterialTheme.typography.titleLarge)
                                     Text("${Formatters.dayLabel(wish.completedAt ?: wish.createdAt)} · 实现啦", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
                                     Text("攒下 ¥${Formatters.fenToYuanText(wish.savedFen)} · ${wish.deposits.size} 颗星星", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     if (wish.caption.isNotBlank()) Text(wish.caption, style = MaterialTheme.typography.bodyMedium)
                                 }
                                 IconButton(onClick = { editWish = wish }) { Icon(Icons.Outlined.Edit, "编辑纪念", tint = MaterialTheme.colorScheme.primary) }
                             }
-                            if (wish.photoPath.isNotBlank()) LifePhotoField(wish.photoPath, { path -> perform { repository.saveWish(wish.copy(photoPath = path)) } }, Modifier.fillMaxWidth())
+                            if (wish.photoPath.isNotBlank()) MemoryPhoto(wish.photoPath,
+                                Modifier.fillMaxWidth().height(180.dp).clip(RoundedCornerShape(18.dp)))
                             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                                 TextButton(onClick = { recordsWish = wish.id }) { Text("攒星回忆") }
                                 Spacer(Modifier.weight(1f))
@@ -206,7 +209,7 @@ fun WishBookScreen(onBack: () -> Unit, onRecordWaiting: (Sticker) -> Unit) {
     }
     promotion?.let { wish ->
         PromoteWaitingDialog(wish, { promotion = null }, busy = busy) { target ->
-            perform { repository.promoteWaiting(wish.id, target); promotion = null; tab = 0 }
+            perform { selected = repository.promoteWaiting(wish.id, target); promotion = null; tab = 0 }
         }
     }
     depositWish?.let { id -> state.wishes.firstOrNull { it.id == id }?.let { wish ->
@@ -254,7 +257,7 @@ fun WishBookScreen(onBack: () -> Unit, onRecordWaiting: (Sticker) -> Unit) {
 private fun WorldEmpty(title: String, subtitle: String, button: String, onClick: () -> Unit) {
     Column(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
         StarWishJar(0f, Modifier.width(112.dp))
-        Text(title, fontFamily = GuluBrandFont, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary)
+        Text(title, fontFamily = GuluBrandFont, fontWeight = FontWeight.Normal, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary)
         Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
         Button(onClick = onClick, shape = RoundedCornerShape(14.dp)) { Text(button) }
     }
@@ -305,14 +308,14 @@ private fun WishEditor(wish: Wish?, onDismiss: () -> Unit, onDelete: (() -> Unit
             else -> onSave((wish ?: Wish(title = title, targetFen = target)).copy(title = title.trim(), targetFen = target, emoji = emoji, caption = caption.trim(), photoPath = photo))
         }
     }, dismissLabel = "再想想", busy = busy, compact = true) {
-        OutlinedTextField(title, { title = it.take(40) }, label = { Text("愿望名字") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-        OutlinedTextField(amount, { amount = it.take(14) }, label = { Text("目标金额") }, prefix = { Text("¥") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(title, { title = it.take(40) }, label = { Text("愿望名字") }, singleLine = true, shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(amount, { amount = it.take(14) }, label = { Text("目标金额") }, prefix = { Text("¥") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true, shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth())
         if (wish != null) exactWishAmount(amount)?.let { target ->
             if (wish.completedAt == null && target <= wish.savedFen) Text("已攒够这个新目标，保存后会移进纪念区。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
             else if (wish.completedAt != null && target > wish.savedFen) Text("新目标比已攒的更多，保存后会回到正在攒。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
         }
         EmojiChooser(emoji) { emoji = it }
-        OutlinedTextField(caption, { caption = it.take(300) }, label = { Text("想留的一句话（可选）") }, minLines = 2, maxLines = 4, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(caption, { caption = it.take(300) }, label = { Text("想留的一句话（可选）") }, minLines = 2, maxLines = 4, shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth())
         LifePhotoField(photo, { photo = it })
         error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
         onDelete?.let { TextButton(onClick = it, enabled = !busy) { Text("删除这个愿望瓶", color = MaterialTheme.colorScheme.error) } }
@@ -333,8 +336,8 @@ private fun WaitingEditor(wish: WaitingWish?, onDismiss: () -> Unit, busy: Boole
             else -> onSave((wish ?: WaitingWish(title = title)).copy(title = title.trim(), amountFen = target, emoji = emoji))
         }
     }, dismissLabel = "稍后", busy = busy, compact = true) {
-        OutlinedTextField(title, { title = it.take(40) }, label = { Text("有点想要…") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-        OutlinedTextField(amount, { amount = it.take(14) }, label = { Text("大约多少钱（可选）") }, prefix = { Text("¥") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(title, { title = it.take(40) }, label = { Text("有点想要…") }, singleLine = true, shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(amount, { amount = it.take(14) }, label = { Text("大约多少钱（可选）") }, prefix = { Text("¥") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true, shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth())
         EmojiChooser(emoji) { emoji = it }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
     }
@@ -350,7 +353,7 @@ private fun PromoteWaitingDialog(wish: WaitingWish, onDismiss: () -> Unit, busy:
     }, dismissLabel = "再想想", busy = busy, compact = true) {
         Text("${wish.emoji} ${wish.title}", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary)
         Text("给它一个小目标，阿噜就把这个愿望从候场区搬进星星瓶。")
-        OutlinedTextField(amount, { amount = it.take(14) }, label = { Text("目标金额") }, prefix = { Text("¥") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(amount, { amount = it.take(14) }, label = { Text("目标金额") }, prefix = { Text("¥") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true, shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth())
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
     }
 }
@@ -365,9 +368,9 @@ private fun DepositDialog(wish: Wish, onDismiss: () -> Unit, busy: Boolean = fal
         if (value == null) error = "金额要大于 0，最多两位小数" else onSave(value, note)
     }, dismissLabel = "稍后", busy = busy, compact = true) {
         Text("还差 ¥${Formatters.fenToYuanText((wish.targetFen - wish.savedFen).coerceAtLeast(0))}", color = MaterialTheme.colorScheme.primary)
-        OutlinedTextField(amount, { amount = it.take(14) }, label = { Text("这次攒了多少") }, prefix = { Text("¥") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(amount, { amount = it.take(14) }, label = { Text("这次攒了多少") }, prefix = { Text("¥") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true, shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth())
         TextButton(onClick = { amount = Formatters.fenToYuanText((wish.targetFen - wish.savedFen).coerceAtLeast(0)) }) { Text("刚好装满这个愿望") }
-        OutlinedTextField(note, { note = it.take(100) }, label = { Text("记一句小事（可选）") }, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(note, { note = it.take(100) }, label = { Text("记一句小事（可选）") }, shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth())
         Text("只更新愿望进度，不会增加账单。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
     }

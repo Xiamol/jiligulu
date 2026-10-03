@@ -19,7 +19,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -53,6 +52,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.jiligulu.app.ui.theme.ExpenseCoral
 import com.jiligulu.app.ui.components.CategoryBadge
+import com.jiligulu.app.ui.components.SpringLazyColumn
 import com.jiligulu.app.domain.color.GoldenAnglePalette
 import com.jiligulu.app.ui.theme.GuluBrandFont
 import com.jiligulu.app.ui.theme.IncomeGreen
@@ -105,7 +105,7 @@ fun TrashScreen(
                     state.tab == TrashTab.DRAFTS -> if (state.draftItems.isEmpty()) {
                         EmptyDrafts()
                     } else {
-                        LazyColumn(
+                        SpringLazyColumn(
                             modifier = Modifier.fillMaxSize(),
                             contentPadding = PaddingValues(horizontal = 18.dp, vertical = 12.dp),
                             verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -131,7 +131,7 @@ fun TrashScreen(
 
                     state.items.isEmpty() -> EmptyTrash()
 
-                    else -> LazyColumn(
+                    else -> SpringLazyColumn(
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(horizontal = 18.dp, vertical = 12.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp)

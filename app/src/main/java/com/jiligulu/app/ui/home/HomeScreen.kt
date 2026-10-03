@@ -3,7 +3,7 @@ package com.jiligulu.app.ui.home
 import com.jiligulu.app.ui.components.edgeSpring
 import com.jiligulu.app.data.littleworld.Sticker
 import com.jiligulu.app.ui.stickers.StickerDrawer
-import androidx.compose.material.icons.outlined.NoteAdd
+import androidx.compose.material.icons.outlined.StickyNote2
 import androidx.compose.material3.IconButton
 
 
@@ -93,7 +93,9 @@ fun HomeScreen(
     vm: HomeViewModel = viewModel(factory = HomeViewModel.Factory),
     active: Boolean = true,
     onOpenStats: (() -> Unit)? = null,
-    onPickSticker: (Sticker) -> Unit = {}
+    onPickSticker: (Sticker) -> Unit = {},
+    onPageDrag: ((Float) -> Unit)? = null,
+    onPageDragEnd: ((Float) -> Unit)? = null
 ) {
     val state by vm.uiState.collectAsStateWithLifecycle()
     val day by vm.selectedDay.collectAsStateWithLifecycle()
@@ -116,7 +118,7 @@ fun HomeScreen(
             refreshMessage = if (app.container.announcements.state.value.offline) "暂时连不上，已保留原来的信笺" else "信箱已刷新 💌"
         } }, modifier = Modifier.fillMaxSize()
     ) {
-        HomeContent(state, onOpenChat, onAddBill, notices, app.container.announcements::open, day, vm::observeDay, vm::selectDay, active, onOpenStats, onPickSticker) { selectedBillId = it }
+        HomeContent(state, onOpenChat, onAddBill, notices, app.container.announcements::open, day, vm::observeDay, vm::selectDay, active, onOpenStats, onPickSticker, onPageDrag, onPageDragEnd) { selectedBillId = it }
         refreshMessage?.let { message ->
             androidx.compose.material3.Snackbar(Modifier.align(Alignment.BottomCenter).padding(16.dp)) { Text(message) }
         }
@@ -128,7 +130,7 @@ fun HomeScreen(
 /** Pure rendering makes previews independent of the database and keeps navigation in the route. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun HomeContent(
+internal fun HomeContent(
     state: HomeUiState,
     onOpenChat: () -> Unit,
     onAddBill: () -> Unit,
@@ -140,6 +142,8 @@ private fun HomeContent(
     active: Boolean = true,
     onOpenStats: (() -> Unit)? = null,
     onPickSticker: (Sticker) -> Unit = {},
+    onPageDrag: ((Float) -> Unit)? = null,
+    onPageDragEnd: ((Float) -> Unit)? = null,
     onBillClick: (Long) -> Unit
 ) {
     var showStickers by rememberSaveable { mutableStateOf(false) }
@@ -147,7 +151,7 @@ private fun HomeContent(
     var typeFilter by rememberSaveable { mutableIntStateOf(0) }
     var sort by rememberSaveable { mutableIntStateOf(0) }
     val outer = androidx.compose.foundation.lazy.rememberLazyListState()
-    val headerPinned by remember { derivedStateOf { outer.firstVisibleItemIndex >= 3 } }
+    val pinGestureScrolling by remember { derivedStateOf { outer.isScrollInProgress && outer.firstVisibleItemIndex >= 3 } }
     var activeInner by remember { mutableStateOf<LazyListState?>(null) }
     val gate = remember { StickyPullGate() }
     val effectScope = rememberCoroutineScope()
@@ -194,13 +198,28 @@ private fun HomeContent(
         onDispose { lifecycle.removeObserver(observer) }
     }
 
-    LaunchedEffect(active, selectedDay) { gate.reset() }
+    LaunchedEffect(active, selectedDay) {
+        gate.reset()
+        reboundJob?.cancel()
+        stretch = 0f
+    }
     fun pinned() = outer.firstVisibleItemIndex >= 3
     fun innerAtTop() = activeInner?.canScrollBackward != true
     val nested = remember(outer, gate) { object : NestedScrollConnection {
         override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
             if (available.y < 0 && outer.canScrollForward) return Offset(0f, -outer.dispatchRawDelta(-available.y))
-            if (available.y > 0 && pinned() && innerAtTop() && !gate.allowExpand) { gate.blockedAtTop(); if (source == NestedScrollSource.UserInput) pullFeedback(available.y); return Offset(0f, available.y) }
+            if (available.y > 0 && pinned() && !gate.allowExpand) {
+                // A pull on the heading/date starts the outer scrollable, while a pull on
+                // a bill starts the inner one. Route both through one boundary owner so
+                // neither can expand the overview before the bill list has reached top.
+                val usedByBills = activeInner?.let { -it.dispatchRawDelta(-available.y) } ?: 0f
+                val leftover = (available.y - usedByBills).coerceAtLeast(0f)
+                if (leftover > .1f) {
+                    gate.blockedAtTop()
+                    if (source == NestedScrollSource.UserInput) pullFeedback(leftover)
+                }
+                return Offset(0f, available.y)
+            }
             return Offset.Zero
         }
         override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
@@ -220,16 +239,36 @@ private fun HomeContent(
         awaitEachGesture {
             val first = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
             gate.begin(pinned(), innerAtTop())
+            if (gate.allowExpand) {
+                reboundJob?.cancel()
+                stretch = 0f
+            }
             var finalPosition = first.position
-            do {
-                val event = awaitPointerEvent(PointerEventPass.Initial)
-                event.changes.firstOrNull { it.id == first.id }?.let { finalPosition = it.position }
-            } while (event.changes.any { it.pressed })
-            val distance = finalPosition - first.position
-            gate.finish(pinned(), innerAtTop(), distance.y > viewConfiguration.touchSlop && distance.y > abs(distance.x))
-            releaseFeedback()
+            var completed = false
+            try {
+                do {
+                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                    event.changes.firstOrNull { it.id == first.id }?.let { finalPosition = it.position }
+                } while (event.changes.any { it.pressed })
+                val distance = finalPosition - first.position
+                gate.finish(pinned(), innerAtTop(), distance.y > viewConfiguration.touchSlop && distance.y > abs(distance.x))
+                completed = true
+            } finally {
+                if (!completed) gate.reset()
+                releaseFeedback()
+            }
         }
     }
+    val outerPageSwipe = Modifier.forwardMainPageSwipe(
+        enabled = { active && !pinned() },
+        onDrag = onPageDrag,
+        onDragEnd = onPageDragEnd,
+        onSwipe = onOpenStats,
+        startAllowed = { position ->
+            val ledger = outer.layoutInfo.visibleItemsInfo.firstOrNull { it.key == "ledger_page" }
+            ledger == null || position.y < ledger.offset || position.y >= ledger.offset + ledger.size
+        }
+    )
     val childBringSpec = LocalBringIntoViewSpec.current
     val manualHeaderSpec = remember { object : BringIntoViewSpec {
         override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float) = 0f
@@ -239,7 +278,7 @@ private fun HomeContent(
     val viewport = maxHeight
     LazyColumn(
         state = outer,
-        modifier = Modifier.fillMaxSize().testTag("home-outer").then(observeGesture).nestedScroll(nested),
+        modifier = Modifier.fillMaxSize().testTag("home-outer").then(observeGesture).then(outerPageSwipe).nestedScroll(nested),
         contentPadding = PaddingValues(start = 20.dp, end = 20.dp)
     ) {
         item(key = "announcements") { com.jiligulu.app.ui.announcement.AnnouncementBoard(announcements, onOpenAnnouncement) }
@@ -265,25 +304,26 @@ private fun HomeContent(
                         Spacer(Modifier.width(7.dp)); Text("记一笔")
                     }
                     IconButton(onClick = { showStickers = true }, modifier = Modifier.align(Alignment.CenterEnd).size(44.dp)) {
-                        Icon(Icons.Outlined.NoteAdd, "打开常用贴纸", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(21.dp))
+                        Icon(Icons.Outlined.StickyNote2, "打开常用贴纸", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(21.dp))
                     }
                 }
             }
-            com.jiligulu.app.ui.quicktools.WeChatQuickActions()
             }
         }
         item(key = "ledger_page") {
-            Column(Modifier.fillMaxWidth().height(viewport).nestedScroll(nested).graphicsLayer {
-                translationY = stretch
-            }) {
-                Row(Modifier.fillMaxWidth().testTag("home-ledger-heading").padding(top = 16.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            // The outer connection owns both heading and bill gestures once. Translating
+            // this heading made a blank strip; only the bill list stretches now.
+            Column(Modifier.fillMaxWidth().height(viewport)) {
+                Row(Modifier.fillMaxWidth().testTag("home-ledger-heading").padding(top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("每日账单", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
                     CompactChoice(listOf("全部收支", "只看支出", "只看收入"), typeFilter) { typeFilter = it }
                     CompactChoice(listOf("时间↓", "时间↑", "金额↓", "金额↑"), sort) { sort = it }
                 }
                 DayPager(selectedDay, Formatters.dayStart(System.currentTimeMillis()), onSelectDay,
                     modifier = Modifier.fillMaxWidth().weight(1f), tag = "home-day-pager",
-                    onSwipePastToday = onOpenStats.takeIf { active && headerPinned }) { pageDay ->
+                    onSwipePastToday = onOpenStats.takeIf { active },
+                    onPageDrag = onPageDrag.takeIf { active },
+                    onPageDragEnd = onPageDragEnd.takeIf { active }) { pageDay ->
                     val flow = remember(pageDay, daySource) { daySource(pageDay) }
                     val snapshot by rememberPageData(flow, DailyLedgerSnapshot(pageDay))
                     val rows = remember(snapshot, typeFilter, sort) { filterHomeBills(snapshot.bills, pageDay, typeFilter, sort) }
@@ -296,7 +336,7 @@ private fun HomeContent(
                         DailyTotals(snapshot.bills, rows.size)
                         Spacer(Modifier.height(10.dp))
                         Box(Modifier.fillMaxWidth().weight(1f)) {
-                            LazyColumn(Modifier.fillMaxSize().edgeSpring({ inner.canScrollBackward }, { inner.canScrollForward }, topEnabled = false).testTag(if (pageDay == selectedDay) "home-day-bills" else "home-neighbor-bills"), state = inner) {
+                            LazyColumn(Modifier.fillMaxSize().graphicsLayer { translationY = stretch }.edgeSpring({ inner.canScrollBackward }, { inner.canScrollForward }, topEnabled = false).testTag(if (pageDay == selectedDay) "home-day-bills" else "home-neighbor-bills"), state = inner) {
                                 if (rows.isEmpty()) item {
                                     Column(Modifier.fillParentMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally,
                                         verticalArrangement = Arrangement.Center) {
@@ -314,7 +354,7 @@ private fun HomeContent(
                                         onClick = { onBillClick(bill.id) }, modifier = Modifier.clip(shape), showDivider = index < rows.lastIndex)
                                 }
                             }
-                            LedgerScrollBar(inner, Modifier.align(Alignment.CenterEnd))
+                            LedgerScrollBar(inner, Modifier.align(Alignment.CenterEnd), forceVisible = pinGestureScrolling)
                         }
                     }
                     }
@@ -370,9 +410,16 @@ private fun MonthlySummary(state: HomeUiState) {
             Spacer(Modifier.width(1.dp).height(72.dp).background(MaterialTheme.colorScheme.outline))
             SummaryAmount("收入", state.incomeText, state.incomeCount, false, Modifier.weight(1f))
         }
-        Text("本月结余 ¥${state.balanceText}", style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 12.dp))
+        BoxWithConstraints(Modifier.fillMaxWidth().padding(top = 10.dp)) {
+            val shortLabels = maxWidth < 320.dp
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("本月结余 ¥${state.balanceText}", style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1,
+                    modifier = Modifier.weight(1f).horizontalScroll(rememberScrollState()))
+                com.jiligulu.app.ui.quicktools.WeChatQuickActions(compact = shortLabels)
+            }
+        }
     }
 }
 

@@ -18,6 +18,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.TextUnit
 import com.jiligulu.app.R
 import java.util.concurrent.ConcurrentHashMap
 
@@ -40,9 +41,13 @@ internal fun StickerPaperArtwork(modifier: Modifier, tint: Color = Color.White) 
 }
 
 @Composable
-internal fun StickerIllustration(emoji: String, modifier: Modifier) {
+internal fun StickerIllustration(emoji: String, modifier: Modifier, fallbackFontSize: TextUnit? = null) {
     val index=listOf("🍳","🚇","☕","🍚","🧋","🍊","🥬","🧻","🚕","🅿️","🐱","🍜").indexOf(emoji)
-    if(index<0) { Text(emoji,modifier,style=MaterialTheme.typography.headlineMedium);return }
+    if(index<0) {
+        val style=MaterialTheme.typography.headlineMedium
+        Text(emoji,modifier,style=if(fallbackFontSize==null)style else style.copy(fontSize=fallbackFontSize,lineHeight=fallbackFontSize*1.2f))
+        return
+    }
     val resources=LocalContext.current.resources
     val art=remember { LittleWorldArtwork.image(resources,R.drawable.sticker_illustrations_atlas) }
     Canvas(modifier) {

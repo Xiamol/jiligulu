@@ -4,7 +4,6 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -18,8 +17,10 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.jiligulu.app.JiliguluApp
@@ -32,8 +33,12 @@ import com.jiligulu.app.ui.calculator.CalculatorDialog
 import com.jiligulu.app.ui.components.GuluDialog
 import com.jiligulu.app.ui.components.LedgerCard
 import com.jiligulu.app.ui.components.rememberPageData
+import com.jiligulu.app.ui.components.SpringLazyColumn
 import com.jiligulu.app.ui.persona.GuluMascot
 import com.jiligulu.app.ui.theme.GuluBrandFont
+import com.jiligulu.app.ui.theme.GuluPurpleDeep
+import com.jiligulu.app.ui.theme.PaperInkLight
+import com.jiligulu.app.ui.theme.PaperNoteLight
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -87,72 +92,97 @@ fun LittleWorldScreen(
         perform { repository.toggleFortune(id) }
     }
 
-    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        WorldPageHeader("阿噜的小窝", "把小日子慢慢装起来", onBack)
-        LazyColumn(contentPadding = PaddingValues(20.dp, 8.dp, 20.dp, 28.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp), modifier = Modifier.weight(1f)) {
+    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).navigationBarsPadding()) {
+        WorldPageHeader("阿噜的小窝", "把小日子慢慢装起来", onBack) {
+            IconButton(onClick = { showFavorites = true }) {
+                BadgedBox(badge = { if (state.favoriteFortunes.isNotEmpty()) Badge(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer, contentColor = MaterialTheme.colorScheme.primary) {
+                    Text(state.favoriteFortunes.size.toString())
+                } }) {
+                    Icon(Icons.Outlined.FavoriteBorder, "我的小签收藏", tint = MaterialTheme.colorScheme.primary)
+                }
+            }
+        }
+        SpringLazyColumn(contentPadding = PaddingValues(18.dp, 4.dp, 18.dp, 20.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.weight(1f)) {
             item {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("生活里，也有好多\n值得留下的小星星。", style = MaterialTheme.typography.titleLarge,
-                            fontFamily = GuluBrandFont, color = MaterialTheme.colorScheme.primary)
-                        Text("这里的小东西都在本地陪着你 ♡", style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 6.dp))
-                    }
-                    GuluMascot(Modifier.size(88.dp))
+                Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("愿望、来信，还有日常的小惊喜。", style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+                    GuluMascot(Modifier.size(44.dp))
                 }
             }
             item {
-                Surface(shape = RoundedCornerShape(22.dp), color = MaterialTheme.colorScheme.tertiaryContainer,
-                    modifier = Modifier.fillMaxWidth(), border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = .5f))) {
-                    Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Box(Modifier.fillMaxWidth().padding(horizontal = 4.dp).rotate(-1.2f)) {
+                    StickerPaperArtwork(Modifier.matchParentSize(), PaperNoteLight)
+                    Column(Modifier.padding(horizontal = 32.dp).padding(top = 20.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("今日小签", fontFamily = GuluBrandFont, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-                            Text("${date.monthValue}月${date.dayOfMonth}日", style = MaterialTheme.typography.labelMedium)
+                            Text("今日小签", fontFamily = GuluBrandFont, fontWeight = FontWeight.Normal,
+                                fontSize = 16.sp, color = PaperInkLight, modifier = Modifier.weight(1f))
+                            Text("${date.monthValue}月${date.dayOfMonth}日", style = MaterialTheme.typography.labelSmall, color = PaperInkLight)
+                            if (opened) IconButton(onClick = { favorite(fortune.id) }, modifier = Modifier.size(36.dp)) {
+                                Icon(if (fortune.id in state.favoriteFortunes) Icons.Outlined.Favorite else Icons.Outlined.FavoriteBorder,
+                                    contentDescription = if (fortune.id in state.favoriteFortunes) "取消收藏今日小签" else "收藏今日小签",
+                                    tint = GuluPurpleDeep, modifier = Modifier.size(20.dp))
+                            }
                         }
                         if (opened) {
-                            Text("${fortune.mark}  ${fortune.title}", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
-                            Text(fortune.text, style = MaterialTheme.typography.bodyLarge)
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text("今天就这一张，明天再来呀", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                IconButton(onClick = { favorite(fortune.id) }) {
-                                    Icon(if (fortune.id in state.favoriteFortunes) Icons.Outlined.Favorite else Icons.Outlined.FavoriteBorder,
-                                        contentDescription = if (fortune.id in state.favoriteFortunes) "取消收藏今日小签" else "收藏今日小签",
-                                        tint = MaterialTheme.colorScheme.primary)
+                            Text("${fortune.mark}  ${fortune.title}", style = MaterialTheme.typography.labelLarge, color = GuluPurpleDeep)
+                            val fortuneText = remember(fortune.id) {
+                                // Keep complete short sentences together instead of leaving one
+                                // final Chinese character by itself on the second line.
+                                val pause = fortune.text.indexOf('。')
+                                if (fortune.text.length >= 28 && pause >= 10 && pause <= fortune.text.length - 6)
+                                    fortune.text.substring(0, pause + 1) + "\n" + fortune.text.substring(pause + 1)
+                                else fortune.text
+                            }
+                            Text(fortuneText, style = MaterialTheme.typography.bodyMedium, color = PaperInkLight)
+                        } else {
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                Text("阿噜悄悄准备的小纸条 ♡", style = MaterialTheme.typography.bodySmall,
+                                    color = PaperInkLight, modifier = Modifier.weight(1f))
+                                TextButton(onClick = { opened = true }, contentPadding = PaddingValues(horizontal = 8.dp)) {
+                                    Text("抽一张 ✨", color = GuluPurpleDeep, style = MaterialTheme.typography.labelLarge)
                                 }
                             }
-                        } else {
-                            Text("阿噜偷偷准备了一张小纸条。", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Button(onClick = { opened = true }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp)) { Text("抽一张，看看今天的小温柔 ✨") }
                         }
-                        TextButton(onClick = { showFavorites = true }, contentPadding = PaddingValues(0.dp)) { Text("我的小签收藏 · ${state.favoriteFortunes.size} 张") }
                     }
                 }
             }
-            item { WorldEntrance("⭐", "星星愿望册", "慢慢攒、慢慢实现，留下每一个满星瓶", onOpenWishBook) }
-            item { WorldEntrance("💌", "给未来的自己", "写一封小信，让阿噜在那一天递给你", onOpenFutureNotes) }
-            item { WorldEntrance("📸", "生活纪念册", "照片票根、周明信片，保存或分享一页生活", onOpenMemories) }
-            item { WorldEntrance("🧮", "阿噜小算盘", "算式、实时结果，算完就能带入记账", { showCalculator = true }) }
             item {
-                LedgerCard {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("🕰️  账单时光机", fontFamily = GuluBrandFont, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-                        Switch(checked = state.timeMachineEnabled, onCheckedChange = { enabled ->
-                            perform { repository.setTimeMachine(enabled) }
-                        })
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        WorldPaperTile("⭐", "星星愿望册", "慢慢装满小愿望", -1.8f, Color(0xFFF4EAFB), onOpenWishBook, Modifier.weight(1f), wishJar = true)
+                        WorldPaperTile("💌", "给未来的信", "让时间替你递信", 1.4f, Color(0xFFFFECEC), onOpenFutureNotes, Modifier.weight(1f))
                     }
-                    when {
-                        !state.timeMachineEnabled -> Text("时光机已休息，想翻旧日子时再叫它。", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        billLoading -> Text("阿噜正在翻翻旧账本…", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        oldBill == null -> Text("多留几页小账单，阿噜就能带你回去看看啦。", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        else -> oldBill?.let { bill ->
-                            Text("${Formatters.dayLabel(bill.timestamp)}，你记下了", style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text(bill.detail.ifBlank { "一笔小账单" }, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 8.dp))
-                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                Text("${if (bill.type == BillType.INCOME) "+" else "−"}¥${Formatters.fenToYuanText(bill.amountFen)}", modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.primary)
-                                TextButton(onClick = { selectedBill = bill.id }) { Text("回去看看 →") }
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        WorldPaperTile("📸", "生活纪念册", "照片与周明信片", 1.3f, Color(0xFFEAF3E8), onOpenMemories, Modifier.weight(1f))
+                        WorldPaperTile("🧮", "阿噜小算盘", "算好就能记一笔", -1.5f, Color(0xFFFFF2D7), { showCalculator = true }, Modifier.weight(1f))
+                    }
+                }
+            }
+            item {
+                Surface(shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surface,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = .55f))) {
+                    Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("🕰️  账单时光机", fontFamily = GuluBrandFont, fontWeight = FontWeight.Normal, fontSize = 16.sp, modifier = Modifier.weight(1f))
+                            FilterChip(selected = state.timeMachineEnabled, onClick = { perform { repository.setTimeMachine(!state.timeMachineEnabled) } },
+                                label = { Text(if (state.timeMachineEnabled) "开着" else "歇会儿", style = MaterialTheme.typography.labelSmall) }, modifier = Modifier.height(32.dp))
+                        }
+                        when {
+                            !state.timeMachineEnabled -> Text("想翻旧日子时，再叫阿噜呀。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            billLoading -> Text("正在翻翻旧账本…", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            oldBill == null -> Text("多记几页账单，阿噜就能带你回去看看。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            else -> oldBill?.let { bill ->
+                                Row(Modifier.fillMaxWidth().heightIn(min = 40.dp).clickable { selectedBill = bill.id }, verticalAlignment = Alignment.CenterVertically) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(Formatters.dayLabel(bill.timestamp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Text(bill.detail.ifBlank { "一笔小账单" }, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    }
+                                    Text("${if (bill.type == BillType.INCOME) "+" else "−"}¥${Formatters.fenToYuanText(bill.amountFen)}", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                                    Icon(Icons.Outlined.ChevronRight, "回去看看", Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
+                                }
                             }
                         }
                     }
@@ -185,7 +215,7 @@ internal fun WorldPageHeader(title: String, subtitle: String, onBack: () -> Unit
     Row(Modifier.fillMaxWidth().statusBarsPadding().padding(start = 4.dp, end = 16.dp, top = 4.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回") }
         Column(Modifier.weight(1f)) {
-            Text(title, fontFamily = GuluBrandFont, style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.primary)
+            Text(title, fontFamily = GuluBrandFont, fontWeight = FontWeight.Normal, style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.primary)
             Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         action()
@@ -193,16 +223,18 @@ internal fun WorldPageHeader(title: String, subtitle: String, onBack: () -> Unit
 }
 
 @Composable
-private fun WorldEntrance(emoji: String, title: String, subtitle: String, onClick: () -> Unit) {
-    Surface(modifier = Modifier.fillMaxWidth().clickable(onClick = onClick), shape = RoundedCornerShape(18.dp),
-        color = MaterialTheme.colorScheme.surface, border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = .55f))) {
-        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Box(Modifier.size(48.dp).rotate(-4f).background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) { Text(emoji, fontSize = 26.sp) }
-            Column(Modifier.weight(1f)) {
-                Text(title, fontFamily = GuluBrandFont, style = MaterialTheme.typography.titleLarge)
-                Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
-            }
-            Icon(Icons.Outlined.ChevronRight, "打开$title", tint = MaterialTheme.colorScheme.primary)
+private fun WorldPaperTile(emoji: String, title: String, subtitle: String, angle: Float, tint: Color,
+    onClick: () -> Unit, modifier: Modifier = Modifier, wishJar: Boolean = false) {
+    Box(modifier.height(112.dp).rotate(angle).clickable(onClickLabel = "打开$title", onClick = onClick)) {
+        StickerPaperArtwork(Modifier.matchParentSize(), tint)
+        Column(Modifier.fillMaxSize().padding(horizontal = 12.dp).padding(top = 15.dp, bottom = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            if (wishJar) StarWishJar(.55f, Modifier.size(42.dp))
+            else Box(Modifier.size(42.dp), contentAlignment = Alignment.Center) { Text(emoji, fontSize = 30.sp) }
+            Text(title, fontFamily = GuluBrandFont, fontWeight = FontWeight.Normal, fontSize = 15.sp,
+                lineHeight = 20.sp, color = GuluPurpleDeep, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(subtitle, style = MaterialTheme.typography.labelSmall, color = PaperInkLight,
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }

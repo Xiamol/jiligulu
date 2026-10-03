@@ -6,8 +6,6 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import com.jiligulu.app.ui.littleworld.StickerIllustration
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
-import androidx.compose.material3.SheetValue
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
@@ -23,13 +21,9 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
@@ -60,9 +54,11 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.jiligulu.app.JiliguluApp
@@ -73,6 +69,8 @@ import com.jiligulu.app.data.local.entity.CategoryEntity
 import com.jiligulu.app.domain.category.CategoryLabels
 import com.jiligulu.app.ui.calculator.CalculatorDialog
 import com.jiligulu.app.ui.components.rememberPageData
+import com.jiligulu.app.ui.components.SpringLazyGrid
+import com.jiligulu.app.ui.components.SpringScrollColumn
 import com.jiligulu.app.ui.theme.GuluBrandFont
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
@@ -83,7 +81,8 @@ import kotlinx.coroutines.launch
 fun StickerDrawer(onDismiss: () -> Unit, onPick: (Sticker) -> Unit) {
     val app = LocalContext.current.applicationContext as JiliguluApp
     val repository = app.container.littleWorld
-    val state by rememberPageData(repository.state, LittleWorldState(stickers = emptyList()))
+    val loadedState by rememberPageData<LittleWorldState?>(repository.state, null)
+    val state = loadedState ?: LittleWorldState(stickers = emptyList())
     val categories by rememberPageData(app.container.categoryRepository.categories, emptyList())
     val scope = rememberCoroutineScope()
     var managing by rememberSaveable { mutableStateOf(false) }
@@ -94,7 +93,6 @@ fun StickerDrawer(onDismiss: () -> Unit, onPick: (Sticker) -> Unit) {
     val maxHeight = (LocalConfiguration.current.screenHeightDp * .56f).dp
     val sheetState=rememberModalBottomSheetState(skipPartiallyExpanded=true)
     val gridState=rememberLazyGridState()
-    LaunchedEffect(sheetState.currentValue) { if(sheetState.currentValue==SheetValue.Expanded) gridState.scrollToItem(0) }
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState,
         containerColor = MaterialTheme.colorScheme.background, shape = RoundedCornerShape(topStart = 30.dp, topEnd = 30.dp)) {
@@ -102,7 +100,7 @@ fun StickerDrawer(onDismiss: () -> Unit, onPick: (Sticker) -> Unit) {
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("阿噜的贴纸墙", fontFamily = GuluBrandFont, style = MaterialTheme.typography.titleLarge,
+                    Text("阿噜的贴纸墙", fontFamily = GuluBrandFont, fontWeight = FontWeight.Normal, style = MaterialTheme.typography.titleLarge,
                         color = MaterialTheme.colorScheme.primary)
                     Text(if (managing) "点贴纸编辑 · 可以挪位置、换图案" else "轻轻揭下一张，带去记一笔 ♡",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -113,7 +111,13 @@ fun StickerDrawer(onDismiss: () -> Unit, onPick: (Sticker) -> Unit) {
             error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
             Box(Modifier.fillMaxWidth().height(maxHeight).clip(RoundedCornerShape(18.dp))) {
                 StickerWallArtwork(Modifier.matchParentSize())
-            LazyVerticalGrid(columns = GridCells.Fixed(3), state=gridState, modifier = Modifier.fillMaxSize(), contentPadding=PaddingValues(horizontal=10.dp,vertical=18.dp),
+            if (loadedState == null) {
+                // Do not compose the permanent trailing key before the real stickers exist:
+                // LazyGrid would retain "new-sticker" as its anchor and open at the bottom.
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    androidx.compose.material3.CircularProgressIndicator(Modifier.size(24.dp))
+                }
+            } else SpringLazyGrid(columns = 3, state=gridState, modifier = Modifier.fillMaxSize(), contentPadding=PaddingValues(horizontal=10.dp,vertical=18.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 itemsIndexed(state.stickers, key = { _, item -> item.id }) { index, sticker ->
                     StickerPaper(sticker, index, managing,
@@ -225,9 +229,10 @@ private fun StickerEditor(sticker: Sticker, categories: List<CategoryEntity>, sa
         Surface(Modifier.padding(24.dp).widthIn(max = 350.dp).fillMaxWidth(), shape = RoundedCornerShape(26.dp),
             color = MaterialTheme.colorScheme.surface) {
             Column(Modifier.heightIn(max = (LocalConfiguration.current.screenHeightDp * .8f).dp)
-                .verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(if (sticker.title.isBlank()) "做一张自己的贴纸 ✿" else "给小贴纸换个样子", fontFamily = GuluBrandFont,
+                .padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(if (sticker.title.isBlank()) "做一张自己的贴纸 ✿" else "给小贴纸换个样子", fontFamily = GuluBrandFont, fontWeight = FontWeight.Normal,
                     style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary)
+                SpringScrollColumn(Modifier.weight(1f, fill = false), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
                 OutlinedTextField(title, { if (it.length <= 24) title = it }, Modifier.fillMaxWidth(),
                     label = { Text("贴纸名字") }, placeholder = { Text("比如：早餐的小面包") },
@@ -247,19 +252,23 @@ private fun StickerEditor(sticker: Sticker, categories: List<CategoryEntity>, sa
                     }
                 }
                 Text("挑一个小图案", style = MaterialTheme.typography.labelLarge)
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 listOf("🍳", "🍚", "🍜", "🥐", "☕", "🧋", "🥬", "🍊", "🚇", "🚕", "🚌", "🛒", "🐱", "🐶", "🎮", "📚", "💰", "⭐").chunked(6).forEach { row ->
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         row.forEach { icon ->
                             Surface(onClick = { emoji = icon }, enabled = !saving, shape = RoundedCornerShape(12.dp),
                                 color = if (emoji == icon) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
-                                modifier = Modifier.weight(1f)) {
-                                Text(icon, style = MaterialTheme.typography.titleLarge, textAlign = TextAlign.Center, modifier = Modifier.padding(vertical = 6.dp))
+                                modifier = Modifier.weight(1f).height(44.dp)) {
+                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                    StickerIllustration(icon, Modifier.size(28.dp), fallbackFontSize = 20.sp)
+                                }
                             }
                         }
                     }
                 }
+                }
                 Text("分类", style = MaterialTheme.typography.labelLarge)
-                Column(Modifier.heightIn(max = 138.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                SpringScrollColumn(Modifier.heightIn(max = 138.dp), handOffOnRepeat = true, verticalArrangement = Arrangement.spacedBy(5.dp)) {
                     Surface(onClick = { categoryId = -1 }, enabled = !saving, shape = RoundedCornerShape(12.dp),
                         color = if (categoryId <= 0) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
                         modifier = Modifier.fillMaxWidth()) {
@@ -284,6 +293,7 @@ private fun StickerEditor(sticker: Sticker, categories: List<CategoryEntity>, sa
                     TextButton(onClick = { onMoveUp?.invoke() }, enabled = onMoveUp != null && !saving) { Text("↑ 前移") }
                     TextButton(onClick = { onMoveDown?.invoke() }, enabled = onMoveDown != null && !saving) { Text("↓ 后移") }
                     TextButton(onClick = onDelete, enabled = !saving) { Text("移除", color = MaterialTheme.colorScheme.error) }
+                }
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     TextButton(onClick = onDismiss, enabled = !saving, modifier = Modifier.weight(1f)) { Text("先收起") }

@@ -7,9 +7,7 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -23,6 +21,7 @@ import androidx.compose.ui.window.DialogProperties
 import com.jiligulu.app.JiliguluApp
 import com.jiligulu.app.data.littleworld.MemoryCard
 import com.jiligulu.app.ui.components.LedgerCard
+import com.jiligulu.app.ui.components.SpringScrollColumn
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -135,9 +134,9 @@ fun MemoryPosterDialog(data: PosterData, onDismiss: () -> Unit) {
                 Text("把生活做成一张小海报", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
                 TextButton(onClick = onDismiss, enabled = !busy) { Text("关闭") }
             }
-            Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedTextField(title, { title = it.take(32) }, label = { Text(if (data.week == null) "给这一刻起个名字" else "给这一周起个名字") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-                OutlinedTextField(caption, { caption = it.take(120) }, label = { Text("留一句话") }, modifier = Modifier.fillMaxWidth(), maxLines = 3)
+            SpringScrollColumn(Modifier.weight(1f, fill = false), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(title, { title = it.take(32) }, label = { Text(if (data.week == null) "给这一刻起个名字" else "给这一周起个名字") }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp), singleLine = true)
+                OutlinedTextField(caption, { caption = it.take(120) }, label = { Text("留一句话") }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp), maxLines = 3)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (data.amountFen != null || data.week != null) {
                         Checkbox(checked = showAmount, onCheckedChange = { showAmount = it }); Text("展示金额", style = MaterialTheme.typography.bodySmall)

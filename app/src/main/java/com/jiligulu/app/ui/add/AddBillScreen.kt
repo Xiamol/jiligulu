@@ -24,12 +24,11 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Calculate
@@ -78,6 +77,7 @@ import com.jiligulu.app.data.repository.CategoryDeletionResult
 import com.jiligulu.app.domain.category.CategoryDefaults
 import com.jiligulu.app.domain.category.CategoryEngine
 import com.jiligulu.app.domain.category.CategoryLabels
+import com.jiligulu.app.ui.components.SpringScrollColumn
 import com.jiligulu.app.ui.components.BillDateTimeField
 import com.jiligulu.app.ui.components.LedgerCard
 import com.jiligulu.app.ui.components.CategoryBadge
@@ -176,7 +176,7 @@ fun AddBillScreen(onBack: () -> Unit, vm: AddBillViewModel = viewModel(factory =
             }
         }
     ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState())
+        SpringScrollColumn(Modifier.fillMaxSize().padding(padding)
             .padding(horizontal = 20.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
             Row(Modifier.fillMaxWidth().selectableGroup().clip(MaterialTheme.shapes.extraLarge)
                 .background(MaterialTheme.colorScheme.surfaceVariant).padding(4.dp),
@@ -219,9 +219,16 @@ fun AddBillScreen(onBack: () -> Unit, vm: AddBillViewModel = viewModel(factory =
                 }
             }
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("分类", style = MaterialTheme.typography.titleSmall)
-                // 三个一行、等宽铺开：不论分类几个，都不会出现「最后一行挤在左边」的参差感。
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("分类", Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
+                    Text(categories.firstOrNull { it.id == effectiveCategoryId }?.let { "已选 · ${CategoryLabels.displayName(it.name)}" }
+                        ?: "${categories.size} 个小分类", modifier = Modifier.widthIn(max = 200.dp),
+                        style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.primary)
+                }
+                // Keep a large category collection within three rows; it has its own spring
+                // and thumb, and a repeated edge gesture can continue the surrounding form.
+                SpringScrollColumn(Modifier.fillMaxWidth().heightIn(max = 158.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp), handOffOnRepeat = true) {
                     categories.chunked(3).forEach { row ->
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -257,6 +264,8 @@ fun AddBillScreen(onBack: () -> Unit, vm: AddBillViewModel = viewModel(factory =
                         }
                     }
                 }
+                if (categories.size > 9) Text("上下滑动找分类 · 长按可以整理", style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
                 if (suggested != null && !userPickedCategory) Text(
                     "已推荐「${CategoryLabels.displayName(suggested.name)}」",
                     style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

@@ -8,8 +8,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -38,7 +36,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
@@ -75,9 +72,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.jiligulu.app.data.local.entity.BillType
 import com.jiligulu.app.data.local.entity.CategoryEntity
 import com.jiligulu.app.ui.persona.GuluMascot
-import com.jiligulu.app.ui.components.BillDateTimeField
 import com.jiligulu.app.ui.components.CategoryBadge
-import com.jiligulu.app.domain.color.GoldenAnglePalette
 import com.jiligulu.app.domain.category.CategoryDefaults
 import com.jiligulu.app.ui.theme.ExpenseCoral
 import com.jiligulu.app.ui.theme.IncomeGreen
@@ -386,7 +381,6 @@ private fun GuluBubble(msg: ChatItem.GuluMsg) {
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun DraftCardView(
     card: ChatItem.DraftCard,
@@ -413,8 +407,9 @@ internal fun DraftCardView(
             .animateContentSize()
             .background(MaterialTheme.colorScheme.surface, MaterialTheme.shapes.large)
             .border(0.7.dp, MaterialTheme.colorScheme.outlineVariant, MaterialTheme.shapes.large)
-            .padding(16.dp)
+            .padding(14.dp)
     ) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text(
             when (card.status) {
                 ChatItem.DraftCard.Status.CONFIRMED -> "✓ 已记入账本 · ${card.savedCount} 笔"
@@ -422,9 +417,17 @@ internal fun DraftCardView(
                 else -> "整理好了 · ${card.drafts.size} 笔待确认"
             },
             style = MaterialTheme.typography.titleSmall,
+            modifier = Modifier.weight(1f),
             color = MaterialTheme.colorScheme.primary,
             fontWeight = FontWeight.SemiBold
         )
+        if (!expanded && editing) {
+            TextButton(onClick = { onExpandedChange(true) }, modifier = Modifier.height(32.dp)
+                .testTag("draft-expand-${card.id}"), contentPadding = PaddingValues(horizontal = 6.dp)) {
+                Text("展开 · 编辑草稿", style = MaterialTheme.typography.labelSmall)
+            }
+        }
+        }
         Spacer(Modifier.height(4.dp))
         Text(
             "「${card.rawInput}」",
@@ -440,9 +443,9 @@ internal fun DraftCardView(
                 card.drafts.filter { it.checked } else card.drafts
             val summaryDrafts = if (card.status == ChatItem.DraftCard.Status.CONFIRMED) visibleDrafts else visibleDrafts.take(3)
             summaryDrafts.forEach { draft ->
-                Row(Modifier.fillMaxWidth().padding(vertical = 7.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     val category = categories.firstOrNull { it.name.equals(draft.categoryName, true) }
-                    CategoryBadge(draft.categoryName, category?.iconValue ?: draft.iconEmoji, size = 32.dp)
+                    CategoryBadge(draft.categoryName, category?.iconValue ?: draft.iconEmoji, size = 28.dp)
                     Column(Modifier.weight(1f)) {
                         Text(draft.detail.ifBlank { draft.categoryName }, style = MaterialTheme.typography.bodyMedium)
                         draft.timestamp?.let { timestamp ->
@@ -460,91 +463,16 @@ internal fun DraftCardView(
             }
             if (visibleDrafts.size > summaryDrafts.size) Text("还有 ${visibleDrafts.size - summaryDrafts.size} 笔", style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
-            if (editing) {
-                TextButton(onClick = { onExpandedChange(true) }, modifier = Modifier.align(Alignment.End)
-                    .testTag("draft-expand-${card.id}")) { Text("展开 · 编辑草稿") }
-            }
             return@Column
         }
 
         card.drafts.forEachIndexed { index, draft ->
-            Column {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(
-                    checked = draft.checked,
-                    onCheckedChange = { c -> onUpdate(index) { d -> d.copy(checked = c) } },
-                    enabled = editing
-                )
-                        OutlinedTextField(
-                            value = draft.amountText,
-                            onValueChange = { v ->
-                                onUpdate(index) { d -> d.copy(amountText = v.filter { c -> c.isDigit() || c == '.' }) }
-                            },
-                            modifier = Modifier.weight(1f).testTag("draft-amount-${card.id}-$index"),
-                            prefix = { Text("¥") },
-                            placeholder = { Text("金额") },
-                            singleLine = true,
-                            enabled = editing,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
-                        )
-                        Spacer(Modifier.width(12.dp))
-                        Text(
-                            if (draft.type == BillType.EXPENSE) "支出" else "收入",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = if (draft.type == BillType.EXPENSE) ExpenseCoral else IncomeGreen
-                        )
-                    }
-                    Spacer(Modifier.height(6.dp))
-                    OutlinedTextField(
-                        value = draft.detail,
-                        onValueChange = { v -> onUpdate(index) { d -> d.copy(detail = v) } },
-                        modifier = Modifier.fillMaxWidth().testTag("draft-detail-${card.id}-$index"),
-                        placeholder = { Text("细则（如：牛肉面）") },
-                        singleLine = true,
-                        enabled = editing
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    BillDateTimeField(
-                        timestamp = draft.timestamp,
-                        onTimestampChange = { timestamp ->
-                            onUpdate(index) { it.copy(timestamp = timestamp, timeNeedsReview = false,
-                                timeHint = if (timestamp == null) "确认入账时记录此刻" else "已手动调整时间") }
-                        },
-                        enabled = editing,
-                        allowCurrentTime = !draft.requiresTimeInput,
-                        label = if (draft.requiresTimeInput) "请先选择账单时间" else "账单时间"
-                    )
-                    Text(if (draft.timeNeedsReview && !draft.requiresTimeInput) draft.timeHint + "；确认入账即接受此时间" else draft.timeHint, style = MaterialTheme.typography.labelSmall,
-                        color = if (draft.requiresTimeInput) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
-                    Spacer(Modifier.height(6.dp))
-                    // 分类选择：现有分类 + AI 建议的新分类
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        categories.forEach { c ->
-                            FilterChip(
-                                selected = draft.categoryName.equals(c.name, true),
-                                onClick = { onUpdate(index) { d -> d.copy(categoryName = c.name,
-                                    iconEmoji = c.iconValue, iconSvg = c.iconSvg, isNewCategory = false) } },
-                                leadingIcon = { CategoryBadge(c.name, c.iconValue, size = 22.dp,
-                                    tint = GoldenAnglePalette.colorForHue(c.colorHue)) },
-                                label = { Text(c.name, style = MaterialTheme.typography.labelMedium) },
-                                enabled = editing
-                            )
-                        }
-                        if (draft.isNewCategory && categories.none { it.name.equals(draft.categoryName, true) }) {
-                            FilterChip(
-                                selected = true,
-                                onClick = {},
-                                leadingIcon = { CategoryBadge(draft.categoryName, draft.iconEmoji, size = 22.dp) },
-                                label = { Text("${draft.categoryName}·新", style = MaterialTheme.typography.labelMedium) },
-                                enabled = editing
-                            )
-                        }
-                    }
-            }
+            DraftEditorRow(draft = draft, categories = categories, enabled = editing,
+                tag = "${card.id}-$index", onUpdate = { change -> onUpdate(index, change) })
             if (index < card.drafts.size - 1) {
-                Spacer(Modifier.height(14.dp))
+                Spacer(Modifier.height(9.dp))
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                Spacer(Modifier.height(14.dp))
+                Spacer(Modifier.height(9.dp))
             }
         }
 
