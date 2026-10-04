@@ -3,6 +3,7 @@ package com.jiligulu.app.data.prefs
 import android.content.Context
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -33,6 +34,10 @@ data class WaterReminderAdvance(val nextDueAt: Long, val pendingToDeliver: Pendi
 
 data class SavedAnnouncements(val source: String, val cachedFeed: String, val mutedIds: Set<String>)
 
+/** Relative to the movable area after system insets and the floating icon's size. */
+data class FloatingCapturePosition(val x: Float, val y: Float)
+data class FloatingCapturePlacement(val sizePercent: Int, val position: FloatingCapturePosition?)
+
 /**
  * 用户偏好：称呼、称呼后缀、自定义 API Key。
  * TODO(M5 前)：Key 迁移到 EncryptedSharedPreferences 加密封存（PRD §4）。
@@ -41,6 +46,8 @@ class UserPrefs(private val context: Context) {
 
     companion object {
         private val KEY_FLOATING_SIZE = intPreferencesKey("floating_capture_size_percent")
+        private val KEY_FLOATING_POSITION_X = floatPreferencesKey("floating_capture_position_x")
+        private val KEY_FLOATING_POSITION_Y = floatPreferencesKey("floating_capture_position_y")
         const val DEFAULT_FLOATING_SIZE_PERCENT = 80
         const val MIN_FLOATING_SIZE_PERCENT = 60
         const val MAX_FLOATING_SIZE_PERCENT = 140
@@ -102,6 +109,24 @@ class UserPrefs(private val context: Context) {
     }.distinctUntilChanged()
     suspend fun setFloatingCaptureSizePercent(percent: Int) {
         context.dataStore.edit { it[KEY_FLOATING_SIZE] = percent.coerceIn(MIN_FLOATING_SIZE_PERCENT, MAX_FLOATING_SIZE_PERCENT) }
+    }
+
+    suspend fun readFloatingCapturePlacement(): FloatingCapturePlacement {
+        val values = context.dataStore.data.first()
+        val x = values[KEY_FLOATING_POSITION_X]
+        val y = values[KEY_FLOATING_POSITION_Y]
+        val position = if (x != null && y != null && x.isFinite() && y.isFinite())
+            FloatingCapturePosition(x.coerceIn(0f, 1f), y.coerceIn(0f, 1f)) else null
+        return FloatingCapturePlacement((values[KEY_FLOATING_SIZE] ?: DEFAULT_FLOATING_SIZE_PERCENT)
+            .coerceIn(MIN_FLOATING_SIZE_PERCENT, MAX_FLOATING_SIZE_PERCENT), position)
+    }
+
+    suspend fun setFloatingCapturePosition(position: FloatingCapturePosition) {
+        if (!position.x.isFinite() || !position.y.isFinite()) return
+        context.dataStore.edit {
+            it[KEY_FLOATING_POSITION_X] = position.x.coerceIn(0f, 1f)
+            it[KEY_FLOATING_POSITION_Y] = position.y.coerceIn(0f, 1f)
+        }
     }
 
     val floatingCaptureEnabled: Flow<Boolean> = context.dataStore.data.map { it[KEY_FLOATING_CAPTURE] ?: false }.distinctUntilChanged()

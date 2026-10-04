@@ -571,7 +571,7 @@ class UiSmokeScreenshotTest {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             scenario.onActivity { activity = it }
             awaitText("对话记账")
-            compose.onNodeWithTag("announcement-board").performClick()
+            compose.onNodeWithTag("main-mailbox").performClick()
             awaitTag("announcement-empty")
             compose.onNodeWithText("收好信笺").performClick()
             awaitTag("announcement-empty", present = false)
@@ -629,7 +629,7 @@ class UiSmokeScreenshotTest {
                 com.jiligulu.app.ui.main.MainScreen({}, {}, {})
             } } }
             awaitTag("home-outer")
-            compose.onNodeWithTag("home-outer").performScrollToIndex(3)
+            compose.onNodeWithTag("home-outer").performScrollToIndex(com.jiligulu.app.ui.home.HOME_LEDGER_ITEM_INDEX)
             compose.waitForIdle()
             compose.mainClock.advanceTimeBy(350)
             compose.waitForIdle()
@@ -715,7 +715,7 @@ class UiSmokeScreenshotTest {
                 scenario.onActivity { activity = it; it.setContent { GuluTheme { com.jiligulu.app.ui.home.HomeScreen({}, {}, home) } } }
                 awaitText("今天-11")
                 // Leave the ledger partially below its pin position: horizontal navigation must not collapse the overview.
-                compose.onNodeWithTag("home-outer").performScrollToIndex(2)
+                compose.onNodeWithTag("home-outer").performScrollToIndex(com.jiligulu.app.ui.home.HOME_LEDGER_ITEM_INDEX - 1)
                 compose.mainClock.advanceTimeBy(300)
                 compose.waitForIdle()
                 compose.waitForIdle()
@@ -740,7 +740,7 @@ class UiSmokeScreenshotTest {
                 awaitText("今天-11")
                 assertEquals(today, home.selectedDay.value)
                 compose.waitUntil(8000) { shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(16)); compose.onAllNodesWithTag("home-day-bills").fetchSemanticsNodes().size == 1 }
-                compose.onNodeWithTag("home-outer").performScrollToIndex(3)
+                compose.onNodeWithTag("home-outer").performScrollToIndex(com.jiligulu.app.ui.home.HOME_LEDGER_ITEM_INDEX)
                 compose.onNodeWithTag("home-day-bills").performScrollToIndex(11)
                 compose.mainClock.advanceTimeBy(300)
                 compose.waitForIdle()
@@ -916,7 +916,7 @@ class UiSmokeScreenshotTest {
     }
 
     private fun openSampleBill() {
-        compose.onNodeWithTag("home-outer").performScrollToIndex(3)
+        compose.onNodeWithTag("home-outer").performScrollToIndex(com.jiligulu.app.ui.home.HOME_LEDGER_ITEM_INDEX)
         compose.onNodeWithTag("home-day-bills").performScrollToIndex(0)
         awaitText("牛肉面")
         compose.onAllNodesWithText("牛肉面").onFirst().performClick()

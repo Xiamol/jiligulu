@@ -30,7 +30,7 @@ class HomePinGestureTest {
         compose.setContent {
             MaterialTheme { HomeContent(HomeUiState(monthLabel = "2026年10月"), {}, {}, onBillClick = {}) }
         }
-        compose.onNodeWithTag("home-outer").performScrollToIndex(3)
+        compose.onNodeWithTag("home-outer").performScrollToIndex(HOME_LEDGER_ITEM_INDEX)
         val heading = compose.onNodeWithTag("home-ledger-heading")
         val bills = compose.onNodeWithTag("home-day-bills")
         val headingTop = heading.fetchSemanticsNode().boundsInRoot.top
@@ -73,7 +73,7 @@ class HomePinGestureTest {
         compose.runOnIdle { assertTrue(dx < -30f); assertEquals(0, ended) }
         outer.performTouchInput { up() }
         compose.runOnIdle { assertEquals(1, ended); dx = 0f }
-        outer.performScrollToIndex(3)
+        outer.performScrollToIndex(HOME_LEDGER_ITEM_INDEX)
         compose.onNodeWithTag("home-day-pager").performTouchInput {
             down(Offset(width * .2f, height * .5f))
             moveTo(Offset(width * .65f, height * .5f), delayMillis = 100)
@@ -87,7 +87,7 @@ class HomePinGestureTest {
             MaterialTheme { HomeContent(HomeUiState(monthLabel = "2026年10月"), {}, {}, onBillClick = {}) }
         }
         val outer = compose.onNodeWithTag("home-outer")
-        outer.performScrollToIndex(3)
+        outer.performScrollToIndex(HOME_LEDGER_ITEM_INDEX)
         val heading = compose.onNodeWithTag("home-ledger-heading")
         val initial = heading.fetchSemanticsNode().boundsInRoot.top
         // Start above the inner list: this gesture is owned by the outer LazyColumn.
@@ -116,7 +116,7 @@ class HomePinGestureTest {
                 selectedDay = today, daySource = { kotlinx.coroutines.flow.flowOf(snapshot(it, "账单")) }, onBillClick = {}) }
         }
         compose.waitUntil(4000) { compose.onAllNodesWithText("账单-0").fetchSemanticsNodes().isNotEmpty() }
-        compose.onNodeWithTag("home-outer").performScrollToIndex(3)
+        compose.onNodeWithTag("home-outer").performScrollToIndex(HOME_LEDGER_ITEM_INDEX)
         val bills = compose.onNodeWithTag("home-day-bills")
         val heading = compose.onNodeWithTag("home-ledger-heading")
         val before = bills.getUnclippedBoundsInRoot().top.value
@@ -151,7 +151,7 @@ class HomePinGestureTest {
                 onSelectDay = { selected = it }, onBillClick = {}) }
         }
         compose.waitUntil(4000) { compose.onAllNodesWithText("今天-0").fetchSemanticsNodes().isNotEmpty() }
-        compose.onNodeWithTag("home-outer").performScrollToIndex(3)
+        compose.onNodeWithTag("home-outer").performScrollToIndex(HOME_LEDGER_ITEM_INDEX)
         compose.onNodeWithTag("home-day-pager").performTouchInput { swipeRight() }
         compose.waitForIdle()
         compose.runOnIdle { assertEquals(yesterday, selected) }

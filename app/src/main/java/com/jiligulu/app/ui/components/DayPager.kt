@@ -75,19 +75,21 @@ fun DayPager(day: Long, latest: Long, onSelect: (Long) -> Unit, modifier: Modifi
         key = { it }) { page -> content(pageDay(page)) }
 }
 
-/** Starts only a deliberate leftward drag, so vertical lists and yesterday remain independent. */
+/** Starts a deliberate horizontal drag; home defaults leftward so yesterday stays independent. */
 fun Modifier.forwardMainPageSwipe(
     enabled: () -> Boolean,
     onDrag: ((Float) -> Unit)?,
     onDragEnd: ((Float) -> Unit)?,
     onSwipe: (() -> Unit)? = null,
-    startAllowed: (Offset) -> Boolean = { true }
+    startAllowed: (Offset) -> Boolean = { true },
+    allowRight: Boolean = false
 ): Modifier = composed {
     val allowed by rememberUpdatedState(enabled)
     val start by rememberUpdatedState(startAllowed)
     val drag by rememberUpdatedState(onDrag)
     val finish by rememberUpdatedState(onDragEnd)
     val swipe by rememberUpdatedState(onSwipe)
+    val rightAllowed by rememberUpdatedState(allowRight)
     pointerInput(Unit) {
         awaitEachGesture {
             val first = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
@@ -113,7 +115,7 @@ fun Modifier.forwardMainPageSwipe(
                     tracker.addPosition(change.uptimeMillis, travel)
                     var justClaimed = false
                     if (!claimed && maxOf(abs(travel.x), abs(travel.y)) > viewConfiguration.touchSlop) {
-                        if (-travel.x <= abs(travel.y)) return@awaitEachGesture
+                        if (abs(travel.x) <= abs(travel.y) || (travel.x > 0 && !rightAllowed)) return@awaitEachGesture
                         claimed = true
                         justClaimed = true
                     }
@@ -125,7 +127,7 @@ fun Modifier.forwardMainPageSwipe(
                     if (!change.pressed) {
                         if (claimed) {
                             if (dragHandler != null) finishHandler?.invoke(tracker.calculateVelocity().x)
-                            else if (-travel.x >= threshold && -travel.x > abs(travel.y)) swipeHandler?.invoke()
+                            else if (abs(travel.x) >= threshold && abs(travel.x) > abs(travel.y)) swipeHandler?.invoke()
                         }
                         ended = true
                         break

@@ -18,7 +18,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ReceiptLong
 import androidx.compose.material.icons.filled.BarChart
+import androidx.compose.material.icons.filled.Cottage
 import androidx.compose.material.icons.outlined.BarChart
+import androidx.compose.material.icons.outlined.Cottage
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -38,7 +40,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import kotlin.math.abs
 
-/** The thumb and the actual two pages move together while the user scrubs the bar. */
+/** The thumb and the actual main pages move together while the user scrubs the bar. */
 @Composable
 @OptIn(ExperimentalFoundationApi::class)
 internal fun MainTabNavigation(
@@ -50,7 +52,7 @@ internal fun MainTabNavigation(
     onScrubEnd: () -> Unit
 ) {
     // Only this small bar observes each animation frame; the data-heavy pages don't recompose.
-    val progress = (pager.currentPage + pager.currentPageOffsetFraction).coerceIn(0f, 1f)
+    val progress = (pager.currentPage + pager.currentPageOffsetFraction).coerceIn(0f, (MainPageCount - 1).toFloat())
     val haptics = LocalHapticFeedback.current
     val density = LocalDensity.current
     val start by rememberUpdatedState(onScrubStart)
@@ -69,7 +71,7 @@ internal fun MainTabNavigation(
                         // Own physical touch; selectable below still supplies accessibility/keyboard clicks.
                         // DOWN freezes an in-flight spring without selecting another destination.
                         down.consume()
-                        val pressedProgress = (pager.currentPage + pager.currentPageOffsetFraction).coerceIn(0f, 1f)
+                        val pressedProgress = (pager.currentPage + pager.currentPageOffsetFraction).coerceIn(0f, (MainPageCount - 1).toFloat())
                         val width = size.width.toFloat()
                         val grab = TabScrubPosition.grabOffset(down.position.x, pressedProgress, width, thumbPx)
                         val slop = viewConfiguration.touchSlop
@@ -106,19 +108,22 @@ internal fun MainTabNavigation(
         ) {
             val widthPx = constraints.maxWidth.toFloat()
             Box(Modifier.padding(top = 11.dp).size(thumbWidth, 34.dp)
-                .graphicsLayer { translationX = widthPx * (.25f + progress.coerceIn(0f, 1f) * .5f) - thumbPx / 2f }
+                .graphicsLayer { translationX = TabScrubPosition.center(progress, widthPx) - thumbPx / 2f }
                 .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = .76f), RoundedCornerShape(50)))
             Row(Modifier.fillMaxWidth().height(80.dp)) {
-                listOf("账本", "统计").forEachIndexed { index, label ->
-                    val proximity = 1f - abs(progress.coerceIn(0f, 1f) - index)
+                listOf("账本", "小窝", "统计").forEachIndexed { index, label ->
+                    val proximity = (1f - abs(progress - index)).coerceIn(0f, 1f)
                     val tint = androidx.compose.ui.graphics.lerp(MaterialTheme.colorScheme.onSurfaceVariant,
                         MaterialTheme.colorScheme.primary, proximity)
                     Column(Modifier.weight(1f).height(80.dp)
                         .selectable(selected = selectedTab == index, onClick = { onSelect(index) }, role = Role.Tab)
-                        .testTag(if (index == 0) "main-tab-home" else "main-tab-stats")
+                        .testTag(when (index) { 0 -> "main-tab-home"; 1 -> "main-tab-world"; else -> "main-tab-stats" })
                         .padding(top = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(if (index == 0) Icons.AutoMirrored.Outlined.ReceiptLong
-                            else if (proximity > .5f) Icons.Filled.BarChart else Icons.Outlined.BarChart,
+                        Icon(when (index) {
+                            0 -> Icons.AutoMirrored.Outlined.ReceiptLong
+                            1 -> if (proximity > .5f) Icons.Filled.Cottage else Icons.Outlined.Cottage
+                            else -> if (proximity > .5f) Icons.Filled.BarChart else Icons.Outlined.BarChart
+                        },
                             contentDescription = null, modifier = Modifier.size(25.dp), tint = tint)
                         Text(label, Modifier.padding(top = 6.dp), color = tint,
                             style = MaterialTheme.typography.labelMedium)

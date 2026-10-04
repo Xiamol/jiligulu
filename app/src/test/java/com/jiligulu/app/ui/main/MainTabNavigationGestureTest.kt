@@ -30,7 +30,7 @@ class MainTabNavigationGestureTest {
         var releases = 0
         compose.setContent {
             MaterialTheme {
-                val pager = rememberPagerState { 2 }
+                val pager = rememberPagerState { MainPageCount }
                 Box(Modifier.fillMaxWidth()) {
                     MainTabNavigation(pager, 0, selections::add, {}, values::add, { releases++ })
                 }
@@ -38,17 +38,17 @@ class MainTabNavigationGestureTest {
         }
         val bar = compose.onNodeWithTag("main-tab-scrubber")
         bar.performTouchInput {
-            down(Offset(width * .25f, height * .5f))
-            moveTo(Offset(width * .65f, height * .5f), delayMillis = 16)
+            down(Offset(width / 6f, height * .5f))
+            moveTo(Offset(width * .7f, height * .5f), delayMillis = 16)
         }
         compose.runOnIdle {
             assertTrue("A MOVE before any long-press timeout must already drag", values.isNotEmpty())
-            assertEquals(.8f, values.last(), .01f)
+            assertEquals(1.6f, values.last(), .01f)
             assertTrue(selections.isEmpty())
             assertEquals(0, releases)
         }
-        bar.performTouchInput { moveTo(Offset(width * .35f, height * .5f), delayMillis = 16) }
-        compose.runOnIdle { assertEquals(.2f, values.last(), .01f) }
+        bar.performTouchInput { moveTo(Offset(width * .3f, height * .5f), delayMillis = 16) }
+        compose.runOnIdle { assertEquals(.4f, values.last(), .01f) }
         bar.performTouchInput { up() }
         compose.runOnIdle { assertEquals(1, releases); assertTrue(selections.isEmpty()) }
     }
@@ -58,16 +58,20 @@ class MainTabNavigationGestureTest {
         val selections = mutableListOf<Int>()
         compose.setContent {
             MaterialTheme {
-                val pager = rememberPagerState { 2 }
+                val pager = rememberPagerState { MainPageCount }
                 Box(Modifier.fillMaxWidth()) {
                     MainTabNavigation(pager, 0, selections::add, {}, values::add, {})
                 }
             }
         }
         val bar = compose.onNodeWithTag("main-tab-scrubber")
-        bar.performTouchInput { down(Offset(width * .75f, height * .5f)) }
+        bar.performTouchInput { down(Offset(width * 5f / 6f, height * .5f)) }
         compose.runOnIdle { assertTrue(selections.isEmpty()); assertTrue(values.isEmpty()) }
         bar.performTouchInput { up() }
-        compose.runOnIdle { assertEquals(listOf(1), selections); assertTrue(values.isEmpty()) }
+        compose.runOnIdle { assertEquals(listOf(2), selections); assertTrue(values.isEmpty()) }
+        bar.performTouchInput { down(Offset(width * .5f, height * .5f)) }
+        compose.runOnIdle { assertEquals(listOf(2), selections) }
+        bar.performTouchInput { up() }
+        compose.runOnIdle { assertEquals(listOf(2, 1), selections); assertTrue(values.isEmpty()) }
     }
 }

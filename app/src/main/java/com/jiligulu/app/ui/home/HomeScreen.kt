@@ -80,6 +80,10 @@ import com.jiligulu.app.ui.theme.ExpenseCoral
 import com.jiligulu.app.ui.theme.GuluTheme
 import com.jiligulu.app.ui.theme.IncomeGreen
 
+// Only the monthly overview and the two record buttons precede the pinned ledger.
+internal const val HOME_LEDGER_ITEM_INDEX = 2
+private const val HOME_LEDGER_ITEM_KEY = "ledger_page"
+
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
@@ -146,7 +150,7 @@ internal fun HomeContent(
     var typeFilter by rememberSaveable { mutableIntStateOf(0) }
     var sort by rememberSaveable { mutableIntStateOf(0) }
     val outer = androidx.compose.foundation.lazy.rememberLazyListState()
-    val pinGestureScrolling by remember { derivedStateOf { outer.isScrollInProgress && outer.firstVisibleItemIndex >= 3 } }
+    val pinGestureScrolling by remember { derivedStateOf { outer.isScrollInProgress && outer.firstVisibleItemIndex >= HOME_LEDGER_ITEM_INDEX } }
     var activeInner by remember { mutableStateOf<LazyListState?>(null) }
     val gate = remember { StickyPullGate() }
     val effectScope = rememberCoroutineScope()
@@ -186,7 +190,7 @@ internal fun HomeContent(
                 resetFeedback()
                 gate.reset()
             } else if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME && resumeIndex >= 0) {
-                val index = resumeIndex; val offset = resumeOffset
+                val index = resumeIndex.coerceIn(0, HOME_LEDGER_ITEM_INDEX); val offset = resumeOffset
                 effectScope.launch {
                     withFrameNanos { }
                     outer.scrollToItem(index, offset)
@@ -203,7 +207,7 @@ internal fun HomeContent(
         gate.reset()
         resetFeedback()
     }
-    fun pinned() = outer.firstVisibleItemIndex >= 3
+    fun pinned() = outer.firstVisibleItemIndex >= HOME_LEDGER_ITEM_INDEX
     fun innerAtTop() = activeInner?.canScrollBackward != true
     val nested = remember(outer, gate, springMotion) { object : NestedScrollConnection {
         override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
@@ -275,7 +279,7 @@ internal fun HomeContent(
         onDragEnd = onPageDragEnd,
         onSwipe = onOpenStats,
         startAllowed = { position ->
-            val ledger = outer.layoutInfo.visibleItemsInfo.firstOrNull { it.key == "ledger_page" }
+            val ledger = outer.layoutInfo.visibleItemsInfo.firstOrNull { it.key == HOME_LEDGER_ITEM_KEY }
             ledger == null || position.y < ledger.offset || position.y >= ledger.offset + ledger.size
         }
     )
@@ -291,10 +295,9 @@ internal fun HomeContent(
         modifier = Modifier.fillMaxSize().testTag("home-outer").then(observeGesture).then(outerPageSwipe).nestedScroll(nested),
         contentPadding = PaddingValues(start = 20.dp, end = 20.dp)
     ) {
-        item(key = "announcements") { com.jiligulu.app.ui.announcement.AnnouncementBoard(announcements, onOpenAnnouncement) }
         item(key = "monthly_summary") { MonthlySummary(state) }
         item(key = "record_actions") {
-            // Keep quick actions in the same lazy item so the manual pin anchor stays at 3.
+            // Both record actions share one item; the next item is the pin anchor.
             Column {
             Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Button(
@@ -320,7 +323,7 @@ internal fun HomeContent(
             }
             }
         }
-        item(key = "ledger_page") {
+        item(key = HOME_LEDGER_ITEM_KEY) {
             // The outer connection owns both heading and bill gestures once. Translating
             // this heading made a blank strip; only the bill list stretches now.
             Column(Modifier.fillMaxWidth().height(viewport)) {

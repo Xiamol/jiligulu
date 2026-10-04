@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material.icons.outlined.Cottage
 import com.jiligulu.app.data.littleworld.Sticker
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -39,6 +38,9 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.platform.LocalContext
+import com.jiligulu.app.JiliguluApp
+import com.jiligulu.app.ui.announcement.MailboxHeaderButton
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.jiligulu.app.ui.theme.GuluBrandFont
@@ -53,6 +55,7 @@ import com.jiligulu.app.ui.persona.DrinkingOverlay
 import com.jiligulu.app.ui.persona.GuluCompanionHeader
 import com.jiligulu.app.ui.persona.PersonaViewModel
 import com.jiligulu.app.ui.stats.StatsScreen
+import com.jiligulu.app.ui.littleworld.LittleWorldScreen
 import com.jiligulu.app.ui.components.forwardMainPageSwipe
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.channels.Channel
@@ -70,26 +73,31 @@ fun MainScreen(
     onOpenSettings: () -> Unit,
     homeVm: HomeViewModel = viewModel(factory = HomeViewModel.Factory),
     personaVm: PersonaViewModel = viewModel(factory = PersonaViewModel.Factory),
-    onOpenLittleWorld: () -> Unit = {},
-    onPickSticker: (Sticker) -> Unit = {}
+    onPickSticker: (Sticker) -> Unit = {},
+    onOpenWishBook: () -> Unit = {},
+    onOpenFutureNotes: () -> Unit = {},
+    onOpenMemories: () -> Unit = {},
+    onRecordAmount: (String) -> Unit = {}
 ) {
+    val app = LocalContext.current.applicationContext as JiliguluApp
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
     val message by personaVm.bubble.collectAsStateWithLifecycle()
     val drinkingId by personaVm.drinkingId.collectAsStateWithLifecycle()
     val showDrinking = drinkingId != null
-    // Both real pages keep a stable viewport and their own scroll anchor even while off screen.
-    val pager = rememberPagerState(initialPage = selectedTab) { 2 }
+    // All main pages keep stable viewports and their own scroll anchors even off screen.
+    val pager = rememberPagerState(initialPage = selectedTab.coerceIn(0, MainPageCount - 1)) { MainPageCount }
     val motion = remember { TabMotionSession() }
     val requests = remember { Channel<TabMotion>(Channel.CONFLATED) }
     var manipulating by remember { mutableStateOf(false) }
+    var worldModalOpen by remember { mutableStateOf(false) }
     var pageWidth by remember { mutableFloatStateOf(1f) }
     fun moveTo(value: Float) {
         motion.dragging = true
-        motion.progress = value.coerceIn(0f, 1f)
+        motion.progress = value.coerceIn(0f, (MainPageCount - 1).toFloat())
         manipulating = true
         requests.trySend(TabMotion.Position(++motion.sequence, motion.progress))
     }
-    fun beginDrag() { moveTo((pager.currentPage + pager.currentPageOffsetFraction).coerceIn(0f, 1f)) }
+    fun beginDrag() { moveTo((pager.currentPage + pager.currentPageOffsetFraction).coerceIn(0f, (MainPageCount - 1).toFloat())) }
     fun finishDrag(velocity: Float = 0f) {
         if (!motion.dragging) return
         motion.dragging = false
@@ -100,7 +108,7 @@ fun MainScreen(
         motion.dragging = false
         manipulating = true
         requests.trySend(TabMotion.Settle(++motion.sequence,
-            (pager.currentPage + pager.currentPageOffsetFraction).coerceIn(0f, 1f), target))
+            (pager.currentPage + pager.currentPageOffsetFraction).coerceIn(0f, (MainPageCount - 1).toFloat()), target.coerceIn(0, MainPageCount - 1)))
     }
     val pageDrag: (Float) -> Unit = { delta ->
         if (!motion.dragging) beginDrag()
@@ -135,7 +143,7 @@ fun MainScreen(
                 fun applyPosition(value: Float) {
                     val current = pager.currentPage + pager.currentPageOffsetFraction
                     val stride = (pager.layoutInfo.pageSize + pager.layoutInfo.pageSpacing).toFloat().coerceAtLeast(1f)
-                    scrollBy((value.coerceIn(0f, 1f) - current) * stride)
+                    scrollBy((value.coerceIn(0f, (MainPageCount - 1).toFloat()) - current) * stride)
                 }
                 applyPosition(request.progress)
                 while (true) {
@@ -181,9 +189,7 @@ fun MainScreen(
                         Text("叽里咕噜", fontFamily = GuluBrandFont, fontSize = 28.sp,
                             color = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.weight(1f))
-                        IconButton(onClick = onOpenLittleWorld) {
-                            Icon(Icons.Outlined.Cottage, contentDescription = "阿噜的小窝", tint = MaterialTheme.colorScheme.primary)
-                        }
+                        MailboxHeaderButton(app.container.announcements)
                         IconButton(onClick = onOpenSettings) {
                             Icon(Icons.Outlined.Settings, contentDescription = "设置",
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -202,7 +208,7 @@ fun MainScreen(
         ) { padding ->
             Box(Modifier.fillMaxSize().padding(padding).onSizeChanged { pageWidth = it.width.toFloat() }) {
                 HorizontalPager(state = pager, modifier = Modifier.fillMaxSize().testTag("main-pages"),
-                    userScrollEnabled = false, beyondViewportPageCount = 1,
+                    userScrollEnabled = false, beyondViewportPageCount = MainPageCount - 1,
                     verticalAlignment = Alignment.Top, key = { it }) { page ->
                     when (page) {
                         0 -> Column(Modifier.fillMaxSize()) {
@@ -217,7 +223,14 @@ fun MainScreen(
                                 active = selectedTab == 0, onOpenStats = { navigate(1) }, onPickSticker = onPickSticker,
                                 onPageDrag = pageDrag, onPageDragEnd = pageDragEnd)
                         }
-                        1 -> StatsScreen(active = selectedTab == 1)
+                        1 -> LittleWorldScreen(onBack = { navigate(0) }, onOpenWishBook = onOpenWishBook,
+                            onOpenFutureNotes = onOpenFutureNotes, onOpenMemories = onOpenMemories,
+                            onRecordAmount = onRecordAmount, embedded = true, active = selectedTab == 1,
+                            onModalChanged = { worldModalOpen = it },
+                            modifier = Modifier.fillMaxSize().forwardMainPageSwipe(
+                                enabled = { selectedTab == 1 && !worldModalOpen }, onDrag = pageDrag,
+                                onDragEnd = pageDragEnd, allowRight = true))
+                        2 -> StatsScreen(active = selectedTab == 2)
                     }
                 }
             }

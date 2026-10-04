@@ -259,7 +259,14 @@ private fun JiliguluRoot(waterRequest: Int, futureNoteId: String? = null, onNote
                         onAddBill = { navController.navigate(Routes.ADD_BILL) },
                         onOpenChat = { navController.navigate(Routes.CHAT) },
                         onOpenSettings = { navController.navigate(Routes.SETTINGS) },
-                        onOpenLittleWorld = { navController.navigate(Routes.LITTLE_WORLD) },
+                        onOpenWishBook = { navController.navigate(Routes.WISH_BOOK) },
+                        onOpenFutureNotes = { navController.navigate(Routes.FUTURE_NOTES) },
+                        onOpenMemories = { navController.navigate(Routes.MEMORIES) },
+                        onRecordAmount = { amount ->
+                            com.jiligulu.app.core.util.Formatters.yuanTextToFen(amount)?.let {
+                                recordSticker(com.jiligulu.app.data.littleworld.Sticker(title = "", amountFen = it))
+                            }
+                        },
                         onPickSticker = recordSticker,
                         homeVm = homeVm
                     )

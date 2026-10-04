@@ -36,5 +36,18 @@ class FloatingCapturePreferenceTest {
         prefs.setFloatingCaptureSizePercent(80)
         assertEquals(80, UserPrefs(context).floatingCaptureSizePercent.first())
     }
+    @Test fun hideDropRestoresTheSettledPositionInsteadOfSavingTheTrashTarget() = runBlocking {
+        val context = RuntimeEnvironment.getApplication()
+        val prefs = UserPrefs(context)
+        val settled = com.jiligulu.app.data.prefs.FloatingCapturePosition(.87f, .35f)
+        val trashTarget = com.jiligulu.app.data.prefs.FloatingCapturePosition(.5f, 1f)
+        prefs.setFloatingCapturePosition(settled)
+        prefs.setFloatingCapturePosition(FloatingCaptureGeometry.positionAfterDrop(settled, trashTarget, droppedToHide = true))
+        assertEquals(settled, UserPrefs(context).readFloatingCapturePlacement().position)
+        val next = com.jiligulu.app.data.prefs.FloatingCapturePosition(.12f, .76f)
+        prefs.setFloatingCapturePosition(FloatingCaptureGeometry.positionAfterDrop(settled, next, droppedToHide = false))
+        assertEquals(next, UserPrefs(context).readFloatingCapturePlacement().position)
+    }
+
 }
 
