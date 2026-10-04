@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.sp
 import com.jiligulu.app.JiliguluApp
 import com.jiligulu.app.core.util.Formatters
 import com.jiligulu.app.data.littleworld.LittleWorldState
+import com.jiligulu.app.data.prefs.LittleWorldSkin
 import com.jiligulu.app.data.local.entity.BillEntity
 import com.jiligulu.app.data.local.entity.BillType
 import com.jiligulu.app.R
@@ -50,6 +51,7 @@ import kotlinx.coroutines.flow.collect
 import java.time.LocalDate
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
 
 @Composable
@@ -66,6 +68,7 @@ fun LittleWorldScreen(
 ) {
     val app = LocalContext.current.applicationContext as JiliguluApp
     val repository = app.container.littleWorld
+    val skin by app.container.userPrefs.littleWorldSkin.collectAsStateWithLifecycle(initialValue = null)
     val lifecycleOwner = LocalLifecycleOwner.current
     var error by remember { mutableStateOf<String?>(null) }
     val initialState = remember { LittleWorldState() }
@@ -141,8 +144,8 @@ fun LittleWorldScreen(
         }
         }
         Box(Modifier.weight(1f)) {
-        LifeGardenCornerDecor(Modifier.matchParentSize())
-        SpringLazyColumn(contentPadding = PaddingValues(18.dp, 4.dp, 18.dp, 20.dp),
+        skin?.let { LittleWorldSkinArtwork(it, Modifier.matchParentSize()) }
+        SpringLazyColumn(contentPadding = PaddingValues(start = 26.dp, top = 48.dp, end = 26.dp, bottom = 64.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxSize()) {
             item {
                 LifeDeskCorner(state, date, onOpenWishBook, { showFavorites = true })
@@ -197,7 +200,10 @@ fun LittleWorldScreen(
                 }
             }
             item {
+                Box(Modifier.fillMaxWidth()) {
+                val clearLeftCorner = skin == LittleWorldSkin.MOONLIGHT || skin == LittleWorldSkin.WOODLAND
                 Surface(shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surface,
+                    modifier = Modifier.fillMaxWidth(.76f).align(if (clearLeftCorner) Alignment.CenterEnd else Alignment.CenterStart),
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = .55f))) {
                     Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -221,6 +227,7 @@ fun LittleWorldScreen(
                             }
                         }
                     }
+                }
                 }
             }
             error?.let { message -> item { Text(message, color = MaterialTheme.colorScheme.error) } }

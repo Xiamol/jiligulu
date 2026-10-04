@@ -56,6 +56,7 @@ class UserPrefs(private val context: Context) {
         private val KEY_NAME_SUFFIX = stringPreferencesKey("name_suffix")
         private val KEY_API_KEY = stringPreferencesKey("api_key_override")
         private val KEY_THEME_MODE = stringPreferencesKey("theme_mode")
+        private val KEY_LITTLE_WORLD_SKIN = stringPreferencesKey("little_world_skin")
         private val KEY_WATER_ENABLED = booleanPreferencesKey("water_enabled")
         private val KEY_WATER_INTERVAL = intPreferencesKey("water_interval_minutes")
         private val KEY_WATER_SCHEDULE_VERSION = intPreferencesKey("water_schedule_version")
@@ -158,6 +159,13 @@ class UserPrefs(private val context: Context) {
 
     /** 主题模式：system / light / dark，默认跟随系统 */
     val themeMode: Flow<String> = context.dataStore.data.map { it[KEY_THEME_MODE] ?: THEME_SYSTEM }
+
+    val littleWorldSkin: Flow<LittleWorldSkin> = context.dataStore.data
+        .map { LittleWorldSkin.fromId(it[KEY_LITTLE_WORLD_SKIN]) }.distinctUntilChanged()
+
+    suspend fun setLittleWorldSkin(skin: LittleWorldSkin) {
+        context.dataStore.edit { it[KEY_LITTLE_WORLD_SKIN] = skin.id }
+    }
 
     /** 喝水提醒开关（默认关） */
     val waterEnabled: Flow<Boolean> = context.dataStore.data.map { it[KEY_WATER_ENABLED] ?: false }

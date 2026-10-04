@@ -260,6 +260,7 @@ fun SettingsScreen(
                                 )
                             }
                         }
+                        LittleWorldSkinSettings(enabled = editable)
                     }
 
                     if (settingsTab == "提醒") SettingsSection("喝水提醒", "工作再忙，也记得照顾自己", "💧") {
