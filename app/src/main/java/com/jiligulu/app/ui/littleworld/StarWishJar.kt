@@ -24,12 +24,12 @@ import kotlin.math.*
 fun StarWishJar(progress:Float,modifier:Modifier=Modifier,complete:Boolean=progress>=1f) {
     val fill = animateFloatAsState(progress.coerceIn(0f,1f),tween(420),label="wishStars")
     val resources=LocalContext.current.resources
-    val art=remember { LittleWorldArtwork.image(resources,R.drawable.wish_star_bottle) }
-    val starArt=remember { LittleWorldArtwork.image(resources,R.drawable.wish_puffy_stars_atlas_v3) }
+    val art=remember { LittleWorldArtwork.image(resources,R.drawable.wish_star_bottle_anime) }
+    val starArt=remember { LittleWorldArtwork.image(resources,R.drawable.wish_puffy_stars_anime) }
     Box(modifier.aspectRatio(.75f).semantics {
         contentDescription=if(complete)"已经装满星星的愿望瓶" else "愿望瓶，已装满 ${(progress.coerceIn(0f,1f)*100).toInt()}%"
     }) {
-        Image(art,null,Modifier.fillMaxSize())
+        Image(art,null,Modifier.fillMaxSize(),contentScale=androidx.compose.ui.layout.ContentScale.FillBounds)
         Box(Modifier.fillMaxSize().drawWithCache {
             val w=size.width;val h=size.height
             val vertices=(0..9).map { n ->

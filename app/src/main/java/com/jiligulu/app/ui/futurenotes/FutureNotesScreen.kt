@@ -5,6 +5,9 @@ import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
+import androidx.compose.ui.draw.rotate
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -28,6 +31,10 @@ import com.jiligulu.app.data.littleworld.FutureNote
 import com.jiligulu.app.data.littleworld.LittleWorldState
 import com.jiligulu.app.ui.components.*
 import com.jiligulu.app.ui.theme.GuluBrandFont
+import com.jiligulu.app.ui.littleworld.WorldScene
+import com.jiligulu.app.ui.littleworld.WorldSceneBanner
+import com.jiligulu.app.ui.littleworld.WorldScenePanel
+import com.jiligulu.app.ui.littleworld.StickerPaperArtwork
 import kotlinx.coroutines.launch
 import java.time.*
 import java.time.format.DateTimeFormatter
@@ -59,21 +66,20 @@ fun FutureNotesScreen(onBack: () -> Unit) {
             catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
             catch (e: Exception) { error = e.message ?: "还没保存好，请再试试" } finally { busy = false } }
     }
-    Scaffold(containerColor = MaterialTheme.colorScheme.background, topBar = { TopAppBar(
-        colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
-        title = { Text("给未来的小信笺", fontFamily = GuluBrandFont, fontWeight = FontWeight.Normal, color = MaterialTheme.colorScheme.primary) }, navigationIcon = {
-        IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack,"返回") }
-    }, actions = { IconButton(onClick = { editing = null; creating = true }) { Icon(Icons.Outlined.Add,"写一张便签") } }) }) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = 20.dp)) {
-            Text("把今天的一句话，寄给未来的你 ♡", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("还在路上", "收件箱", "旧信匣").forEachIndexed { i, label -> FilterChip(tab == i,{ tab = i },label={Text(label)}) }
-            }
+    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).statusBarsPadding().navigationBarsPadding()) {
+        Column(Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
             val now = clock
             val rows = remember(state.futureNotes, now, tab) { state.futureNotes.filter { n -> when(tab) { 0 -> n.dueAt > now && n.readAt == null; 1 -> n.dueAt <= now && n.readAt == null; else -> n.readAt != null } }.sortedByDescending { it.dueAt } }
             SpringLazyColumn(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(top = 4.dp, bottom=24.dp)) {
-                if (rows.isEmpty()) item { PaperNote("这里先留一小块空白，等你的来信 ♡", Modifier.padding(vertical=36.dp)) }
-                items(rows,key={it.id}) { n -> LedgerCard {
+                item { WorldScenePanel(when(tab) { 0->WorldScene.COURIER;1->WorldScene.INBOX;else->WorldScene.ARCHIVE },
+                    when(tab) {0->"查看阿噜手里的信";1->"打开收件箱";else->"打开旧信匣"},onBack,
+                    listOf("还在路上","收件箱","旧信匣"),tab,{tab=it},"写一封",{editing=null;creating=true},
+                    onObject={rows.minByOrNull {it.dueAt}?.let {opened=it} ?: run {editing=null;creating=true}}) }
+                if (rows.isEmpty()) item { Text("这一次还空着，写封信，阿噜就出发啦 ♡",style=MaterialTheme.typography.bodySmall,
+                    color=MaterialTheme.colorScheme.onSurfaceVariant,modifier=Modifier.padding(vertical=12.dp)) }
+                items(rows,key={it.id}) { n -> Box(Modifier.fillMaxWidth().rotate(if(n.id.hashCode()%2==0) -.7f else .6f)) {
+                    StickerPaperArtwork(Modifier.matchParentSize(),MaterialTheme.colorScheme.tertiaryContainer)
+                    Column(Modifier.fillMaxWidth().clickable { opened=n }.padding(horizontal=24.dp,vertical=18.dp)) {
                     Row(verticalAlignment=Alignment.CenterVertically) {
                         Text("💌", Modifier.padding(end=10.dp), style=MaterialTheme.typography.headlineSmall)
                         Column(Modifier.weight(1f)) { Text(n.title,style=MaterialTheme.typography.titleMedium,maxLines=1,overflow=TextOverflow.Ellipsis); Text(noteDate(n.dueAt),style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant) }
@@ -86,7 +92,7 @@ fun FutureNotesScreen(onBack: () -> Unit) {
                         Spacer(Modifier.weight(1f))
                         TextButton(onClick={ deleting=n }){Text("删除",color=MaterialTheme.colorScheme.onSurfaceVariant)}
                     }
-                } }
+                } } }
             }
         }
     }

@@ -34,8 +34,8 @@ internal fun LittleWorldSkinSettings(enabled: Boolean) {
     val scope = rememberCoroutineScope()
     var saving by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf(false) }
-    Text("小窝皮肤", style = MaterialTheme.typography.titleSmall)
-    Text("点选就换装，重启也会记住 ♡", style = MaterialTheme.typography.bodySmall,
+    Text("全局皮肤", style = MaterialTheme.typography.titleSmall)
+    Text("账本、统计和阿噜的小世界一起换装 ♡", style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant)
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         LittleWorldSkin.entries.chunked(2).forEach { row ->
@@ -58,7 +58,7 @@ internal fun LittleWorldSkinSettings(enabled: Boolean) {
                             if (checked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant),
                         modifier = Modifier.weight(1f).semantics {
                             role = Role.RadioButton; selected = checked
-                            contentDescription = "小窝皮肤：${skin.title}"
+                            contentDescription = "全局皮肤：${skin.title}"
                         }) {
                         Column(Modifier.padding(7.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                             Box(Modifier.fillMaxWidth().height(116.dp).clip(RoundedCornerShape(10.dp))) {

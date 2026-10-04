@@ -23,13 +23,13 @@ import com.jiligulu.app.data.announcement.AnnouncementRepository
 fun MailboxHeaderButton(repository: AnnouncementRepository) {
     val state by repository.state.collectAsStateWithLifecycle()
     IconButton(enabled = !state.loading, onClick = {
-        repository.open(state.entries.firstOrNull()?.id.orEmpty())
+        repository.open((state.entries.firstOrNull { it.id in state.unreadIds } ?: state.entries.firstOrNull())?.id.orEmpty())
     }, modifier = Modifier.testTag("main-mailbox")) {
         if (state.loading) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
         else BadgedBox(badge = {
-            if (state.entries.isNotEmpty()) Badge(containerColor = MaterialTheme.colorScheme.primaryContainer,
+            if (state.unreadIds.isNotEmpty()) Badge(containerColor = MaterialTheme.colorScheme.primaryContainer,
                 contentColor = MaterialTheme.colorScheme.primary) {
-                Text(if (state.entries.size > 9) "9+" else state.entries.size.toString())
+                Text(if (state.unreadIds.size > 9) "9+" else state.unreadIds.size.toString())
             }
         }) {
             Icon(Icons.Outlined.MailOutline, "阿噜的小信箱", tint = MaterialTheme.colorScheme.primary)

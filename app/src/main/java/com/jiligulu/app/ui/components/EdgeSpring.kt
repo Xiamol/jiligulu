@@ -96,18 +96,21 @@ internal class EdgeSpringMotion(private val limit: Float) {
 private class EdgeSpringGesture {
     var allowDirection = 0
     var blocked = 0
+    var topDistance = 0f
 }
 
 fun Modifier.edgeSpring(
     canBack: () -> Boolean, canForward: () -> Boolean,
     handOffOnRepeat: Boolean = false, topEnabled: Boolean = true, interceptPre: Boolean = true,
-    state: EdgeSpringState? = null
+    state: EdgeSpringState? = null, onTopPull: ((Float)->Unit)? = null
 ): Modifier = composed {
     val gate = state ?: remember { EdgeSpringState() }
     val backward by rememberUpdatedState(canBack)
     val forward by rememberUpdatedState(canForward)
     val scope = rememberCoroutineScope()
-    val limit = with(LocalDensity.current) { 32f * density }
+    val density=LocalDensity.current.density
+    val pullCallback by rememberUpdatedState(onTopPull)
+    val limit = 32f * density
     val motion = remember(limit) { EdgeSpringMotion(limit) }
     val gesture = remember { EdgeSpringGesture() }
     DisposableEffect(motion, gate) {
@@ -129,6 +132,7 @@ fun Modifier.edgeSpring(
         }
         if (source == NestedScrollSource.UserInput && motion.touching) {
             gesture.blocked = direction
+            if(direction==1) gesture.topDistance+=delta.coerceAtLeast(0f)
             gate.visible = true
             motion.pull(delta)
         }
@@ -145,6 +149,7 @@ fun Modifier.edgeSpring(
             awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
             motion.beginTouch()
             gesture.blocked = 0
+            gesture.topDistance = 0f
             gesture.allowDirection = if (handOffOnRepeat) gate.begin(SystemClock.uptimeMillis()) else 0
             gate.hideJob?.cancel()
             var complete = false
@@ -152,6 +157,7 @@ fun Modifier.edgeSpring(
                 do { val event = awaitPointerEvent(PointerEventPass.Initial) } while (event.changes.any { it.pressed })
                 complete = true
             } finally {
+                if(complete) pullCallback?.invoke(if(gesture.blocked==1) gesture.topDistance/density else 0f)
                 gate.finish(if (complete) gesture.blocked else 0, SystemClock.uptimeMillis())
                 // Always release, including a tap that interrupts an old spring, cancellation
                 // and a gesture wholly consumed by an ancestor nested scroll connection.

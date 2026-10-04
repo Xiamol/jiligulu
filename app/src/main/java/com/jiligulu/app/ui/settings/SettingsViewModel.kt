@@ -11,6 +11,8 @@ import com.jiligulu.app.data.prefs.UserPrefs
 import com.jiligulu.app.data.repository.ChatHistoryRepository
 import com.jiligulu.app.data.reminder.WaterReminderScheduler
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -50,8 +52,6 @@ class SettingsViewModel(
     private val _uiState = MutableStateFlow(SettingsUiState())
     val uiState = _uiState.asStateFlow()
 
-    private val savedEvents = Channel<Unit>(Channel.BUFFERED)
-    val saved = savedEvents.receiveAsFlow()
 
     // Keep rapid preference changes and the final save in the same order as user actions.
     private val writeMutex = Mutex()
@@ -155,32 +155,30 @@ class SettingsViewModel(
         writePreference { prefs.setQuietHours(start, end) }
     }
 
-    fun save() {
-        val draft = _uiState.value
-        if (!draft.isLoaded || draft.isSaving) return
-        if (draft.waterEnabled && (draft.quietStartInvalid || draft.quietEndInvalid)) {
-            _uiState.update { it.copy(error = "请把免打扰时间填写为有效的 HH:mm 格式。") }
-            return
+    suspend fun saveField(field: ProfileSettingField, value: String): Boolean {
+        if (!_uiState.value.isLoaded || _uiState.value.isSaving) return false
+        val text = value.trim()
+        if (field == ProfileSettingField.NAME && text.isBlank()) {
+            _uiState.update { it.copy(error = "给阿噜留个称呼吧 ♡") }; return false
         }
         _uiState.update { it.copy(isSaving = true, error = null) }
-        viewModelScope.launch {
-            try {
+        return try {
+            withContext(NonCancellable) {
                 writeMutex.withLock {
-                    prefs.setNickname(draft.nickname)
-                    prefs.setNameSuffix(draft.suffix)
-                    prefs.setApiKeyOverride(draft.apiKey)
-                    val start = textToMinutes(draft.quietStartText)
-                    val end = textToMinutes(draft.quietEndText)
-                    if (start != null && end != null) prefs.setQuietHours(start, end)
+                    when(field) {
+                        ProfileSettingField.NAME -> { prefs.setNickname(text); _uiState.update { it.copy(nickname=text) } }
+                        ProfileSettingField.SUFFIX -> { prefs.setNameSuffix(text); _uiState.update { it.copy(suffix=text.ifBlank { UserPrefs.DEFAULT_SUFFIX }) } }
+                        ProfileSettingField.API_KEY -> { prefs.setApiKeyOverride(text); _uiState.update { it.copy(apiKey=text) } }
+                    }
                 }
-                savedEvents.send(Unit)
-            } catch (error: CancellationException) {
-                throw error
-            } catch (_: Exception) {
-                _uiState.update { it.copy(isSaving = false, error = "保存失败，请重试。") }
             }
-        }
+            true
+        } catch (cancelled: CancellationException) { throw cancelled
+        } catch (_: Exception) { _uiState.update { it.copy(error="这项设置没能保存，再试一次吧。") }; false
+        } finally { _uiState.update { it.copy(isSaving=false) } }
     }
+
+    fun clearError() { _uiState.update { it.copy(error=null) } }
 
     private fun editDraft(transform: (SettingsUiState) -> SettingsUiState) {
         if (!_uiState.value.isLoaded || _uiState.value.isSaving) return

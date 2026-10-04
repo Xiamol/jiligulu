@@ -115,4 +115,23 @@ class AnnouncementRepositoryTest {
             assertTrue(runCatching { AnnouncementCodec.decode(raw) }.isFailure)
         }
     }
+
+    @Test fun readAndMutedLettersLoseTheirBadgeAcrossColdStarts() = runBlocking {
+        val prefs=prefs
+        prefs.setAnnouncementSource("https://example.test/read-badge.json")
+        val two="""{"announcements":[{"id":"badge-a","title":"第一封","body":"你好"},{"id":"badge-b","title":"第二封","body":"你好"}]}"""
+        val first=AnnouncementRepository(prefs,{two},{1L});first.initialize()
+        assertEquals(setOf("badge-a","badge-b"),first.state.value.unreadIds)
+        first.open("badge-a");first.markOpenedRead();first.close()
+        val cold=AnnouncementRepository(prefs,{two},{1L});cold.initialize()
+        assertEquals(setOf("badge-b"),cold.state.value.unreadIds)
+        assertEquals("badge-b",cold.state.value.automaticId)
+        cold.muteOpened()
+        val next=AnnouncementRepository(prefs,{two},{1L});next.initialize()
+        assertTrue(next.state.value.unreadIds.isEmpty())
+        assertEquals(2,next.state.value.entries.size)
+        next.open("badge-a")
+        assertEquals("第一封",next.state.value.opened?.title)
+        assertTrue(next.state.value.unreadIds.isEmpty())
+    }
 }

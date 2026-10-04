@@ -35,6 +35,7 @@ fun SpringLazyColumn(
     verticalArrangement: Arrangement.Vertical = Arrangement.Top,
     manualScrollOnly: Boolean = true,
     handOffOnRepeat: Boolean = false,
+    onTopPull: ((Float)->Unit)? = null,
     content: LazyListScope.() -> Unit
 ) {
     val gate = remember { EdgeSpringState() }
@@ -44,7 +45,7 @@ fun SpringLazyColumn(
         LocalBringIntoViewSpec provides if (manualScrollOnly) fixedSpec else originalSpec) {
         Box(modifier.clipToBounds()) {
             LazyColumn(state = state, modifier = Modifier.fillMaxSize()
-                .edgeSpring({ state.canScrollBackward }, { state.canScrollForward }, handOffOnRepeat = handOffOnRepeat, state = gate),
+                .edgeSpring({ state.canScrollBackward }, { state.canScrollForward }, handOffOnRepeat = handOffOnRepeat, state = gate, onTopPull = onTopPull),
                 contentPadding = contentPadding, verticalArrangement = verticalArrangement, content = content)
             Box(Modifier.matchParentSize()) { LedgerScrollBar(state, Modifier.align(Alignment.CenterEnd), forceVisible = gate.visible) }
         }

@@ -50,6 +50,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -72,6 +73,7 @@ import com.jiligulu.app.ui.components.TimePickerDialog
 import com.jiligulu.app.ui.components.TimePickerField
 import com.jiligulu.app.ui.persona.GuluMascot
 import com.jiligulu.app.ui.theme.GuluBrandFont
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -83,11 +85,19 @@ fun SettingsScreen(
     vm: SettingsViewModel = viewModel(factory = SettingsViewModel.Factory)
 ) {
     val state by vm.uiState.collectAsStateWithLifecycle()
-    val currentOnBack by rememberUpdatedState(onBack)
-    val lifecycleOwner = LocalLifecycleOwner.current
-    LaunchedEffect(vm, lifecycleOwner) {
-        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-            vm.saved.collect { currentOnBack() }
+    val fieldScope = rememberCoroutineScope()
+    var editingField by rememberSaveable { mutableStateOf<ProfileSettingField?>(null) }
+    var fieldText by rememberSaveable { mutableStateOf("") }
+    fun edit(field: ProfileSettingField, value: String) { vm.clearError(); fieldText=value; editingField=field }
+    editingField?.let { field ->
+        GuluDialog(field.title, { if(!state.isSaving) editingField=null }, confirmLabel="保存", compact=true,
+            busy=state.isSaving, onConfirm={ fieldScope.launch { if(vm.saveField(field,fieldText)) editingField=null } }) {
+            OutlinedTextField(fieldText,{fieldText=it;vm.clearError()},Modifier.fillMaxWidth(),singleLine=true,
+                label={Text(field.title)},shape=RoundedCornerShape(14.dp),enabled=!state.isSaving,
+                visualTransformation=if(field==ProfileSettingField.API_KEY) PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None)
+            if(field==ProfileSettingField.SUFFIX) Text("留空时使用「大人」",style=MaterialTheme.typography.bodySmall)
+            if(field==ProfileSettingField.API_KEY) Text("留空使用内置配置",style=MaterialTheme.typography.bodySmall)
+            state.error?.let { Text(it,color=MaterialTheme.colorScheme.error,style=MaterialTheme.typography.bodySmall) }
         }
     }
 
@@ -167,24 +177,6 @@ fun SettingsScreen(
                     }
                 }
             )
-        },
-        bottomBar = {
-            if (state.isLoaded) {
-                Surface(color = MaterialTheme.colorScheme.background) {
-                    Button(
-                        onClick = vm::save,
-                        enabled = editable,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .navigationBarsPadding()
-                            .padding(horizontal = 20.dp, vertical = 12.dp)
-                            .heightIn(min = 52.dp),
-                        shape = MaterialTheme.shapes.extraLarge
-                    ) {
-                        Text(if (state.isSaving) "正在保存…" else "保存设置")
-                    }
-                }
-            }
         }
     ) { padding ->
         if (state.isLoading) {
@@ -224,25 +216,8 @@ fun SettingsScreen(
                                 }
                             }
                     if (settingsTab == "日常") SettingsSection("你的称呼", "让阿噜用你喜欢的方式叫你", "💌") {
-                        OutlinedTextField(
-                            value = state.nickname,
-                            onValueChange = vm::setNickname,
-                            modifier = Modifier.fillMaxWidth(),
-                            label = { Text("名字") },
-                            singleLine = true,
-                            enabled = editable,
-                            shape = RoundedCornerShape(14.dp)
-                        )
-                        OutlinedTextField(
-                            value = state.suffix,
-                            onValueChange = vm::setSuffix,
-                            modifier = Modifier.fillMaxWidth(),
-                            label = { Text("称呼后缀") },
-                            supportingText = { Text("留空时使用「大人」") },
-                            singleLine = true,
-                            enabled = editable,
-                            shape = RoundedCornerShape(14.dp)
-                        )
+                        ProfileSettingRow("名字",state.nickname,editable) { edit(ProfileSettingField.NAME,state.nickname) }
+                        ProfileSettingRow("称呼后缀",state.suffix,editable) { edit(ProfileSettingField.SUFFIX,state.suffix) }
                     }
 
                     if (settingsTab == "日常") SettingsSection("外观", "给小账本换个喜欢的模样", "🎨") {
@@ -327,17 +302,9 @@ fun SettingsScreen(
 
                     if (settingsTab == "数据") SettingsSection("AI 服务", "让每一句生活，都有回应", "✨") {
                         AiUsageSettings()
-                        OutlinedTextField(
-                            value = state.apiKey,
-                            onValueChange = vm::setApiKey,
-                            modifier = Modifier.fillMaxWidth(),
-                            label = { Text("自定义 API Key") },
-                            supportingText = { Text("留空时使用应用默认配置") },
-                            singleLine = true,
-                            enabled = editable,
-                            visualTransformation = PasswordVisualTransformation(),
-                            shape = RoundedCornerShape(14.dp)
-                        )
+                        ProfileSettingRow("自定义 API Key",if(state.apiKey.isBlank()) "使用内置配置" else "已设置 · 点击修改",editable) {
+                            edit(ProfileSettingField.API_KEY,state.apiKey)
+                        }
                         Text(
                             "保存在当前设备，调用 DeepSeek 时用于身份验证。",
                             style = MaterialTheme.typography.bodySmall,

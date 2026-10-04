@@ -33,6 +33,7 @@ class FloatingCaptureService : Service() {
     private var sizePercent = UserPrefs.DEFAULT_FLOATING_SIZE_PERCENT
     private val touchHandler = Handler(Looper.getMainLooper())
     private val windows by lazy { getSystemService(WindowManager::class.java) }
+    private val glassHost by lazy { GlassOverlayHost(this,windows) }
     private val prefs by lazy { (application as com.jiligulu.app.JiliguluApp).container.userPrefs }
     override fun onBind(intent: Intent?) = null
 
@@ -97,18 +98,20 @@ class FloatingCaptureService : Service() {
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     view.setGlassPressed(true)
+                    view.setGlassLight(event.rawX/resources.displayMetrics.widthPixels,event.rawY/resources.displayMetrics.heightPixels)
                     startX = event.rawX; startY = event.rawY; x = params.x; y = params.y
                     dragStartPosition = FloatingCaptureGeometry.normalize(x, y, params.width, usableBounds())
                     moved = false; held = false; overTarget = false
                     touchHandler.postDelayed(hold, ViewConfiguration.getLongPressTimeout().toLong()); true
                 }
                 MotionEvent.ACTION_MOVE -> {
+                    view.setGlassLight(event.rawX/resources.displayMetrics.widthPixels,event.rawY/resources.displayMetrics.heightPixels)
                     val dx = event.rawX - startX; val dy = event.rawY - startY
                     if (abs(dx) + abs(dy) > ViewConfiguration.get(this).scaledTouchSlop) moved = true
                     if (moved) {
                         val point = FloatingCaptureGeometry.clamp(x + dx.toInt(), y + dy.toInt(), params.width, usableBounds())
                         params.x = point.x; params.y = point.y
-                        runCatching { windows.updateViewLayout(view, params) }
+                        runCatching { glassHost.update(params) }
                     }
                     val target = dismissTarget
                     val inside = overDismissTarget(event.rawX, event.rawY)
@@ -130,12 +133,12 @@ class FloatingCaptureService : Service() {
                         val finalPoint = FloatingCaptureGeometry.clamp(x + (event.rawX - startX).toInt(),
                             y + (event.rawY - startY).toInt(), params.width, usableBounds())
                         params.x = finalPoint.x; params.y = finalPoint.y
-                        runCatching { windows.updateViewLayout(view, params) }
+                        runCatching { glassHost.update(params) }
                         // One write per completed drag; never persist intermediate movement,
                         // the trash target or temporary screenshot invisibility.
                         persistPosition(FloatingCaptureGeometry.normalize(params.x, params.y, params.width, usableBounds()))
                     } else if (!held && !capturing) {
-                        capturing = true; view.visibility = View.INVISIBLE
+                        capturing = true; glassHost.visible(false)
                         if (!ScreenCaptureService.captureIfReady()) runCatching {
                             startActivity(Intent(this, CapturePermissionActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                         }.onFailure { restore(); Toast.makeText(this, "无法打开截图授权，请回到设置重试", Toast.LENGTH_SHORT).show() }
@@ -151,7 +154,8 @@ class FloatingCaptureService : Service() {
                 else -> true
             }
         }
-        windows.addView(view, params)
+        glassHost.attach(view, params)
+        if(capturing) glassHost.visible(false)
         bubbleLayout = params; bubble = view; instance = this; running.value = true
     }
 
@@ -185,7 +189,7 @@ class FloatingCaptureService : Service() {
         val side = iconPixels()
         val point = FloatingCaptureGeometry.restore(position, side, usableBounds())
         params.width = side; params.height = side; params.x = point.x; params.y = point.y
-        runCatching { windows.updateViewLayout(view, params) }
+        runCatching { glassHost.update(params) }
     }
 
     private fun persistPosition(position: FloatingCapturePosition, stopAfterSave: Boolean = false) {
@@ -211,7 +215,7 @@ class FloatingCaptureService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int { if (intent?.action == "stop") hideForSession(); return START_NOT_STICKY }
     private fun hideForSession(position: FloatingCapturePosition? = rememberedPosition) {
         hiddenForSession.value = true
-        bubble?.visibility = View.INVISIBLE
+        glassHost.visible(false)
         if (position != null) persistPosition(position, stopAfterSave = true) else stopSelf()
     }
     private fun showDismissTarget() {
@@ -235,7 +239,7 @@ class FloatingCaptureService : Service() {
         scope.cancel(); touchHandler.removeCallbacksAndMessages(null); hideDismissTarget()
         stopService(Intent(this, ScreenCaptureService::class.java))
         capturing = false
-        bubble?.let { runCatching { windows.removeView(it) } }
+        runCatching { glassHost.detach() }
         bubble = null; bubbleLayout = null; instance = null; running.value = false
         super.onDestroy()
     }
@@ -244,7 +248,7 @@ class FloatingCaptureService : Service() {
         val hiddenForSession = MutableStateFlow(false)
         private var instance: FloatingCaptureService? = null
         private var capturing = false
-        fun restore() { capturing = false; instance?.bubble?.visibility = View.VISIBLE }
+        fun restore() { capturing = false; instance?.glassHost?.visible(true) }
     }
 }
 

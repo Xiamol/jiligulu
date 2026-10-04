@@ -134,7 +134,7 @@ fun BillDetailSheet(billId: Long, onDismiss: () -> Unit) {
                     label = { Text("备注 · 留一句生活记忆") }, maxLines = 4, shape = MaterialTheme.shapes.large,
                     modifier = Modifier.fillMaxWidth(), enabled = !state.isSaving)
                 LedgerCard {
-                    Text("给这一笔夹张生活票根", style = MaterialTheme.typography.titleSmall,
+                    Text("给这一笔夹张生活照片", style = MaterialTheme.typography.titleSmall,
                         color = MaterialTheme.colorScheme.primary)
                     Text("生日饭、旅行车窗，值得记住的小片刻。", style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)

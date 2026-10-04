@@ -8,6 +8,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
@@ -60,6 +61,11 @@ fun AnnouncementDialogHost(repository: AnnouncementRepository, enabled: Boolean)
     val state by repository.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     if (!enabled || state.loading) return
+    LaunchedEffect(state.opened?.id) {
+        if (state.opened != null) kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+            runCatching { repository.markOpenedRead() }
+        }
+    }
     if (state.emptyMailboxOpen) {
         GuluDialog(compact = true, title = "💌 阿噜的小信箱", onDismiss = repository::close, confirmLabel = "收好信笺") {
             Text(if (state.offline) "这次暂时没连上公告服务，可以回到首页下拉刷新，再看看新来信。"

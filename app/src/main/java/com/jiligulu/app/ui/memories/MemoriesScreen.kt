@@ -37,6 +37,11 @@ import com.jiligulu.app.ui.components.SpringLazyColumn
 import com.jiligulu.app.ui.theme.GuluBrandFont
 import com.jiligulu.app.ui.theme.IncomeGreen
 import com.jiligulu.app.ui.theme.ExpenseCoral
+import com.jiligulu.app.ui.littleworld.WorldScene
+import com.jiligulu.app.ui.littleworld.WorldSceneBanner
+import com.jiligulu.app.ui.littleworld.WorldScenePanel
+import com.jiligulu.app.ui.littleworld.AlbumPaperPage
+import com.jiligulu.app.ui.littleworld.CountedTab
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -88,22 +93,19 @@ fun MemoriesScreen(onBack: () -> Unit) {
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var selectedBill by remember { mutableStateOf<Long?>(null) }
     var selectedCard by remember { mutableStateOf<MemoryCard?>(null) }
+    var selectedPhoto by remember { mutableStateOf<BillEntity?>(null) }
     var makeWeek by remember { mutableStateOf(false) }
 
     SpringLazyColumn(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)
         .statusBarsPadding().navigationBarsPadding().padding(horizontal = 20.dp),
         contentPadding = PaddingValues(bottom = 28.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        item { WorldScenePanel(WorldScene.ALBUM,"打开生活纪念册",onBack,listOf("生活明信片","生活照片"),tab,{tab=it},
+            "周明信片",{makeWeek=true},onObject={
+                if(tab==0) state.cards.maxByOrNull {it.createdAt}?.let {selectedCard=it}
+                else photos.firstOrNull()?.let {selectedPhoto=it}
+            }) }
         item {
-            Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") }
-                Column {
-                    Text("生活纪念册", fontFamily = GuluBrandFont, fontWeight = FontWeight.Normal, style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.primary)
-                    Text("日子里的小事，都值得被收好。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-        }
-        item {
-            LedgerCard {
+            AlbumPaperPage {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text("💌",fontSize=22.sp,modifier=Modifier.padding(end=8.dp))
                     Text("给这一周起个名字", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
@@ -123,16 +125,10 @@ fun MemoriesScreen(onBack: () -> Unit) {
                     modifier = Modifier.fillMaxWidth()) { Text("做一张周明信片") }
             }
         }
-        item {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                FilterChip(selected = tab == 0, onClick = { tab = 0 }, label = { Text("生活明信片 ${state.cards.size}") })
-                FilterChip(selected = tab == 1, onClick = { tab = 1 }, label = { Text("照片票根 ${photos.size}") })
-            }
-        }
         if (tab == 0) {
             if (state.cards.isEmpty()) item { LedgerCard { Text("还没有夹进小明信片呢 ♡"); Text("做一张周账单，或从账单详情把照片变成海报。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) } }
             items(state.cards.sortedByDescending { it.createdAt }, key = { "card-${it.id}" }) { card ->
-                LedgerCard(Modifier.clickable { selectedCard = card }) {
+                AlbumPaperPage(Modifier.clickable { selectedCard = card }) {
                     MemoryPhoto(card.imagePath, Modifier.fillMaxWidth().height(240.dp).clip(RoundedCornerShape(14.dp)), androidx.compose.ui.layout.ContentScale.Fit)
                     Spacer(Modifier.height(10.dp))
                     Text(card.title, style = MaterialTheme.typography.titleMedium)
@@ -143,10 +139,10 @@ fun MemoriesScreen(onBack: () -> Unit) {
         } else {
             if (photos.isEmpty()) item { LedgerCard { Text("相册里还空空的，等一个小瞬间。", style = MaterialTheme.typography.bodyMedium); Text("打开任意账单 → 夹一张生活照片 → 保存修改。", style = MaterialTheme.typography.bodySmall) } }
             items(photos, key = { "bill-${it.id}" }) { bill ->
-                LedgerCard(Modifier.clickable { selectedBill = bill.id }) {
+                AlbumPaperPage(Modifier.clickable { selectedPhoto = bill }) {
                     MemoryPhoto(bill.photoUri.orEmpty(), Modifier.fillMaxWidth().height(190.dp).clip(RoundedCornerShape(14.dp)))
                     Spacer(Modifier.height(10.dp))
-                    Text(bill.detail.ifBlank { "一张生活票根" }, style = MaterialTheme.typography.titleMedium)
+                    Text(bill.detail.ifBlank { "一张生活照片" }, style = MaterialTheme.typography.titleMedium)
                     if (bill.note.isNotBlank()) Text(bill.note, style = MaterialTheme.typography.bodySmall, maxLines = 3)
                     Text(Formatters.dayLabel(bill.timestamp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
@@ -156,6 +152,15 @@ fun MemoriesScreen(onBack: () -> Unit) {
     if (makeWeek) MemoryPosterDialog(PosterData("${if (offset == -1) "上周" else if (offset == 0) "这周" else "那一周"}的生活小记", "认真过日子的证据，阿噜替你夹好啦。", dateMillis = range.first, week = summary), { makeWeek = false })
     selectedBill?.let { BillDetailSheet(it, { selectedBill = null }) }
     selectedCard?.let { ArchivedCardDialog(it, { selectedCard = null }) }
+    selectedPhoto?.let { photo -> GuluDialog(photo.detail.ifBlank { "这一页生活" },{selectedPhoto=null},compact=true) {
+        MemoryPhoto(photo.photoUri.orEmpty(),Modifier.fillMaxWidth().height(260.dp),androidx.compose.ui.layout.ContentScale.Fit)
+        if(photo.note.isNotBlank()) Text(photo.note,style=MaterialTheme.typography.bodySmall)
+        Text(Formatters.dayLabel(photo.timestamp),style=MaterialTheme.typography.labelSmall)
+        Row(verticalAlignment=Alignment.CenterVertically) {
+            TextButton(onClick={selectedPhoto=null;selectedBill=photo.id}) { Text("查看这笔账") }
+            MemoryPosterButton(photo.detail,photo.note,photo.photoUri.orEmpty(),photo.amountFen,photo.timestamp)
+        }
+    } }
 }
 
 @Composable

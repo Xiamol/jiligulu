@@ -27,7 +27,8 @@ data class AnnouncementState(
     val emptyMailboxOpen: Boolean = false,
     val saving: Boolean = false,
     val offline: Boolean = false,
-    val error: String? = null
+    val error: String? = null,
+    val unreadIds: Set<String> = emptySet()
 ) {
     val opened: Announcement? get() = entries.find { it.id == (manualId ?: automaticId) }
 }
@@ -44,12 +45,14 @@ class AnnouncementRepository(
     private var initialized = false
     private var feed: List<Announcement> = emptyList()
     private var muted = emptySet<String>()
+    private var read = emptySet<String>()
 
     suspend fun initialize() = mutex.withLock {
         if (initialized) return@withLock
         try {
             val saved = prefs.readAnnouncements()
             muted = saved.mutedIds
+            read = saved.readIds
             feed = runCatching { AnnouncementCodec.decode(saved.cachedFeed) }.getOrDefault(emptyList())
             mutable.value = AnnouncementState(loading = true, entries = feed.filter { it.activeAt(now()) })
             var offline = false
@@ -66,7 +69,8 @@ class AnnouncementRepository(
             }
             val active = feed.filter { it.activeAt(now()) }
             mutable.value = AnnouncementState(loading = false, entries = active,
-                automaticId = active.firstOrNull { it.id !in muted }?.id, offline = offline)
+                automaticId = active.firstOrNull { it.id !in muted && it.id !in read }?.id, offline = offline,
+                unreadIds = active.filter { it.id !in muted && it.id !in read }.map { it.id }.toSet())
             initialized = true
         } catch (cancelled: CancellationException) { throw cancelled
         } catch (_: Exception) {
@@ -96,6 +100,7 @@ class AnnouncementRepository(
     fun updateTime() {
         val active = feed.filter { it.activeAt(now()) }
         mutable.value = mutable.value.copy(entries = active,
+            unreadIds = active.filter { it.id !in muted && it.id !in read }.map { it.id }.toSet(),
             automaticId = mutable.value.automaticId?.takeIf { id -> active.any { it.id == id } },
             manualId = mutable.value.manualId?.takeIf { id -> active.any { it.id == id } })
     }
@@ -113,6 +118,14 @@ class AnnouncementRepository(
         if (!mutable.value.saving) mutable.value = mutable.value.copy(automaticId = null, manualId = null, emptyMailboxOpen = false, error = null)
     }
 
+    suspend fun markOpenedRead() = mutex.withLock {
+        val id = mutable.value.opened?.id ?: return@withLock
+        if (id in read) return@withLock
+        prefs.markAnnouncementRead(id)
+        read = read + id
+        mutable.value = mutable.value.copy(unreadIds = mutable.value.unreadIds - id)
+    }
+
     suspend fun muteOpened() = mutex.withLock {
         val id = mutable.value.opened?.id ?: return@withLock
         if (mutable.value.saving) return@withLock
@@ -120,7 +133,8 @@ class AnnouncementRepository(
         try {
             prefs.muteAnnouncement(id)
             muted = muted + id
-            mutable.value = mutable.value.copy(saving = false, automaticId = null, manualId = null)
+            mutable.value = mutable.value.copy(saving = false, automaticId = null, manualId = null,
+                unreadIds = mutable.value.unreadIds - id)
         } catch (cancelled: CancellationException) {
             mutable.value = mutable.value.copy(saving = false)
             throw cancelled

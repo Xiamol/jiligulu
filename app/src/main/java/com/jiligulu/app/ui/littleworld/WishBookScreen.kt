@@ -67,7 +67,9 @@ fun WishBookScreen(onBack: () -> Unit, onRecordWaiting: (Sticker) -> Unit) {
     val active = remember(state.wishes) { state.wishes.filter { it.completedAt == null }.sortedBy { it.createdAt } }
     val completed = remember(state.wishes) { state.wishes.filter { it.completedAt != null }.sortedByDescending { it.completedAt } }
     val waiting = remember(state.waiting) { state.waiting.filter { !it.archived }.sortedByDescending { it.createdAt } }
-    val current = active.firstOrNull { it.id == selected } ?: active.firstOrNull()
+    val current = active.firstOrNull { it.id == selected }
+    var selectedWaiting by rememberSaveable { mutableStateOf<String?>(null) }
+    var selectedMemory by rememberSaveable { mutableStateOf<String?>(null) }
 
     fun perform(block: suspend () -> Unit) {
         if (busy) return
@@ -81,115 +83,74 @@ fun WishBookScreen(onBack: () -> Unit, onRecordWaiting: (Sticker) -> Unit) {
         }
     }
 
-    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).navigationBarsPadding()) {
-        WorldPageHeader("星星愿望册", "一颗一颗攒，愿望会慢慢亮起来", onBack) {
-            IconButton(onClick = { if (tab == 1) createWaiting = true else createWish = true }) { Icon(Icons.Outlined.Add, if (tab == 1) "添加候场愿望" else "添加存钱愿望", tint = MaterialTheme.colorScheme.primary) }
-        }
-        Row(Modifier.padding(horizontal = 20.dp, vertical = 4.dp).fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .5f), RoundedCornerShape(18.dp))) {
-            listOf("正在攒 ${active.size}", "候场 ${waiting.size}", "纪念 ${completed.size}").forEachIndexed { index, label ->
-                Surface(color = if (tab == index) MaterialTheme.colorScheme.primaryContainer else androidx.compose.ui.graphics.Color.Transparent,
-                    shape = RoundedCornerShape(16.dp), modifier = Modifier.weight(1f).padding(3.dp).clickable { tab = index }) {
-                    Text(label, modifier = Modifier.padding(vertical = 11.dp), style = MaterialTheme.typography.labelLarge,
-                        color = if (tab == index) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+    BoxWithConstraints(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).statusBarsPadding().navigationBarsPadding()) {
+        val roomHeight=maxHeight
+        SpringLazyColumn(Modifier.fillMaxSize(),contentPadding=PaddingValues(bottom=0.dp),
+            verticalArrangement=Arrangement.spacedBy(10.dp)) {
+            item {
+                val bottles=when(tab) {
+                    0->active.map {ShelfWish(it.id,it.title,wishProgress(it),"${wishPercent(it)}%")}
+                    1->waiting.map {ShelfWish(it.id,it.title,0f,"先留着喜欢")}
+                    else->completed.map {ShelfWish(it.id,it.title,1f,"实现啦")}
+                }
+                WishShelfStage(bottles,tab,onBack,{if(tab==1) createWaiting=true else createWish=true},
+                    {tab=it;selected=null;selectedWaiting=null;selectedMemory=null},minHeight=roomHeight) { id ->
+                    when(tab) {0->selected=id;1->selectedWaiting=id;else->selectedMemory=id}
                 }
             }
-        }
-        SpringLazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(20.dp, 12.dp, 20.dp, 28.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            error?.let { message -> item { Text(message, color = MaterialTheme.colorScheme.error) } }
-            when (tab) {
-                0 -> {
-                    if (current == null) item {
-                        WorldEmpty("星星瓶还空着", "想去的地方、想买的小东西，都可以先给它留个瓶子。", "许一个愿望", { createWish = true })
-                    } else {
-                        if (active.size > 1) item {
-                            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                items(active, key = { it.id }) { wish ->
-                                    Surface(shape = RoundedCornerShape(16.dp), modifier = Modifier.width(138.dp).clickable { selected = wish.id },
-                                        color = if (current.id == wish.id) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
-                                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = .5f))) {
-                                        Column(Modifier.padding(12.dp)) {
-                                            Text("${wish.emoji} ${wish.title}", maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall)
-                                            Text("${wishPercent(wish)}% · ¥${Formatters.fenToYuanText(wish.savedFen)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 5.dp))
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        item {
-                            LedgerCard {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Column(Modifier.weight(1f)) {
-                                        Text("${current.emoji} ${current.title}", fontFamily = GuluBrandFont, fontWeight = FontWeight.Normal, style = MaterialTheme.typography.headlineSmall)
-                                        Text("阿噜帮你守着这个小愿望", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    }
-                                    IconButton(onClick = { editWish = current }) { Icon(Icons.Outlined.Edit, "编辑愿望", tint = MaterialTheme.colorScheme.primary) }
-                                }
-                                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                                    StarWishJar(wishProgress(current), Modifier.width(148.dp))
-                                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        Text("已装满 ${wishPercent(current)}%", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.titleMedium)
-                                        Text("¥${Formatters.fenToYuanText(current.savedFen)}", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
-                                        Text("目标 ¥${Formatters.fenToYuanText(current.targetFen)}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                        Text("还差 ¥${Formatters.fenToYuanText((current.targetFen - current.savedFen).coerceAtLeast(0))}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    }
-                                }
-                                if (current.caption.isNotBlank()) Text(current.caption, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(bottom = 10.dp))
-                                Button(onClick = { depositWish = current.id }, Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp)) { Text("放进一颗小星星 ✨") }
-                                TextButton(onClick = { recordsWish = current.id }, modifier = Modifier.align(Alignment.CenterHorizontally)) { Text("看看怎么攒到这里的 · ${current.deposits.size} 次") }
-                            }
-                        }
-                        item { Text("这里记录愿望进度，收支账本要另行记账。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center) }
-                    }
-                }
-                1 -> {
-                    item { Text("有点想要，还没决定。先放这里，喜欢可以慢慢想。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                    if (waiting.isEmpty()) item { WorldEmpty("给喜欢留个位置", "不用立刻下单，也不用立刻做决定。", "放一个小愿望", { createWaiting = true }) }
-                    items(waiting, key = { it.id }) { wish ->
-                        WaitingCard(wish, onEdit = { editWaiting = wish }, onPromote = { promotion = wish },
-                            onBought = { onRecordWaiting(Sticker(id = "waiting:${wish.id}", title = wish.title, emoji = wish.emoji, amountFen = wish.amountFen)) },
-                            onArchive = { perform { repository.archiveWaiting(wish.id) } })
-                    }
-                    val archived = state.waiting.filter { it.archived }
-                    if (archived.isNotEmpty()) item {
-                        TextButton(onClick = { showArchived = !showArchived }) { Text("${if (showArchived) "收起" else "看看"}已经轻轻收好的愿望 · ${archived.size}") }
-                    }
-                    if (showArchived) items(archived, key = { "archived-${it.id}" }) { wish ->
-                        Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text("${wish.emoji} ${wish.title}", modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            TextButton(onClick = { perform { repository.saveWaiting(wish.copy(archived = false)) } }) { Text("放回候场") }
-                        }
-                    }
-                }
-                2 -> {
-                    item { Text("装满的瓶子不会消失。这里留着你一个个实现的小愿望 ♡", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                    if (completed.isEmpty()) item { WorldEmpty("第一只满星瓶在路上", "每一颗小星星都会留下，慢慢来就好。", "去攒星星", { tab = 0 }) }
-                    items(completed, key = { it.id }) { wish ->
-                        LedgerCard {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                                StarWishJar(1f, Modifier.width(92.dp), complete = true)
-                                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                                    Text("${wish.emoji} ${wish.title}", fontFamily = GuluBrandFont, fontWeight = FontWeight.Normal, style = MaterialTheme.typography.titleLarge)
-                                    Text("${Formatters.dayLabel(wish.completedAt ?: wish.createdAt)} · 实现啦", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
-                                    Text("攒下 ¥${Formatters.fenToYuanText(wish.savedFen)} · ${wish.deposits.size} 颗星星", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    if (wish.caption.isNotBlank()) Text(wish.caption, style = MaterialTheme.typography.bodyMedium)
-                                }
-                                IconButton(onClick = { editWish = wish }) { Icon(Icons.Outlined.Edit, "编辑纪念", tint = MaterialTheme.colorScheme.primary) }
-                            }
-                            if (wish.photoPath.isNotBlank()) MemoryPhoto(wish.photoPath,
-                                Modifier.fillMaxWidth().height(180.dp).clip(RoundedCornerShape(18.dp)))
-                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                TextButton(onClick = { recordsWish = wish.id }) { Text("攒星回忆") }
-                                Spacer(Modifier.weight(1f))
-                                MemoryPosterButton(wish.title, wish.caption.ifBlank { "一颗一颗的小星星，终于装满了这个愿望。" }, wish.photoPath,
-                                    amountFen = wish.savedFen, dateMillis = wish.completedAt)
-                            }
-                        }
+            if(tab==0&&active.isEmpty()) item { TextButton(onClick={createWish=true}) {Text("放上第一个愿望瓶") } }
+            if(tab==1&&waiting.isEmpty()) item { TextButton(onClick={createWaiting=true}) {Text("先留一个喜欢") } }
+            if(tab==2&&completed.isEmpty()) item { Text("实现的小愿望会留在这里，慢慢来就好 ♡",style=MaterialTheme.typography.bodySmall) }
+            if(tab==1) {
+                val archived=state.waiting.filter {it.archived}
+                if(archived.isNotEmpty()) item { TextButton(onClick={showArchived=!showArchived}) {Text(if(showArchived) "收起已经放下的愿望" else "看看已经放下的愿望") } }
+                if(showArchived) items(archived,key={"archived-${it.id}"}) {wish->
+                    Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
+                        Text(wish.title,Modifier.weight(1f),style=MaterialTheme.typography.bodySmall)
+                        TextButton(onClick={perform {repository.saveWaiting(wish.copy(archived=false))}}){Text("放回候场")}
                     }
                 }
             }
         }
     }
+    current?.let {wish->GuluDialog(wish.title,{selected=null},compact=true,busy=busy) {
+        Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(14.dp)) {
+            StarWishJar(wishProgress(wish),Modifier.width(84.dp))
+            Column(verticalArrangement=Arrangement.spacedBy(5.dp)) {
+                Text("已装满 ${wishPercent(wish)}%",color=MaterialTheme.colorScheme.primary)
+                Text("¥${Formatters.fenToYuanText(wish.savedFen)}",style=MaterialTheme.typography.titleLarge)
+                Text("目标 ¥${Formatters.fenToYuanText(wish.targetFen)}",style=MaterialTheme.typography.bodySmall)
+                Text("还差 ¥${Formatters.fenToYuanText((wish.targetFen-wish.savedFen).coerceAtLeast(0))}",style=MaterialTheme.typography.bodySmall)
+            }
+        }
+        if(wish.caption.isNotBlank()) Text(wish.caption,style=MaterialTheme.typography.bodySmall)
+        Button(onClick={selected=null;depositWish=wish.id},enabled=!busy,modifier=Modifier.fillMaxWidth()){Text("放进一颗小星星")}
+        Row {
+            TextButton(onClick={selected=null;editWish=wish},enabled=!busy){Text("编辑愿望")}
+            TextButton(onClick={selected=null;recordsWish=wish.id},enabled=!busy){Text("攒星记录")}
+        }
+    } }
+    selectedWaiting?.let {id->waiting.firstOrNull {it.id==id}?.let {wish->GuluDialog(wish.title,{selectedWaiting=null},compact=true,busy=busy) {
+        Text(if(wish.amountFen>0) "大约 ¥${Formatters.fenToYuanText(wish.amountFen)}" else "价格可以慢慢想，先留下喜欢。")
+        Button(onClick={selectedWaiting=null;promotion=wish},enabled=!busy,modifier=Modifier.fillMaxWidth()){Text("开始认真攒")}
+        TextButton(onClick={selectedWaiting=null;onRecordWaiting(Sticker(id="waiting:${wish.id}",title=wish.title,emoji=wish.emoji,amountFen=wish.amountFen))},enabled=!busy){Text("买到了 · 记一笔")}
+        Row {
+            TextButton(onClick={selectedWaiting=null;editWaiting=wish},enabled=!busy){Text("编辑")}
+            TextButton(onClick={perform {repository.archiveWaiting(wish.id);selectedWaiting=null}},enabled=!busy){Text("轻轻放下")}
+        }
+    } } }
+    selectedMemory?.let {id->completed.firstOrNull {it.id==id}?.let {wish->GuluDialog(wish.title,{selectedMemory=null},compact=true,busy=busy) {
+        Text("${Formatters.dayLabel(wish.completedAt ?: wish.createdAt)} · 实现啦",color=MaterialTheme.colorScheme.primary)
+        Text("攒下 ¥${Formatters.fenToYuanText(wish.savedFen)} · ${wish.deposits.size} 次记录",style=MaterialTheme.typography.bodySmall)
+        if(wish.caption.isNotBlank()) Text(wish.caption)
+        if(wish.photoPath.isNotBlank()) MemoryPhoto(wish.photoPath,Modifier.fillMaxWidth().height(180.dp))
+        Row(verticalAlignment=Alignment.CenterVertically) {
+            TextButton(onClick={selectedMemory=null;recordsWish=wish.id}){Text("攒星回忆")}
+            TextButton(onClick={selectedMemory=null;editWish=wish}){Text("编辑")}
+        }
+        MemoryPosterButton(wish.title,wish.caption.ifBlank {"一颗一颗的小星星，终于装满了这个愿望。"},wish.photoPath,
+            amountFen=wish.savedFen,dateMillis=wish.completedAt)
+    } } }
 
     if (createWish || editWish != null) WishEditor(editWish, onDismiss = { createWish = false; editWish = null }, onDelete = editWish?.let { { deleteWish = it } }, busy = busy) { wish ->
         val wasComplete = editWish?.completedAt != null

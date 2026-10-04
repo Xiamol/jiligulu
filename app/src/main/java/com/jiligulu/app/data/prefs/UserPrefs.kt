@@ -32,7 +32,7 @@ data class WaterReminderState(
 
 data class WaterReminderAdvance(val nextDueAt: Long, val pendingToDeliver: PendingWater?)
 
-data class SavedAnnouncements(val source: String, val cachedFeed: String, val mutedIds: Set<String>)
+data class SavedAnnouncements(val source: String, val cachedFeed: String, val mutedIds: Set<String>, val readIds: Set<String> = emptySet())
 
 /** Relative to the movable area after system insets and the floating icon's size. */
 data class FloatingCapturePosition(val x: Float, val y: Float)
@@ -57,6 +57,8 @@ class UserPrefs(private val context: Context) {
         private val KEY_API_KEY = stringPreferencesKey("api_key_override")
         private val KEY_THEME_MODE = stringPreferencesKey("theme_mode")
         private val KEY_LITTLE_WORLD_SKIN = stringPreferencesKey("little_world_skin")
+        private val KEY_SECRET_STAR_BEST = intPreferencesKey("secret_star_best")
+        private val KEY_SECRET_PET_SLEEPING = booleanPreferencesKey("secret_pet_sleeping")
         private val KEY_WATER_ENABLED = booleanPreferencesKey("water_enabled")
         private val KEY_WATER_INTERVAL = intPreferencesKey("water_interval_minutes")
         private val KEY_WATER_SCHEDULE_VERSION = intPreferencesKey("water_schedule_version")
@@ -76,6 +78,7 @@ class UserPrefs(private val context: Context) {
         private val KEY_ANNOUNCEMENT_SOURCE = stringPreferencesKey("announcement_source")
         private val KEY_ANNOUNCEMENT_CACHE = stringPreferencesKey("announcement_cache")
         private val KEY_MUTED_ANNOUNCEMENTS = stringSetPreferencesKey("muted_announcements")
+        private val KEY_READ_ANNOUNCEMENTS = stringSetPreferencesKey("read_announcements")
         const val DEFAULT_ANNOUNCEMENT_SOURCE = "https://raw.githubusercontent.com/Xiamol/jiligulu/announcements/announcements.json"
         const val DEFAULT_SUFFIX = "大人"
 
@@ -138,7 +141,7 @@ class UserPrefs(private val context: Context) {
     suspend fun readAnnouncements(): SavedAnnouncements {
         val values = context.dataStore.data.first()
         return SavedAnnouncements(values[KEY_ANNOUNCEMENT_SOURCE] ?: DEFAULT_ANNOUNCEMENT_SOURCE,
-            values[KEY_ANNOUNCEMENT_CACHE].orEmpty(), values[KEY_MUTED_ANNOUNCEMENTS].orEmpty())
+            values[KEY_ANNOUNCEMENT_CACHE].orEmpty(), values[KEY_MUTED_ANNOUNCEMENTS].orEmpty(), values[KEY_READ_ANNOUNCEMENTS].orEmpty())
     }
 
     suspend fun setAnnouncementSource(source: String) {
@@ -150,6 +153,9 @@ class UserPrefs(private val context: Context) {
     suspend fun cacheAnnouncements(raw: String) { context.dataStore.edit { it[KEY_ANNOUNCEMENT_CACHE] = raw } }
     suspend fun muteAnnouncement(id: String) {
         context.dataStore.edit { it[KEY_MUTED_ANNOUNCEMENTS] = it[KEY_MUTED_ANNOUNCEMENTS].orEmpty() + id }
+    }
+    suspend fun markAnnouncementRead(id: String) {
+        context.dataStore.edit { it[KEY_READ_ANNOUNCEMENTS] = it[KEY_READ_ANNOUNCEMENTS].orEmpty() + id }
     }
 
     val nameSuffix: Flow<String> = context.dataStore.data.map { it[KEY_NAME_SUFFIX] ?: DEFAULT_SUFFIX }
@@ -166,6 +172,10 @@ class UserPrefs(private val context: Context) {
     suspend fun setLittleWorldSkin(skin: LittleWorldSkin) {
         context.dataStore.edit { it[KEY_LITTLE_WORLD_SKIN] = skin.id }
     }
+    val secretStarBest: Flow<Int> = context.dataStore.data.map { (it[KEY_SECRET_STAR_BEST] ?: 0).coerceAtLeast(0) }.distinctUntilChanged()
+    suspend fun keepSecretStarBest(score:Int) { context.dataStore.edit { it[KEY_SECRET_STAR_BEST] = maxOf(it[KEY_SECRET_STAR_BEST] ?: 0,score) } }
+    val secretPetSleeping: Flow<Boolean> = context.dataStore.data.map { it[KEY_SECRET_PET_SLEEPING] ?: false }.distinctUntilChanged()
+    suspend fun setSecretPetSleeping(value:Boolean) { context.dataStore.edit { it[KEY_SECRET_PET_SLEEPING]=value } }
 
     /** 喝水提醒开关（默认关） */
     val waterEnabled: Flow<Boolean> = context.dataStore.data.map { it[KEY_WATER_ENABLED] ?: false }

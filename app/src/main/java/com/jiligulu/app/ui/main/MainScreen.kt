@@ -4,6 +4,7 @@ import androidx.compose.animation.core.spring
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.MutatePriority
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -77,6 +78,8 @@ fun MainScreen(
     onOpenWishBook: () -> Unit = {},
     onOpenFutureNotes: () -> Unit = {},
     onOpenMemories: () -> Unit = {},
+    onOpenTimeMachine: () -> Unit = {},
+    onOpenSecretBase: () -> Unit = {},
     onRecordAmount: (String) -> Unit = {}
 ) {
     val app = LocalContext.current.applicationContext as JiliguluApp
@@ -188,7 +191,7 @@ fun MainScreen(
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Text("叽里咕噜", fontFamily = GuluBrandFont, fontSize = 28.sp,
                             color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.weight(1f))
+                            modifier = Modifier.weight(1f).combinedClickable(onClick={},onLongClick=onOpenSecretBase))
                         MailboxHeaderButton(app.container.announcements)
                         IconButton(onClick = onOpenSettings) {
                             Icon(Icons.Outlined.Settings, contentDescription = "设置",
@@ -225,6 +228,7 @@ fun MainScreen(
                         }
                         1 -> LittleWorldScreen(onBack = { navigate(0) }, onOpenWishBook = onOpenWishBook,
                             onOpenFutureNotes = onOpenFutureNotes, onOpenMemories = onOpenMemories,
+                            onOpenTimeMachine=onOpenTimeMachine,onOpenSecretBase=onOpenSecretBase,
                             onRecordAmount = onRecordAmount, embedded = true, active = selectedTab == 1,
                             onModalChanged = { worldModalOpen = it },
                             modifier = Modifier.fillMaxSize().forwardMainPageSwipe(

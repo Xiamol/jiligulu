@@ -6,6 +6,7 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.LinearGradient
+import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RadialGradient
@@ -22,7 +23,7 @@ import kotlin.math.min
 
 /**
  * Transparent overlay material: the real window shows through a light violet glass shell.
- * Cached lighting supplies depth without capturing, reading or blurring another app's pixels.
+ * Cached lighting supplies depth; GlassOverlayHost uses platform blur without raw pixel capture.
  * The service owns touch/drag placement; pressing only transforms drawing inside this view.
  */
 class GlassFloatingBubbleView @JvmOverloads constructor(
@@ -54,13 +55,16 @@ class GlassFloatingBubbleView @JvmOverloads constructor(
     private var pressure = 0f
     private var glassPressed = false
     private var pressAnimator: ValueAnimator? = null
+    private val lightMatrix=Matrix()
+    private var lightX=.3f
+    private var lightY=.3f
 
     init {
         background = null
         // The default launcher asset contains a cream square; this sprite has true alpha.
         setImageResource(R.drawable.gulu_idle)
         scaleType = ScaleType.FIT_CENTER
-        imageAlpha = 238
+        imageAlpha = 110
         // Shadow is cached below, so an elevation assigned by an existing service cannot
         // introduce a second rectangular platform shadow around the transparent corners.
         outlineProvider = null
@@ -85,19 +89,21 @@ class GlassFloatingBubbleView @JvmOverloads constructor(
         // All shader/array/path allocations happen on resize, never on idle or per draw.
         glassPaint.shader = LinearGradient(glassBounds.left, glassBounds.top,
             glassBounds.right, glassBounds.bottom,
-            intArrayOf(Color.argb(67, 255, 255, 255), Color.argb(25, 246, 243, 255), Color.argb(48, 187, 168, 232)),
+            intArrayOf(Color.argb(25, 255, 255, 255), Color.argb(9, 246, 243, 255), Color.argb(22, 187, 168, 232)),
             floatArrayOf(0f, .53f, 1f), Shader.TileMode.CLAMP)
         glowPaint.shader = RadialGradient(cx - side * .19f, cy - side * .22f, side * .63f,
             intArrayOf(Color.argb(46, 255, 255, 255), Color.TRANSPARENT),
             floatArrayOf(0f, 1f), Shader.TileMode.CLAMP)
-        rimPaint.strokeWidth = (side * .018f).coerceAtLeast(1f)
+        rimPaint.strokeWidth = (side * .044f).coerceAtLeast(1.8f)
         rimPaint.shader = SweepGradient(cx, cy,
-            intArrayOf(Color.argb(160, 255, 255, 255), Color.argb(53, 99, 72, 150),
-                Color.argb(124, 248, 241, 255), Color.argb(232, 255, 255, 255),
-                Color.argb(64, 208, 198, 247), Color.argb(160, 255, 255, 255)),
+            intArrayOf(Color.argb(232, 255, 255, 255), Color.argb(74, 59, 46, 93),
+                Color.argb(180, 248, 241, 255), Color.argb(250, 255, 255, 255),
+                Color.argb(112, 179, 189, 234), Color.argb(232, 255, 255, 255)),
             floatArrayOf(0f, .25f, .5f, .68f, .84f, 1f))
-        innerRimPaint.strokeWidth = (side * .008f).coerceAtLeast(.7f)
-        innerRimPaint.color = Color.argb(48, 97, 70, 154)
+        lightMatrix.setRotate((lightX-.5f)*110f+(lightY-.5f)*45f,cx,cy)
+        rimPaint.shader?.setLocalMatrix(lightMatrix)
+        innerRimPaint.strokeWidth = (side * .012f).coerceAtLeast(.8f)
+        innerRimPaint.color = Color.argb(70, 77, 65, 110)
 
         topGlint.reset()
         topGlint.moveTo(glassBounds.left + side * .11f, glassBounds.top + side * .064f)
@@ -132,8 +138,7 @@ class GlassFloatingBubbleView @JvmOverloads constructor(
         val cx = width / 2f
         val cy = height / 2f
         val body = canvas.save()
-        val scale = 1f - pressure * .047f
-        canvas.scale(scale, scale, cx, cy)
+        canvas.scale(1f - pressure * .07f,1f + pressure * .018f,cx,cy)
         canvas.translate(0f, pressure * side * .011f)
         softShadow?.let { canvas.drawBitmap(it, 0f, 0f, bitmapPaint) }
         canvas.drawRoundRect(glassBounds, radius, radius, glassPaint)
@@ -143,7 +148,7 @@ class GlassFloatingBubbleView @JvmOverloads constructor(
         val artwork = canvas.save()
         canvas.clipPath(glassPath)
         // Keep the eyes, sprout and purple silhouette recognizable on light/dark surfaces.
-        canvas.scale(.86f, .86f, cx, cy)
+        canvas.scale(.75f, .75f, cx, cy)
         super.onDraw(canvas)
         canvas.restoreToCount(artwork)
 
@@ -156,6 +161,16 @@ class GlassFloatingBubbleView @JvmOverloads constructor(
         canvas.drawPath(lowerGlint, lowerGlintPaint)
         canvas.restoreToCount(reflections)
         canvas.restoreToCount(body)
+    }
+
+    /** Position-driven specular bands; no pixel sampling or continuously running animation. */
+    fun setGlassLight(x:Float,y:Float) {
+        val nextX=x.coerceIn(0f,1f);val nextY=y.coerceIn(0f,1f)
+        if(kotlin.math.abs(nextX-lightX)+kotlin.math.abs(nextY-lightY)<.012f) return
+        lightX=nextX;lightY=nextY
+        lightMatrix.setRotate((lightX-.5f)*110f+(lightY-.5f)*45f,width/2f,height/2f)
+        rimPaint.shader?.setLocalMatrix(lightMatrix)
+        invalidate()
     }
 
     /** Call on DOWN, and release on UP/CANCEL/configuration changes in the service. */

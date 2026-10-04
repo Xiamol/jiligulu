@@ -71,6 +71,8 @@ object Routes {
     const val WISH_BOOK = "wish_book"
     const val FUTURE_NOTES = "future_notes"
     const val MEMORIES = "memories"
+    const val TIME_MACHINE = "time_machine"
+    const val SECRET_BASE = "secret_base"
 
     /** 回收站的草稿页签——跳转卡里的「我自己去回收站」直达这里。 */
     const val TRASH_DRAFT = "trash_draft"
@@ -114,6 +116,8 @@ class MainActivity : ComponentActivity() {
             val app = LocalContext.current.applicationContext as JiliguluApp
             val themeMode by app.container.userPrefs.themeMode
                 .collectAsStateWithLifecycle(initialValue = UserPrefs.THEME_SYSTEM)
+            val globalSkin by app.container.userPrefs.littleWorldSkin.collectAsStateWithLifecycle(
+                initialValue = com.jiligulu.app.data.prefs.LittleWorldSkin.DEFAULT)
             val request by waterRequests.collectAsStateWithLifecycle()
             val futureNote by futureNoteRequests.collectAsStateWithLifecycle()
             val darkTheme = when (themeMode) {
@@ -121,7 +125,7 @@ class MainActivity : ComponentActivity() {
                 UserPrefs.THEME_DARK -> true
                 else -> isSystemInDarkTheme()
             }
-            GuluTheme(darkTheme = darkTheme) { JiliguluRoot(request, futureNote) { futureNoteRequests.value = null } }
+            GuluTheme(darkTheme = darkTheme, skin = globalSkin) { JiliguluRoot(request, futureNote) { futureNoteRequests.value = null } }
         }
     }
 
@@ -262,6 +266,8 @@ private fun JiliguluRoot(waterRequest: Int, futureNoteId: String? = null, onNote
                         onOpenWishBook = { navController.navigate(Routes.WISH_BOOK) },
                         onOpenFutureNotes = { navController.navigate(Routes.FUTURE_NOTES) },
                         onOpenMemories = { navController.navigate(Routes.MEMORIES) },
+                        onOpenTimeMachine = { navController.navigate(Routes.TIME_MACHINE) },
+                        onOpenSecretBase = { navController.navigate(Routes.SECRET_BASE) {launchSingleTop=true} },
                         onRecordAmount = { amount ->
                             com.jiligulu.app.core.util.Formatters.yuanTextToFen(amount)?.let {
                                 recordSticker(com.jiligulu.app.data.littleworld.Sticker(title = "", amountFen = it))
@@ -291,6 +297,8 @@ private fun JiliguluRoot(waterRequest: Int, futureNoteId: String? = null, onNote
                         onOpenWishBook = { navController.navigate(Routes.WISH_BOOK) },
                         onOpenFutureNotes = { navController.navigate(Routes.FUTURE_NOTES) },
                         onOpenMemories = { navController.navigate(Routes.MEMORIES) },
+                        onOpenTimeMachine = { navController.navigate(Routes.TIME_MACHINE) },
+                        onOpenSecretBase = { navController.navigate(Routes.SECRET_BASE) {launchSingleTop=true} },
                         onRecordAmount = { amount ->
                             com.jiligulu.app.core.util.Formatters.yuanTextToFen(amount)?.let { recordSticker(com.jiligulu.app.data.littleworld.Sticker(title = "", amountFen = it)) }
                         })
@@ -298,6 +306,10 @@ private fun JiliguluRoot(waterRequest: Int, futureNoteId: String? = null, onNote
                 composable(Routes.WISH_BOOK) { com.jiligulu.app.ui.littleworld.WishBookScreen(onBack = { navController.popBackStack() }, onRecordWaiting = recordSticker) }
                 composable(Routes.FUTURE_NOTES) { com.jiligulu.app.ui.futurenotes.FutureNotesScreen(onBack = { navController.popBackStack() }) }
                 composable(Routes.MEMORIES) { com.jiligulu.app.ui.memories.MemoriesScreen(onBack = { navController.popBackStack() }) }
+                composable(Routes.TIME_MACHINE) { com.jiligulu.app.ui.littleworld.TimeMachineScreen { navController.popBackStack() } }
+                composable(Routes.SECRET_BASE) { com.jiligulu.app.ui.littleworld.SecretBaseScreen(
+                    onBack={navController.popBackStack()},onOpenNotes={navController.navigate(Routes.FUTURE_NOTES)},
+                    onOpenMemories={navController.navigate(Routes.MEMORIES)}) }
                 composable(Routes.CHAT) {
                     ChatScreen(
                         onBack = { navController.popBackStack() },
