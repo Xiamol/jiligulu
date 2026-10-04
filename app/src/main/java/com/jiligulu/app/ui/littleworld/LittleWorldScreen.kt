@@ -140,8 +140,10 @@ fun LittleWorldScreen(
             }
         }
         }
+        Box(Modifier.weight(1f)) {
+        LifeGardenCornerDecor(Modifier.matchParentSize())
         SpringLazyColumn(contentPadding = PaddingValues(18.dp, 4.dp, 18.dp, 20.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.weight(1f)) {
+            verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxSize()) {
             item {
                 LifeDeskCorner(state, date, onOpenWishBook, { showFavorites = true })
             }
@@ -222,6 +224,7 @@ fun LittleWorldScreen(
                 }
             }
             error?.let { message -> item { Text(message, color = MaterialTheme.colorScheme.error) } }
+        }
         }
     }
     if (active) selectedBill?.let { id -> BillDetailSheet(id) { selectedBill = null } }

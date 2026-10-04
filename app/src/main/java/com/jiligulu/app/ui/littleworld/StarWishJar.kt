@@ -25,7 +25,7 @@ fun StarWishJar(progress:Float,modifier:Modifier=Modifier,complete:Boolean=progr
     val fill = animateFloatAsState(progress.coerceIn(0f,1f),tween(420),label="wishStars")
     val resources=LocalContext.current.resources
     val art=remember { LittleWorldArtwork.image(resources,R.drawable.wish_star_bottle) }
-    val starArt=remember { LittleWorldArtwork.image(resources,R.drawable.wish_lucky_stars_atlas_v2) }
+    val starArt=remember { LittleWorldArtwork.image(resources,R.drawable.wish_puffy_stars_atlas_v3) }
     Box(modifier.aspectRatio(.75f).semantics {
         contentDescription=if(complete)"已经装满星星的愿望瓶" else "愿望瓶，已装满 ${(progress.coerceIn(0f,1f)*100).toInt()}%"
     }) {
@@ -44,8 +44,8 @@ fun StarWishJar(progress:Float,modifier:Modifier=Modifier,complete:Boolean=progr
                     j=i
                 };return result
             }
-            val positions=(0..10).flatMap { row->(0..7).map { col->
-                Offset(w*(.115f+col*.11f+(if(row%2==0).008f else -.008f)),h*(.845f-row*.051f))
+            val positions=(0..5).flatMap { row->(0..4).map { col->
+                Offset(w*(.17f+col*.165f+(if(row%2==0).018f else -.018f)),h*(.845f-row*.105f))
             } }.filter{inside(it)}
             val cell=IntSize(starArt.width/3,starArt.height/2)
             // Back rows are smaller and dimmer. Front sprites slightly overlap, making a
@@ -53,7 +53,7 @@ fun StarWishJar(progress:Float,modifier:Modifier=Modifier,complete:Boolean=progr
             val stars=positions.mapIndexed { i, center ->
                     val variant=(i*5+i/6)%6
                     val scale=when(i%4){0->.9f;1->1.08f;else->1f}
-                    val side=(w*.15f*scale).roundToInt().coerceAtLeast(1)
+                    val side=(w*.28f*scale).roundToInt().coerceAtLeast(1)
                     CachedWishStar(center,IntOffset((variant%3)*cell.width,(variant/3)*cell.height),
                         IntOffset((center.x-side/2f).roundToInt(),(center.y-side/2f).roundToInt()),
                         IntSize(side,side),((i*31)%49-24).toFloat(),if(i%4==0).86f else .98f)
@@ -61,7 +61,7 @@ fun StarWishJar(progress:Float,modifier:Modifier=Modifier,complete:Boolean=progr
             val glass=Brush.linearGradient(listOf(Color.White.copy(alpha=.10f),Color.Transparent,
                 Color(0xFFBEAAE8).copy(alpha=.07f)),Offset(w*.15f,h*.32f),Offset(w*.85f,h*.84f))
             onDrawBehind {
-                val count=(fill.value*stars.size).roundToInt().coerceIn(0,stars.size)
+                val count=(fill.value*stars.size).roundToInt().coerceIn(if(fill.value>0f)1 else 0,stars.size)
                 clipPath(interior) {
                     // Higher rows sit behind the lower foreground objects.
                     for(i in count-1 downTo 0) {

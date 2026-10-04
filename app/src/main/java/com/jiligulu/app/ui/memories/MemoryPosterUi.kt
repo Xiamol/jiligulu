@@ -1,6 +1,7 @@
 package com.jiligulu.app.ui.memories
 
 import android.os.Build
+import android.graphics.BitmapFactory
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -79,6 +80,14 @@ fun MemoryPosterDialog(data: PosterData, onDismiss: () -> Unit) {
     } }
     var stamp by remember { mutableStateOf(seasonalStamp) }
     var file by remember { mutableStateOf<File?>(null) }
+    val previewRatio by produceState(.75f, file) {
+        val current = file ?: return@produceState
+        value = withContext(Dispatchers.IO) {
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(current.absolutePath, bounds)
+            if (bounds.outWidth > 0 && bounds.outHeight > 0) bounds.outWidth.toFloat() / bounds.outHeight else .75f
+        }
+    }
     var rendering by remember { mutableStateOf(true) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -135,8 +144,14 @@ fun MemoryPosterDialog(data: PosterData, onDismiss: () -> Unit) {
                 TextButton(onClick = onDismiss, enabled = !busy) { Text("关闭") }
             }
             SpringScrollColumn(Modifier.weight(1f, fill = false), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedTextField(title, { title = it.take(32) }, label = { Text(if (data.week == null) "给这一刻起个名字" else "给这一周起个名字") }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp), singleLine = true)
-                OutlinedTextField(caption, { caption = it.take(120) }, label = { Text("留一句话") }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp), maxLines = 3)
+                // The actual shareable artwork leads. Its measured aspect ratio accommodates
+                // whole portrait photos and shorter, denser weekly postcards without stretching.
+                Box(Modifier.fillMaxWidth().height(300.dp).clip(RoundedCornerShape(18.dp))
+                    .background(MaterialTheme.colorScheme.surfaceContainerLow), contentAlignment = Alignment.Center) {
+                    file?.let { MemoryPhoto(it.absolutePath, Modifier.fillMaxHeight().aspectRatio(previewRatio)
+                        .clip(RoundedCornerShape(10.dp)), ContentScale.Fit) }
+                    if (rendering) CircularProgressIndicator(Modifier.size(28.dp))
+                }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (data.amountFen != null || data.week != null) {
                         Checkbox(checked = showAmount, onCheckedChange = { showAmount = it }); Text("展示金额", style = MaterialTheme.typography.bodySmall)
@@ -144,10 +159,8 @@ fun MemoryPosterDialog(data: PosterData, onDismiss: () -> Unit) {
                     Spacer(Modifier.weight(1f))
                     TextButton(onClick = { stamp = when (stamp) { seasonalStamp -> "好好生活"; "好好生活" -> "小小快乐"; "小小快乐" -> "愿望成真"; else -> seasonalStamp } }) { Text("$stamp ▾") }
                 }
-                Box(Modifier.fillMaxWidth().height(285.dp), contentAlignment = Alignment.Center) {
-                    file?.let { MemoryPhoto(it.absolutePath, Modifier.fillMaxHeight().aspectRatio(.75f).clip(RoundedCornerShape(12.dp)), ContentScale.Fit) }
-                    if (rendering) CircularProgressIndicator(Modifier.size(28.dp))
-                }
+                OutlinedTextField(title, { title = it.take(32) }, label = { Text(if (data.week == null) "给这一刻起个名字" else "给这一周起个名字") }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp), singleLine = true)
+                OutlinedTextField(caption, { caption = it.take(120) }, label = { Text("留一句话") }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp), maxLines = 3)
                 Text("金额默认藏好，只把你想分享的生活留下。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
             }
