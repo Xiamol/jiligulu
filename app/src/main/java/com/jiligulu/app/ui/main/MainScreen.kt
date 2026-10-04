@@ -9,10 +9,12 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Settings
@@ -22,8 +24,11 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -40,6 +45,7 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import com.jiligulu.app.JiliguluApp
 import com.jiligulu.app.ui.announcement.MailboxHeaderButton
 import androidx.compose.ui.unit.dp
@@ -65,7 +71,7 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.distinctUntilChanged
 
-/** Main destinations own scroll state; the companion occupies a fixed header slot. */
+/** Each destination owns its header and scroll state inside one stable pager viewport. */
 @Composable
 @OptIn(ExperimentalFoundationApi::class)
 fun MainScreen(
@@ -84,6 +90,7 @@ fun MainScreen(
 ) {
     val app = LocalContext.current.applicationContext as JiliguluApp
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
+    RoomStatusBarAppearance(selectedTab == 1)
     val message by personaVm.bubble.collectAsStateWithLifecycle()
     val drinkingId by personaVm.drinkingId.collectAsStateWithLifecycle()
     val showDrinking = drinkingId != null
@@ -186,21 +193,9 @@ fun MainScreen(
     Box(Modifier.fillMaxSize()) {
         Scaffold(
             containerColor = MaterialTheme.colorScheme.background,
-            topBar = {
-                Column(Modifier.statusBarsPadding().padding(horizontal = 20.dp)) {
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text("叽里咕噜", fontFamily = GuluBrandFont, fontSize = 28.sp,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.weight(1f).combinedClickable(onClick={},onLongClick=onOpenSecretBase))
-                        MailboxHeaderButton(app.container.announcements)
-                        IconButton(onClick = onOpenSettings) {
-                            Icon(Icons.Outlined.Settings, contentDescription = "设置",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    }
-                    Spacer(Modifier.height(12.dp))
-                }
-            },
+            // The room paints behind the status bar; other pages apply their own safe header.
+            // Keeping the inset policy fixed avoids resizing outgoing pages during a swipe.
+            contentWindowInsets = WindowInsets(0, 0, 0, 0),
             bottomBar = {
                 Column {
                     HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.45f))
@@ -215,6 +210,7 @@ fun MainScreen(
                     verticalAlignment = Alignment.Top, key = { it }) { page ->
                     when (page) {
                         0 -> Column(Modifier.fillMaxSize()) {
+                            MainPageHeader(app, selectedTab == 0, onOpenSettings, onOpenSecretBase)
                             // The companion belongs to this page, including while it exits.
                             // Switching tabs must not resize the outgoing ledger viewport.
                             GuluCompanionHeader(message = message,
@@ -226,21 +222,74 @@ fun MainScreen(
                                 active = selectedTab == 0, onOpenStats = { navigate(1) }, onPickSticker = onPickSticker,
                                 onPageDrag = pageDrag, onPageDragEnd = pageDragEnd)
                         }
-                        1 -> LittleWorldScreen(onBack = { navigate(0) }, onOpenWishBook = onOpenWishBook,
-                            onOpenFutureNotes = onOpenFutureNotes, onOpenMemories = onOpenMemories,
-                            onOpenTimeMachine=onOpenTimeMachine,onOpenSecretBase=onOpenSecretBase,
-                            onRecordAmount = onRecordAmount, embedded = true, active = selectedTab == 1,
-                            onModalChanged = { worldModalOpen = it },
-                            modifier = Modifier.fillMaxSize().forwardMainPageSwipe(
-                                enabled = { selectedTab == 1 && !worldModalOpen }, onDrag = pageDrag,
-                                onDragEnd = pageDragEnd, allowRight = true))
-                        2 -> StatsScreen(active = selectedTab == 2)
+                        1 -> Box(Modifier.fillMaxSize()) {
+                            LittleWorldScreen(onBack = { navigate(0) }, onOpenWishBook = onOpenWishBook,
+                                onOpenFutureNotes = onOpenFutureNotes, onOpenMemories = onOpenMemories,
+                                onOpenTimeMachine=onOpenTimeMachine,onOpenSecretBase=onOpenSecretBase,
+                                onRecordAmount = onRecordAmount, embedded = true, active = selectedTab == 1,
+                                onModalChanged = { worldModalOpen = it },
+                                modifier = Modifier.fillMaxSize().forwardMainPageSwipe(
+                                    enabled = { selectedTab == 1 && !worldModalOpen }, onDrag = pageDrag,
+                                    onDragEnd = pageDragEnd, allowRight = true))
+                            if (selectedTab == 1) Surface(Modifier.align(Alignment.TopEnd).statusBarsPadding()
+                                .padding(top = 4.dp, end = 12.dp),
+                                shape = RoundedCornerShape(24.dp),
+                                color = MaterialTheme.colorScheme.surface.copy(alpha = .86f)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    MailboxHeaderButton(app.container.announcements)
+                                    IconButton(onClick = onOpenSettings) {
+                                        Icon(Icons.Outlined.Settings, contentDescription = "设置",
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                }
+                            }
+                        }
+                        2 -> Column(Modifier.fillMaxSize()) {
+                            MainPageHeader(app, selectedTab == 2, onOpenSettings, onOpenSecretBase)
+                            Box(Modifier.weight(1f)) { StatsScreen(active = selectedTab == 2) }
+                        }
                     }
                 }
             }
         }
         DrinkingOverlay(visible = showDrinking, onFinished = personaVm::completeDrinking,
             onCancel = personaVm::cancelDrinking)
+    }
+}
+
+/** The room has a bright painted wall even when the system uses dark mode. */
+@Composable
+private fun RoomStatusBarAppearance(active:Boolean) {
+    val view=LocalView.current
+    val activity=remember(view) {
+        var context=view.context
+        while(context is android.content.ContextWrapper && context !is android.app.Activity) context=context.baseContext
+        context as? android.app.Activity
+    }
+    if(active && activity!=null) DisposableEffect(view,activity) {
+        val controller=androidx.core.view.WindowCompat.getInsetsController(activity.window,view)
+        val previous=controller.isAppearanceLightStatusBars
+        controller.isAppearanceLightStatusBars=true
+        onDispose {controller.isAppearanceLightStatusBars=previous}
+    }
+}
+
+@Composable
+@OptIn(ExperimentalFoundationApi::class)
+private fun MainPageHeader(app: JiliguluApp, active: Boolean, onOpenSettings: () -> Unit, onOpenSecretBase: () -> Unit) {
+    Column(Modifier.statusBarsPadding().padding(horizontal = 20.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text("叽里咕噜", fontFamily = GuluBrandFont, fontSize = 28.sp,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.weight(1f).combinedClickable(onClick = {}, onLongClick = onOpenSecretBase))
+            if (active) MailboxHeaderButton(app.container.announcements)
+            else Spacer(Modifier.size(48.dp))
+            IconButton(onClick = onOpenSettings) {
+                Icon(Icons.Outlined.Settings, contentDescription = "设置",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        Spacer(Modifier.height(12.dp))
     }
 }
 

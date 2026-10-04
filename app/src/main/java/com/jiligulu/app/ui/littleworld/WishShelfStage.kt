@@ -21,6 +21,9 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.font.FontWeight
+import com.jiligulu.app.ui.theme.GuluBrandFont
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
 import com.jiligulu.app.R
@@ -35,41 +38,46 @@ data class ShelfWish(val id:String,val title:String,val progress:Float,val subti
 fun WishShelfStage(items:List<ShelfWish>,kind:Int,onBack:()->Unit,onAdd:()->Unit,onKind:(Int)->Unit,minHeight:Dp=0.dp,onSelect:(String)->Unit) {
     val resources=LocalContext.current.resources
     val art by produceState<ImageBitmap?>(null,resources) {
-        value=withContext(Dispatchers.IO) { LittleWorldArtwork.image(resources,R.drawable.wish_shelf_room_anime) }
+        value=withContext(Dispatchers.IO) { LittleWorldArtwork.image(resources,R.drawable.wish_shelf_lavender_v2) }
     }
     var page by rememberSaveable(kind) { mutableIntStateOf(0) }
     var whisper by remember { mutableStateOf(false) }
-    val pages=maxOf(1,(items.size+8)/9)
+    val pages=maxOf(1,(items.size+11)/12)
     LaunchedEffect(pages) {page=page.coerceIn(0,pages-1)}
     LaunchedEffect(whisper) {if(whisper){kotlinx.coroutines.delay(2600);whisper=false}}
     Column(verticalArrangement=Arrangement.spacedBy(7.dp)) {
-        BoxWithConstraints(Modifier.fillMaxWidth().height(maxOf(minHeight,LocalConfiguration.current.screenWidthDp.dp/.75f))
+        BoxWithConstraints(Modifier.fillMaxWidth().height(maxOf(minHeight,LocalConfiguration.current.screenWidthDp.dp/(9f/16f)))
             .combinedClickable(onClick={},onLongClick={whisper=true})) {
             art?.let {Image(it,null,Modifier.matchParentSize(),contentScale=ContentScale.FillBounds)}
-            val visible=items.drop(page*9).take(9)
+            val visible=items.drop(page*12).take(12)
             ScenePlaqueButton("‹ 小窝",Modifier.align(Alignment.TopStart).padding(8.dp),onClick=onBack)
             ScenePlaqueButton("＋ 愿望",Modifier.align(Alignment.TopEnd).padding(8.dp),onClick=onAdd)
-            Row(Modifier.offset(x=maxWidth*.17f,y=maxHeight*.095f).width(maxWidth*.66f),
-                horizontalArrangement=Arrangement.spacedBy(6.dp)) {
-                listOf("正在攒","候场","纪念").forEachIndexed { i,label->
-                    ScenePlaqueButton(label,Modifier.weight(1f),selected=kind==i,onClick={onKind(i)})
+            Text("星星愿望册",Modifier.offset(x=maxWidth*.31f,y=maxHeight*.084f).width(maxWidth*.38f),
+                textAlign=androidx.compose.ui.text.style.TextAlign.Center,fontFamily=GuluBrandFont,
+                fontSize=18.sp,color=Color(0xFF795E49))
+            listOf("正在攒","候场","纪念").forEachIndexed { i,label->
+                Box(Modifier.offset(x=maxWidth*(.27f+i*.23f)-maxWidth*.11f,y=maxHeight*.14f-22.dp)
+                    .size(maxWidth*.22f,44.dp).clickable {onKind(i)},contentAlignment=Alignment.Center) {
+                    Text(if(kind==i) "· $label ·" else label,style=MaterialTheme.typography.labelMedium,
+                        fontWeight=if(kind==i) FontWeight.Bold else FontWeight.Normal,
+                        color=if(kind==i) Color(0xFF73568E) else Color(0xFF806446))
                 }
             }
             val bottleWidth=maxWidth*.19f
             val bottleHeight=bottleWidth/.75f
             visible.forEachIndexed { index,item ->
                 val row=index/3;val col=index%3
-                val count=minOf(3,visible.size-row*3)
-                val centerX=maxWidth*(.51f+(col-(count-1)/2f)*.205f)
-                val floor=maxHeight*listOf(.36f,.603f,.867f)[row]
+                val centerX=maxWidth*(.27f+col*.23f)
+                val floor=maxHeight*listOf(.321f,.506f,.697f,.857f)[row]
                 Canvas(Modifier.offset(x=centerX-bottleWidth*.32f,y=floor-4.dp).size(bottleWidth*.64f,5.dp)) {
-                    drawOval(Color(0xFF66503D).copy(alpha=.16f),topLeft=Offset.Zero,size=Size(size.width,size.height))
+                    drawOval(Color(0xFF776386).copy(alpha=.18f),topLeft=Offset.Zero,size=Size(size.width,size.height))
                 }
-                Column(Modifier.width(bottleWidth).offset(x=centerX-bottleWidth/2,
-                    y=floor-bottleHeight*.92f),horizontalAlignment=Alignment.CenterHorizontally) {
-                    StarWishJar(item.progress,Modifier.width(bottleWidth).clickable(onClickLabel="查看${item.title}"){onSelect(item.id)},
-                        complete=kind==2)
-                    ScenePlaqueButton(item.title,Modifier.width(bottleWidth),onClick={onSelect(item.id)})
+                StarWishJar(item.progress,Modifier.width(bottleWidth).offset(x=centerX-bottleWidth/2,
+                    y=floor-bottleHeight*.92f).clickable(onClickLabel="查看${item.title}"){onSelect(item.id)},complete=kind==2)
+                Box(Modifier.offset(x=centerX-bottleWidth/2,y=floor+maxHeight*.006f-18.dp)
+                    .size(bottleWidth,36.dp).clickable {onSelect(item.id)},contentAlignment=Alignment.Center) {
+                    Text(item.title,style=MaterialTheme.typography.labelSmall,color=Color(0xFF71543F),
+                        maxLines=1,overflow=TextOverflow.Ellipsis)
                 }
             }
             if(items.isEmpty()) Text("等一个小愿望 ♡",Modifier.align(Alignment.Center),
@@ -78,11 +86,12 @@ fun WishShelfStage(items:List<ShelfWish>,kind:Int,onBack:()->Unit,onAdd:()->Unit
                 color=MaterialTheme.colorScheme.surface.copy(alpha=.94f)) {
                 Text("阿噜悄悄给每个愿望留了位置，慢一点也没关系 ♡",Modifier.padding(10.dp),style=MaterialTheme.typography.bodySmall)
             }
-        }
-        if(pages>1) Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.Center) {
-            TextButton(onClick={page--},enabled=page>0){Text("上一架")}
-            Text("${page+1} / $pages",style=MaterialTheme.typography.labelSmall)
-            TextButton(onClick={page++},enabled=page<pages-1){Text("下一架")}
+            if(pages>1) Row(Modifier.align(Alignment.BottomCenter).padding(bottom=18.dp),
+                verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(10.dp)) {
+                ScenePlaqueButton("‹ 上一架",enabled=page>0,onClick={page--})
+                Text("${page+1} / $pages",style=MaterialTheme.typography.labelSmall,color=Color(0xFF71543F))
+                ScenePlaqueButton("下一架 ›",enabled=page<pages-1,onClick={page++})
+            }
         }
     }
 }

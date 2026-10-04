@@ -127,9 +127,11 @@ fun LittleWorldScreen(
             }
         }
         }
-        BoxWithConstraints(Modifier.weight(1f)) {
+        BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
         val roomHeight=maxHeight
-        SpringLazyColumn(contentPadding = PaddingValues(bottom = 16.dp),
+        // A single viewport-sized room preserves the spring/two-pull secret gesture
+        // without turning the illustration into a taller, scrolling page.
+        SpringLazyColumn(contentPadding = PaddingValues(0.dp),
             onTopPull={ distance->
                 val now=android.os.SystemClock.uptimeMillis()
                 if(active&&distance>=44f) {
@@ -137,15 +139,16 @@ fun LittleWorldScreen(
                     else {secretPullAt=now;secretHint=true}
                 } else secretPullAt=0
             },
-            verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxSize()) {
+            modifier = Modifier.fillMaxSize()) {
             item {
                 InteractiveRoomStage(onOpenWishBook,onOpenFutureNotes,onOpenMemories,
                     {showCalculator=true},{showFortune=true},onOpenTimeMachine,
-                    {showFortune=true},minHeight=roomHeight)
+                    {showFortune=true},modifier=Modifier.fillMaxWidth().height(roomHeight))
             }
-            error?.let { message -> item { Text(message, color = MaterialTheme.colorScheme.error) } }
         }
-        if(secretHint) Surface(Modifier.align(Alignment.TopCenter).padding(horizontal=18.dp,vertical=5.dp),
+        if(secretHint) Surface(Modifier.align(Alignment.TopCenter)
+            .then(if (embedded) Modifier.statusBarsPadding() else Modifier)
+            .padding(horizontal=18.dp,vertical=5.dp),
             shape=RoundedCornerShape(14.dp),color=MaterialTheme.colorScheme.primaryContainer) {
             Text("不要再下拉啦，那里是阿噜的秘密基地～",Modifier.padding(horizontal=12.dp,vertical=7.dp),
                 style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onPrimaryContainer)
