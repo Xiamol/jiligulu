@@ -3,6 +3,7 @@ package com.jiligulu.app.ui.main
 import androidx.compose.animation.core.spring
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.MutatePriority
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -55,9 +56,10 @@ import com.jiligulu.app.ui.stats.StatsScreen
 import com.jiligulu.app.ui.components.forwardMainPageSwipe
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.receiveAsFlow
 
 /** Main destinations own scroll state; the companion occupies a fixed header slot. */
 @Composable
@@ -106,10 +108,9 @@ fun MainScreen(
     }
     val pageDragEnd: (Float) -> Unit = { velocity -> finishDrag(velocity) }
     LaunchedEffect(pager, requests) {
-        requests.receiveAsFlow().collectLatest { request ->
-            val (page, offset) = TabScrubPosition.pageOffset(request.progress)
-            pager.scrollToPage(page, offset)
-            if (request is TabMotion.Settle) {
+        var settling: Job? = null
+        fun startSettle(request: TabMotion.Settle) {
+            settling = launch {
                 try {
                     pager.animateScrollToPage(request.target,
                         animationSpec = spring(dampingRatio = 1f, stiffness = 650f, visibilityThreshold = 1f))
@@ -118,6 +119,35 @@ fun MainScreen(
                     if (request.sequence == motion.sequence) manipulating = false
                 }
             }
+        }
+        while (true) {
+            val request = requests.receive()
+            // New press/tap may interrupt a previous settle. MOVE events share one scroll
+            // mutation below rather than cancelling and rebuilding the pager on every frame.
+            settling?.cancelAndJoin()
+            settling = null
+            if (request is TabMotion.Settle) {
+                startSettle(request)
+                continue
+            }
+            var release: TabMotion.Settle? = null
+            pager.scroll(MutatePriority.UserInput) {
+                fun applyPosition(value: Float) {
+                    val current = pager.currentPage + pager.currentPageOffsetFraction
+                    val stride = (pager.layoutInfo.pageSize + pager.layoutInfo.pageSpacing).toFloat().coerceAtLeast(1f)
+                    scrollBy((value.coerceIn(0f, 1f) - current) * stride)
+                }
+                applyPosition(request.progress)
+                while (true) {
+                    val next = requests.receive()
+                    applyPosition(next.progress)
+                    if (next is TabMotion.Settle) {
+                        release = next
+                        break
+                    }
+                }
+            }
+            release?.let(::startSettle)
         }
     }
     LaunchedEffect(pager) {

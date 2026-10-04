@@ -17,6 +17,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.text.style.TextOverflow
@@ -60,10 +61,11 @@ fun LedgerBillRow(
         }
         if (showDivider) {
             val color = MaterialTheme.colorScheme.outline
-            Canvas(Modifier.fillMaxWidth().padding(horizontal = 16.dp).height(1.dp)) {
-                drawLine(color, Offset.Zero, Offset(size.width, 0f), strokeWidth = 1.dp.toPx(),
-                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(4.dp.toPx(), 4.dp.toPx())))
-            }
+            Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp).height(1.dp).drawWithCache {
+                val stroke = 1.dp.toPx()
+                val effect = PathEffect.dashPathEffect(floatArrayOf(4.dp.toPx(), 4.dp.toPx()))
+                onDrawBehind { drawLine(color, Offset.Zero, Offset(size.width, 0f), strokeWidth = stroke, pathEffect = effect) }
+            })
         }
     }
 }

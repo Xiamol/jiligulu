@@ -1,6 +1,5 @@
 package com.jiligulu.app.ui.home
 
-import com.jiligulu.app.ui.components.edgeSpring
 import com.jiligulu.app.data.littleworld.Sticker
 import com.jiligulu.app.ui.stickers.StickerDrawer
 import androidx.compose.material.icons.outlined.StickyNote2
@@ -22,11 +21,7 @@ import androidx.compose.ui.unit.Velocity
 import androidx.compose.foundation.lazy.LazyListState
 import kotlin.math.abs
 import kotlinx.coroutines.flow.first
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.core.spring
 import androidx.compose.ui.platform.LocalDensity
-import kotlinx.coroutines.Job
 import androidx.compose.foundation.layout.*
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
@@ -156,26 +151,30 @@ internal fun HomeContent(
     val gate = remember { StickyPullGate() }
     val effectScope = rememberCoroutineScope()
     val density = LocalDensity.current.density
-    var stretch by remember { mutableFloatStateOf(0f) }
-    val rebound = remember { Animatable(0f) }
-    var reboundJob by remember { mutableStateOf<Job?>(null) }
+    val springMotion = remember(density) { EdgeSpringMotion(40f * density) }
+    val springBar = remember { EdgeSpringState() }
     fun pullFeedback(delta: Float) {
-        if (delta > 0) {
-            reboundJob?.cancel()
-            stretch = (stretch + delta * .24f).coerceAtMost(40f * density)
+        if (springMotion.touching && abs(delta) > .1f) {
+            springBar.visible = true
+            springMotion.pull(delta)
         }
     }
     fun releaseFeedback() {
-        val distance = stretch
-        if (distance <= 0f) return
-        reboundJob?.cancel()
-        reboundJob = effectScope.launch {
-            rebound.snapTo(distance)
-            rebound.animateTo(0f, spring(dampingRatio = .72f, stiffness = 500f, visibilityThreshold = .5f)) {
-                stretch = value
-            }
+        springMotion.release(effectScope)
+        springBar.hideJob?.cancel()
+        if (springBar.visible) springBar.hideJob = effectScope.launch {
+            kotlinx.coroutines.delay(800)
+            springBar.visible = false
+            springBar.hideJob = null
         }
     }
+    fun resetFeedback() {
+        springMotion.reset()
+        springBar.hideJob?.cancel()
+        springBar.hideJob = null
+        springBar.visible = false
+    }
+    DisposableEffect(springMotion) { onDispose { resetFeedback() } }
     var resumeIndex by rememberSaveable { mutableIntStateOf(-1) }
     var resumeOffset by rememberSaveable { mutableIntStateOf(0) }
     val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
@@ -184,6 +183,8 @@ internal fun HomeContent(
             if (event == androidx.lifecycle.Lifecycle.Event.ON_PAUSE) {
                 resumeIndex = outer.firstVisibleItemIndex
                 resumeOffset = outer.firstVisibleItemScrollOffset
+                resetFeedback()
+                gate.reset()
             } else if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME && resumeIndex >= 0) {
                 val index = resumeIndex; val offset = resumeOffset
                 effectScope.launch {
@@ -200,18 +201,26 @@ internal fun HomeContent(
 
     LaunchedEffect(active, selectedDay) {
         gate.reset()
-        reboundJob?.cancel()
-        stretch = 0f
+        resetFeedback()
     }
     fun pinned() = outer.firstVisibleItemIndex >= 3
     fun innerAtTop() = activeInner?.canScrollBackward != true
-    val nested = remember(outer, gate) { object : NestedScrollConnection {
+    val nested = remember(outer, gate, springMotion) { object : NestedScrollConnection {
         override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-            if (available.y < 0 && outer.canScrollForward) return Offset(0f, -outer.dispatchRawDelta(-available.y))
+            if (available.y < 0) {
+                val usedByOverview = if (outer.canScrollForward) -outer.dispatchRawDelta(-available.y) else 0f
+                val remaining = available.y - usedByOverview
+                if (pinned() && remaining < -.1f) {
+                    val usedByBills = activeInner?.let { -it.dispatchRawDelta(-remaining) } ?: 0f
+                    val leftover = (remaining - usedByBills).coerceAtMost(0f)
+                    if (source == NestedScrollSource.UserInput) pullFeedback(leftover)
+                    // The same owner handles both ends. The child must not apply a second
+                    // transform at bottom and leave it behind when the parent eats a pull.
+                    return Offset(0f, available.y)
+                }
+                return Offset(0f, usedByOverview)
+            }
             if (available.y > 0 && pinned() && !gate.allowExpand) {
-                // A pull on the heading/date starts the outer scrollable, while a pull on
-                // a bill starts the inner one. Route both through one boundary owner so
-                // neither can expand the overview before the bill list has reached top.
                 val usedByBills = activeInner?.let { -it.dispatchRawDelta(-available.y) } ?: 0f
                 val leftover = (available.y - usedByBills).coerceAtLeast(0f)
                 if (leftover > .1f) {
@@ -224,34 +233,35 @@ internal fun HomeContent(
         }
         override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
             if (pinned() && innerAtTop() && !gate.allowExpand && (available.y > 0 || consumed.y > 0)) gate.blockedAtTop()
-            if (available.y > 0 && pinned() && !gate.allowExpand) {
+            if (pinned() && (available.y < 0 || available.y > 0 && !gate.allowExpand)) {
                 if (source == NestedScrollSource.UserInput) pullFeedback(available.y)
                 return Offset(0f, available.y)
             }
             return Offset.Zero
         }
-        override suspend fun onPreFling(available: Velocity): Velocity =
-            if (available.y > 0 && pinned() && innerAtTop() && !gate.allowExpand) Velocity(0f, available.y) else Velocity.Zero
+        override suspend fun onPreFling(available: Velocity): Velocity = when {
+            available.y > 0 && pinned() && innerAtTop() && !gate.allowExpand -> Velocity(0f, available.y)
+            available.y < 0 && pinned() && activeInner?.canScrollForward != true -> Velocity(0f, available.y)
+            else -> Velocity.Zero
+        }
         override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity =
-            if (available.y > 0 && pinned() && !gate.allowExpand) Velocity(0f, available.y) else Velocity.Zero
+            if (pinned() && (available.y < 0 || available.y > 0 && !gate.allowExpand)) Velocity(0f, available.y) else Velocity.Zero
     } }
-    val observeGesture = Modifier.pointerInput(gate) {
+    val observeGesture = Modifier.pointerInput(gate, springMotion) {
         awaitEachGesture {
             val first = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
             gate.begin(pinned(), innerAtTop())
-            if (gate.allowExpand) {
-                reboundJob?.cancel()
-                stretch = 0f
-            }
-            var finalPosition = first.position
+            springMotion.beginTouch()
+            springBar.hideJob?.cancel()
+            if (gate.allowExpand) springMotion.clear()
+            var travel = Offset.Zero
             var completed = false
             try {
                 do {
                     val event = awaitPointerEvent(PointerEventPass.Initial)
-                    event.changes.firstOrNull { it.id == first.id }?.let { finalPosition = it.position }
+                    event.changes.firstOrNull { it.id == first.id }?.let { travel += it.position - it.previousPosition }
                 } while (event.changes.any { it.pressed })
-                val distance = finalPosition - first.position
-                gate.finish(pinned(), innerAtTop(), distance.y > viewConfiguration.touchSlop && distance.y > abs(distance.x))
+                gate.finish(pinned(), innerAtTop(), travel.y > viewConfiguration.touchSlop && travel.y > abs(travel.x))
                 completed = true
             } finally {
                 if (!completed) gate.reset()
@@ -336,7 +346,7 @@ internal fun HomeContent(
                         DailyTotals(snapshot.bills, rows.size)
                         Spacer(Modifier.height(10.dp))
                         Box(Modifier.fillMaxWidth().weight(1f)) {
-                            LazyColumn(Modifier.fillMaxSize().graphicsLayer { translationY = stretch }.edgeSpring({ inner.canScrollBackward }, { inner.canScrollForward }, topEnabled = false).testTag(if (pageDay == selectedDay) "home-day-bills" else "home-neighbor-bills"), state = inner) {
+                            LazyColumn(Modifier.fillMaxSize().graphicsLayer { translationY = springMotion.offset }.testTag(if (pageDay == selectedDay) "home-day-bills" else "home-neighbor-bills"), state = inner) {
                                 if (rows.isEmpty()) item {
                                     Column(Modifier.fillParentMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally,
                                         verticalArrangement = Arrangement.Center) {
@@ -354,7 +364,7 @@ internal fun HomeContent(
                                         onClick = { onBillClick(bill.id) }, modifier = Modifier.clip(shape), showDivider = index < rows.lastIndex)
                                 }
                             }
-                            LedgerScrollBar(inner, Modifier.align(Alignment.CenterEnd), forceVisible = pinGestureScrolling)
+                            LedgerScrollBar(inner, Modifier.align(Alignment.CenterEnd), forceVisible = pinGestureScrolling || springBar.visible)
                         }
                     }
                     }

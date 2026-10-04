@@ -2,7 +2,8 @@ package com.jiligulu.app.ui.main
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -23,15 +24,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
@@ -57,31 +56,52 @@ internal fun MainTabNavigation(
     val start by rememberUpdatedState(onScrubStart)
     val drag by rememberUpdatedState(onScrub)
     val end by rememberUpdatedState(onScrubEnd)
-    val position by rememberUpdatedState(progress)
-    var dragStart by remember { mutableFloatStateOf(0f) }
-    var dragPixels by remember { mutableFloatStateOf(0f) }
+    val select by rememberUpdatedState(onSelect)
     val thumbWidth = 70.dp
     val thumbPx = with(density) { thumbWidth.toPx() }
 
     Box(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).navigationBarsPadding()) {
         androidx.compose.foundation.layout.BoxWithConstraints(
             Modifier.fillMaxWidth().height(80.dp).testTag("main-tab-scrubber")
-                .pointerInput(Unit) {
-                    detectDragGesturesAfterLongPress(
-                        onDragStart = {
-                            dragStart = position
-                            dragPixels = 0f
-                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                            start()
-                        },
-                        onDrag = { change, amount ->
-                            change.consume()
-                            dragPixels += amount.x
-                            drag(TabScrubPosition.fromPixels(dragStart, dragPixels, size.width / 2f))
-                        },
-                        onDragEnd = { end() },
-                        onDragCancel = { end() }
-                    )
+                .pointerInput(pager, thumbPx) {
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                        // Own physical touch; selectable below still supplies accessibility/keyboard clicks.
+                        // DOWN freezes an in-flight spring without selecting another destination.
+                        down.consume()
+                        val pressedProgress = (pager.currentPage + pager.currentPageOffsetFraction).coerceIn(0f, 1f)
+                        val width = size.width.toFloat()
+                        val grab = TabScrubPosition.grabOffset(down.position.x, pressedProgress, width, thumbPx)
+                        val slop = viewConfiguration.touchSlop
+                        var dragging = false
+                        var finished = false
+                        start()
+                        try {
+                            while (true) {
+                                val event = awaitPointerEvent(PointerEventPass.Initial)
+                                if (event.changes.size != 1) break
+                                val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                val distance = change.position - down.position
+                                if (!dragging && abs(distance.y) > slop && abs(distance.y) > abs(distance.x)) break
+                                if (!dragging && TabScrubPosition.dragged(distance.x, distance.y, slop)) {
+                                    dragging = true
+                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                }
+                                change.consume()
+                                if (dragging) {
+                                    // Absolute position includes the movement before crossing touch slop.
+                                    drag(TabScrubPosition.fromTrack(change.position.x, width, grab))
+                                }
+                                if (!change.pressed) {
+                                    if (dragging) end() else select(TabScrubPosition.tappedTab(change.position.x, width))
+                                    finished = true
+                                    break
+                                }
+                            }
+                        } finally {
+                            if (!finished) end()
+                        }
+                    }
                 }
         ) {
             val widthPx = constraints.maxWidth.toFloat()

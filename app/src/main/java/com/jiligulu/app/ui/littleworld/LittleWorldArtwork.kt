@@ -37,12 +37,16 @@ internal object LittleWorldArtwork {
 internal fun StickerPaperArtwork(modifier: Modifier, tint: Color = Color.White) {
     val resources=LocalContext.current.resources
     val art=remember { LittleWorldArtwork.image(resources,R.drawable.sticker_paper_painting) }
-    Image(art,null,modifier,contentScale=ContentScale.FillBounds,colorFilter=ColorFilter.tint(tint,BlendMode.Modulate))
+    val colorFilter=remember(tint) { ColorFilter.tint(tint,BlendMode.Modulate) }
+    Image(art,null,modifier,contentScale=ContentScale.FillBounds,colorFilter=colorFilter)
 }
+
+private val IllustrationIndices = listOf("🍳","🚇","☕","🍚","🧋","🍊","🥬","🧻","🚕","🅿️","🐱","🍜")
+    .mapIndexed { index, emoji -> emoji to index }.toMap()
 
 @Composable
 internal fun StickerIllustration(emoji: String, modifier: Modifier, fallbackFontSize: TextUnit? = null) {
-    val index=listOf("🍳","🚇","☕","🍚","🧋","🍊","🥬","🧻","🚕","🅿️","🐱","🍜").indexOf(emoji)
+    val index=IllustrationIndices[emoji] ?: -1
     if(index<0) {
         val style=MaterialTheme.typography.headlineMedium
         Text(emoji,modifier,style=if(fallbackFontSize==null)style else style.copy(fontSize=fallbackFontSize,lineHeight=fallbackFontSize*1.2f))
@@ -50,9 +54,10 @@ internal fun StickerIllustration(emoji: String, modifier: Modifier, fallbackFont
     }
     val resources=LocalContext.current.resources
     val art=remember { LittleWorldArtwork.image(resources,R.drawable.sticker_illustrations_atlas) }
+    val cell=remember(art) { IntSize(art.width/4,art.height/3) }
+    val source=remember(index,cell) { IntOffset((index%4)*cell.width,(index/4)*cell.height) }
     Canvas(modifier) {
-        val cell=IntSize(art.width/4,art.height/3)
-        drawImage(art,srcOffset=IntOffset((index%4)*cell.width,(index/4)*cell.height),srcSize=cell,
+        drawImage(art,srcOffset=source,srcSize=cell,
             dstSize=IntSize(size.width.toInt(),size.height.toInt()))
     }
 }

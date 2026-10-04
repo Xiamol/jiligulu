@@ -14,7 +14,9 @@ import androidx.compose.ui.input.nestedscroll.*
 import androidx.compose.ui.input.pointer.*
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Velocity
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 
@@ -24,11 +26,76 @@ class EdgeSpringState {
         internal set
     internal var lastDirection = 0
     internal var until = 0L
+    internal var hideJob: Job? = null
     internal fun begin(now: Long): Int = if (now < until) lastDirection else 0
     internal fun finish(direction: Int, now: Long) {
         lastDirection = direction
         until = if (direction != 0) now + 800 else 0
     }
+}
+
+/** One signed displacement per visible surface. Read offset only in its graphics layer. */
+internal class EdgeSpringMotion(private val limit: Float) {
+    var offset by mutableFloatStateOf(0f)
+        private set
+    var touching = false
+        private set
+    private val rebound = Animatable(0f)
+    private var job: Job? = null
+    private var generation = 0
+
+    fun beginTouch() {
+        generation++
+        job?.cancel()
+        job = null
+        touching = true
+    }
+
+    fun pull(delta: Float) {
+        // Pointer up is observed in Initial, before a scrollable handles its final Main
+        // delta. That late delta must not cancel a rebound that has already started.
+        if (!touching || !delta.isFinite()) return
+        offset = (offset + delta * .24f).coerceIn(-limit, limit)
+    }
+
+    fun clear() {
+        generation++
+        job?.cancel()
+        job = null
+        offset = 0f
+    }
+
+    fun reset() {
+        touching = false
+        clear()
+    }
+
+    fun release(scope: CoroutineScope) {
+        touching = false
+        if (!scope.isActive || abs(offset) < .5f) { clear(); return }
+        val distance = offset
+        val token = ++generation
+        job?.cancel()
+        job = scope.launch {
+            try {
+                rebound.snapTo(distance)
+                rebound.animateTo(0f, spring(dampingRatio = .72f, stiffness = 500f, visibilityThreshold = .5f)) {
+                    if (token == generation && !touching) offset = value
+                }
+            } finally {
+                // An old cancelled animation cannot clear the position of a newer drag.
+                if (token == generation && !touching) {
+                    offset = 0f
+                    job = null
+                }
+            }
+        }
+    }
+}
+
+private class EdgeSpringGesture {
+    var allowDirection = 0
+    var blocked = 0
 }
 
 fun Modifier.edgeSpring(
@@ -41,55 +108,60 @@ fun Modifier.edgeSpring(
     val forward by rememberUpdatedState(canForward)
     val scope = rememberCoroutineScope()
     val limit = with(LocalDensity.current) { 32f * density }
-    var offset by remember { mutableFloatStateOf(0f) }
-    val rebound = remember { Animatable(0f) }
-    var job by remember { mutableStateOf<Job?>(null) }
-    var hideJob by remember { mutableStateOf<Job?>(null) }
-    var touched by remember { mutableStateOf(false) }
-    var allowDirection by remember { mutableIntStateOf(0) }
-    var blocked by remember { mutableIntStateOf(0) }
+    val motion = remember(limit) { EdgeSpringMotion(limit) }
+    val gesture = remember { EdgeSpringGesture() }
+    DisposableEffect(motion, gate) {
+        onDispose {
+            motion.reset()
+            gate.hideJob?.cancel()
+            gate.hideJob = null
+            gate.visible = false
+            gate.finish(0, SystemClock.uptimeMillis())
+        }
+    }
     fun consume(delta: Float, source: NestedScrollSource): Offset {
         val direction = if (delta > 0) 1 else if (delta < 0) -1 else 0
         val edge = (direction == 1 && topEnabled && !backward()) || (direction == -1 && !forward())
-        if (!edge || (handOffOnRepeat && direction == allowDirection)) return Offset.Zero
-        if (source == NestedScrollSource.UserInput && touched) {
-            // Re-grab the displacement at its current position, without snapping to zero.
-            job?.cancel()
-            blocked = direction
+        if (!edge) return Offset.Zero
+        if (handOffOnRepeat && direction == gesture.allowDirection) {
+            motion.clear()
+            return Offset.Zero
+        }
+        if (source == NestedScrollSource.UserInput && motion.touching) {
+            gesture.blocked = direction
             gate.visible = true
-            offset = (offset + delta * .23f).coerceIn(-limit, limit)
+            motion.pull(delta)
         }
         return Offset(0f, delta)
     }
-    val connection = remember(handOffOnRepeat, topEnabled, interceptPre, gate) { object : NestedScrollConnection {
+    val connection = remember(handOffOnRepeat, topEnabled, interceptPre, gate, motion) { object : NestedScrollConnection {
         override fun onPreScroll(available: Offset, source: NestedScrollSource) = if (interceptPre) consume(available.y, source) else Offset.Zero
         override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource) = consume(available.y, source)
         override suspend fun onPreFling(available: Velocity): Velocity =
-            if (blocked != 0) Velocity(0f, available.y) else Velocity.Zero
+            if (gesture.blocked != 0) Velocity(0f, available.y) else Velocity.Zero
     } }
-    this.pointerInput(gate, handOffOnRepeat, topEnabled) {
+    this.pointerInput(gate, motion, handOffOnRepeat, topEnabled) {
         awaitEachGesture {
             awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-            touched = true
-            blocked = 0
-            allowDirection = if (handOffOnRepeat) gate.begin(SystemClock.uptimeMillis()) else 0
-            hideJob?.cancel()
-            do { val event = awaitPointerEvent(PointerEventPass.Initial) } while (event.changes.any { it.pressed })
-            touched = false
-            gate.finish(blocked, SystemClock.uptimeMillis())
-            val distance = offset
-            if (blocked != 0 && distance != 0f) {
-                job?.cancel()
-                job = scope.launch {
-                    rebound.snapTo(distance)
-                    rebound.animateTo(0f, spring(dampingRatio = .72f, stiffness = 500f, visibilityThreshold = .5f)) {
-                        offset = value
-                    }
+            motion.beginTouch()
+            gesture.blocked = 0
+            gesture.allowDirection = if (handOffOnRepeat) gate.begin(SystemClock.uptimeMillis()) else 0
+            gate.hideJob?.cancel()
+            var complete = false
+            try {
+                do { val event = awaitPointerEvent(PointerEventPass.Initial) } while (event.changes.any { it.pressed })
+                complete = true
+            } finally {
+                gate.finish(if (complete) gesture.blocked else 0, SystemClock.uptimeMillis())
+                // Always release, including a tap that interrupts an old spring, cancellation
+                // and a gesture wholly consumed by an ancestor nested scroll connection.
+                motion.release(scope)
+                if (gate.visible && scope.isActive) gate.hideJob = scope.launch {
+                    kotlinx.coroutines.delay(800)
+                    gate.visible = false
+                    gate.hideJob = null
                 }
             }
-            if (gate.visible) hideJob = scope.launch { kotlinx.coroutines.delay(800); gate.visible = false }
         }
-    // Both drag and rebound use one value, read only in the layer phase. A release no longer
-    // shows one frame of the old rebound value, and taps/normal scrolling launch no animation.
-    }.nestedScroll(connection).graphicsLayer { translationY = offset }
+    }.nestedScroll(connection).graphicsLayer { translationY = motion.offset }
 }

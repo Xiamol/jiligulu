@@ -77,6 +77,7 @@ object Routes {
 }
 
 class MainActivity : ComponentActivity() {
+    private val windowRefresh by lazy { com.jiligulu.app.core.ui.WindowRefreshPreference(this) }
     private val futureNoteRequests = MutableStateFlow<String?>(null)
     private val waterRequests = MutableStateFlow(0)
 
@@ -129,6 +130,16 @@ class MainActivity : ComponentActivity() {
         setIntent(intent)
         handleWaterIntent(intent)
         handleFutureNoteIntent(intent)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        windowRefresh.onResume()
+    }
+
+    override fun onPause() {
+        windowRefresh.onPause()
+        super.onPause()
     }
 
     private fun handleFutureNoteIntent(intent: Intent?) {

@@ -2,9 +2,15 @@ package com.jiligulu.app.ui.home
 
 import android.app.Application
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.swipeRight
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performTouchInput
 import org.junit.Assert.assertEquals
@@ -101,5 +107,71 @@ class HomePinGestureTest {
         compose.mainClock.advanceTimeBy(300)
         compose.runOnIdle { assertTrue(heading.fetchSemanticsNode().boundsInRoot.top > initial + 10f) }
     }
+
+
+    @Test fun bottomSpringFollowedImmediatelyByTopPullNeverLeavesAGap() {
+        val today = com.jiligulu.app.core.util.Formatters.dayStart(System.currentTimeMillis())
+        compose.setContent {
+            MaterialTheme { HomeContent(HomeUiState(monthLabel = "2026年10月"), {}, {},
+                selectedDay = today, daySource = { kotlinx.coroutines.flow.flowOf(snapshot(it, "账单")) }, onBillClick = {}) }
+        }
+        compose.waitUntil(4000) { compose.onAllNodesWithText("账单-0").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithTag("home-outer").performScrollToIndex(3)
+        val bills = compose.onNodeWithTag("home-day-bills")
+        val heading = compose.onNodeWithTag("home-ledger-heading")
+        val before = bills.getUnclippedBoundsInRoot().top.value
+        val headingBefore = heading.getUnclippedBoundsInRoot().top.value
+        bills.performTouchInput {
+            down(Offset(width * .5f, height * .75f))
+            moveTo(Offset(width * .5f, height * .3f), delayMillis = 100)
+            up()
+        }
+        // Grab again while the bottom spring is still travelling back.
+        compose.mainClock.advanceTimeBy(16)
+        bills.performTouchInput {
+            down(Offset(width * .5f, height * .2f))
+            moveTo(Offset(width * .5f, height * .65f), delayMillis = 100)
+            up()
+        }
+        compose.mainClock.advanceTimeBy(700)
+        compose.runOnIdle {
+            assertEquals(before, bills.getUnclippedBoundsInRoot().top.value, 1f)
+            assertEquals(headingBefore, heading.getUnclippedBoundsInRoot().top.value, 1f)
+        }
+    }
+
+    @Test fun yesterdayPageThenTopPullReturnsExactlyToItsRestingPosition() {
+        val today = com.jiligulu.app.core.util.Formatters.dayStart(System.currentTimeMillis())
+        val yesterday = com.jiligulu.app.ui.components.shiftLocalDay(today, -1)
+        var selected by mutableStateOf(today)
+        compose.setContent {
+            MaterialTheme { HomeContent(HomeUiState(monthLabel = "2026年10月"), {}, {},
+                selectedDay = selected,
+                daySource = { kotlinx.coroutines.flow.flowOf(snapshot(it, if (it == today) "今天" else "昨天")) },
+                onSelectDay = { selected = it }, onBillClick = {}) }
+        }
+        compose.waitUntil(4000) { compose.onAllNodesWithText("今天-0").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithTag("home-outer").performScrollToIndex(3)
+        compose.onNodeWithTag("home-day-pager").performTouchInput { swipeRight() }
+        compose.waitForIdle()
+        compose.runOnIdle { assertEquals(yesterday, selected) }
+        val bills = compose.onNodeWithTag("home-day-bills")
+        val before = bills.getUnclippedBoundsInRoot().top.value
+        bills.performTouchInput {
+            down(Offset(width * .5f, height * .2f))
+            moveTo(Offset(width * .5f, height * .65f), delayMillis = 100)
+            up()
+        }
+        compose.mainClock.advanceTimeBy(700)
+        compose.runOnIdle { assertEquals(before, bills.getUnclippedBoundsInRoot().top.value, 1f) }
+    }
+
+    private fun snapshot(day: Long, prefix: String): DailyLedgerSnapshot = DailyLedgerSnapshot(day,
+        bills = List(3) { index ->
+            val entity = com.jiligulu.app.data.local.entity.BillEntity(id = day + index + 1,
+                amountFen = 900, type = com.jiligulu.app.data.local.entity.BillType.EXPENSE,
+                categoryId = 1, detail = "$prefix-$index", timestamp = day + (index + 1) * 60000)
+            BillUi(entity.id, "🍚", 20f, 0, entity.detail, "12:00", "-9", true, entity, "吃饭")
+        }, loaded = true)
 
 }
