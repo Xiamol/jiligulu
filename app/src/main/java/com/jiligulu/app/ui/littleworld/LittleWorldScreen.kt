@@ -1,9 +1,7 @@
 package com.jiligulu.app.ui.littleworld
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -18,10 +16,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -32,7 +29,6 @@ import com.jiligulu.app.data.littleworld.LittleWorldState
 import com.jiligulu.app.data.prefs.LittleWorldSkin
 import com.jiligulu.app.data.local.entity.BillEntity
 import com.jiligulu.app.data.local.entity.BillType
-import com.jiligulu.app.R
 import com.jiligulu.app.ui.billdetail.BillDetailSheet
 import com.jiligulu.app.ui.calculator.CalculatorDialog
 import com.jiligulu.app.ui.components.GuluDialog
@@ -144,15 +140,14 @@ fun LittleWorldScreen(
         }
         }
         Box(Modifier.weight(1f)) {
-        skin?.let { LittleWorldSkinArtwork(it, Modifier.matchParentSize()) }
-        SpringLazyColumn(contentPadding = PaddingValues(start = 26.dp, top = 48.dp, end = 26.dp, bottom = 64.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxSize()) {
+        SpringLazyColumn(contentPadding = PaddingValues(start = 18.dp, top = 16.dp, end = 18.dp, bottom = 22.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxSize()) {
             item {
-                LifeDeskCorner(state, date, onOpenWishBook, { showFavorites = true })
+                LifeDeskCorner(state, date, onOpenWishBook, { showFavorites = true }, skin)
             }
             item {
                 Box(Modifier.fillMaxWidth().padding(horizontal = 4.dp).rotate(-1.2f)) {
-                    StickerPaperArtwork(Modifier.matchParentSize(), PaperNoteLight)
+                    StickerPaperArtwork(Modifier.matchParentSize(), skin?.noteColor ?: PaperNoteLight)
                     Column(Modifier.padding(horizontal = 32.dp).padding(top = 20.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text("今日小签", fontFamily = GuluBrandFont, fontWeight = FontWeight.Normal,
@@ -190,24 +185,21 @@ fun LittleWorldScreen(
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        WorldPaperTile("⭐", "星星愿望册", "慢慢装满小愿望", -1.8f, Color(0xFFF4EAFB), onOpenWishBook, Modifier.weight(1f), wishJar = true)
-                        WorldPaperTile("💌", "给未来的信", "让时间替你递信", 1.4f, Color(0xFFFFECEC), onOpenFutureNotes, Modifier.weight(1f))
+                        WorldPaperTile("⭐", "星星愿望册", "慢慢装满小愿望", -1.8f, Color(0xFFF4EAFB), onOpenWishBook, Modifier.weight(1f), wishJar = true, skin = skin)
+                        WorldPaperTile("💌", "给未来的信", "让时间替你递信", 1.4f, Color(0xFFFFECEC), onOpenFutureNotes, Modifier.weight(1f), skin = skin)
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        WorldPaperTile("📸", "生活纪念册", "照片与周明信片", 1.3f, Color(0xFFEAF3E8), onOpenMemories, Modifier.weight(1f))
-                        WorldPaperTile("🧮", "阿噜小算盘", "算好就能记一笔", -1.5f, Color(0xFFFFF2D7), { showCalculator = true }, Modifier.weight(1f))
+                        WorldPaperTile("📸", "生活纪念册", "照片与周明信片", 1.3f, Color(0xFFEAF3E8), onOpenMemories, Modifier.weight(1f), skin = skin)
+                        WorldPaperTile("🧮", "阿噜小算盘", "算好就能记一笔", -1.5f, Color(0xFFFFF2D7), { showCalculator = true }, Modifier.weight(1f), skin = skin)
                     }
                 }
             }
             item {
-                Box(Modifier.fillMaxWidth()) {
-                val clearLeftCorner = skin == LittleWorldSkin.MOONLIGHT || skin == LittleWorldSkin.WOODLAND
-                Surface(shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surface,
-                    modifier = Modifier.fillMaxWidth(.76f).align(if (clearLeftCorner) Alignment.CenterEnd else Alignment.CenterStart),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = .55f))) {
-                    Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Box(Modifier.fillMaxWidth().rotate(.6f)) {
+                    StickerPaperArtwork(Modifier.matchParentSize(), skin?.paperColor ?: PaperNoteLight)
+                    Column(Modifier.fillMaxWidth().padding(start = 68.dp, end = 22.dp, top = 16.dp, bottom = 14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("🕰️  账单时光机", fontFamily = GuluBrandFont, fontWeight = FontWeight.Normal, fontSize = 16.sp, modifier = Modifier.weight(1f))
+                            Text("账单时光机", fontFamily = GuluBrandFont, fontWeight = FontWeight.Normal, fontSize = 16.sp, modifier = Modifier.weight(1f))
                             FilterChip(selected = state.timeMachineEnabled, onClick = { perform { repository.setTimeMachine(!state.timeMachineEnabled) } },
                                 label = { Text(if (state.timeMachineEnabled) "开着" else "歇会儿", style = MaterialTheme.typography.labelSmall) }, modifier = Modifier.height(32.dp))
                         }
@@ -227,7 +219,8 @@ fun LittleWorldScreen(
                             }
                         }
                     }
-                }
+                    skin?.let { selected -> LittleWorldSkinSticker(selected, SkinStickerPart.KEEPSAKE,
+                        Modifier.size(70.dp, 52.dp).align(Alignment.CenterStart).offset(x = (-3).dp).rotate(-6f)) }
                 }
             }
             error?.let { message -> item { Text(message, color = MaterialTheme.colorScheme.error) } }
@@ -266,14 +259,13 @@ internal fun WorldPageHeader(title: String, subtitle: String, onBack: () -> Unit
 }
 
 @Composable
-private fun LifeDeskCorner(state: LittleWorldState, date: LocalDate, onOpenWishBook: () -> Unit, onFavorites: () -> Unit) {
+private fun LifeDeskCorner(state: LittleWorldState, date: LocalDate, onOpenWishBook: () -> Unit, onFavorites: () -> Unit,
+    skin: LittleWorldSkin?) {
     val featured = remember(state.wishes) { state.wishes.firstOrNull { it.completedAt == null }
         ?: state.wishes.maxByOrNull { it.completedAt ?: it.createdAt } }
-    val resources = LocalContext.current.resources
-    val backdrop = remember(resources) { LittleWorldArtwork.image(resources, R.drawable.sticker_wall_board) }
-    BoxWithConstraints(Modifier.fillMaxWidth().height(148.dp).clip(RoundedCornerShape(22.dp)).background(PaperNoteLight)) {
-        Image(backdrop, null, Modifier.matchParentSize(), contentScale = ContentScale.Crop, alignment = Alignment.TopStart)
-        Row(Modifier.fillMaxWidth().padding(start = 15.dp, end = 9.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+    BoxWithConstraints(Modifier.fillMaxWidth().height(156.dp).rotate(-.6f)) {
+        StickerPaperArtwork(Modifier.matchParentSize(), skin?.noteColor ?: PaperNoteLight)
+        Row(Modifier.fillMaxWidth().padding(start = 34.dp, end = 26.dp, top = 13.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("阿噜的生活桌", fontFamily = GuluBrandFont, fontWeight = FontWeight.Normal,
                 fontSize = 20.sp, color = GuluPurpleDeep, modifier = Modifier.weight(1f))
             Text("${date.monthValue}/${date.dayOfMonth}", style = MaterialTheme.typography.labelSmall, color = PaperInkLight)
@@ -285,10 +277,10 @@ private fun LifeDeskCorner(state: LittleWorldState, date: LocalDate, onOpenWishB
             }
         }
         val progress = featured?.let { (it.savedFen.toDouble() / it.targetFen.coerceAtLeast(1)).toFloat().coerceIn(0f, 1f) } ?: 0f
-        StarWishJar(progress, Modifier.width(66.dp).height(85.dp).align(Alignment.TopStart).offset(x = 10.dp, y = 38.dp)
+        StarWishJar(progress, Modifier.width(66.dp).height(85.dp).align(Alignment.TopStart).offset(x = 18.dp, y = 43.dp)
             .clickable(onClickLabel = "打开星星愿望册", onClick = onOpenWishBook), complete = featured?.completedAt != null)
         val noteWidth = (maxWidth - 164.dp).coerceIn(108.dp, 148.dp)
-        Box(Modifier.width(noteWidth).height(82.dp).align(Alignment.Center).offset(y = 10.dp).rotate(-3f)
+        Box(Modifier.width(noteWidth).height(82.dp).align(Alignment.Center).offset(y = 6.dp).rotate(-3f)
             .clickable(onClickLabel = "打开星星愿望册", onClick = onOpenWishBook)) {
             StickerPaperArtwork(Modifier.matchParentSize(), Color(0xFFFFF6DF))
             Column(Modifier.fillMaxSize().padding(horizontal = 16.dp).padding(top = 16.dp, bottom = 8.dp),
@@ -301,19 +293,21 @@ private fun LifeDeskCorner(state: LittleWorldState, date: LocalDate, onOpenWishB
                     color = PaperInkLight, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
-        GuluMascot(Modifier.size(69.dp).align(Alignment.TopEnd).offset(x = (-6).dp, y = 48.dp))
-        Row(Modifier.fillMaxWidth().align(Alignment.BottomCenter).padding(bottom = 8.dp), horizontalArrangement = Arrangement.Center) {
+        GuluMascot(Modifier.size(69.dp).align(Alignment.TopEnd).offset(x = (-13).dp, y = 48.dp))
+        Row(Modifier.fillMaxWidth().align(Alignment.BottomCenter).padding(bottom = 16.dp), horizontalArrangement = Arrangement.Center) {
             Text("星瓶 ${state.wishes.size}   ·   来信 ${state.futureNotes.size}   ·   明信片 ${state.cards.size}",
                 style = MaterialTheme.typography.labelSmall, color = PaperInkLight)
         }
+        skin?.let { selected -> LittleWorldSkinSticker(selected, SkinStickerPart.TAB,
+            Modifier.size(72.dp, 54.dp).align(Alignment.TopCenter).offset(x = 29.dp, y = (-12).dp).rotate(5f)) }
     }
 }
 
 @Composable
 private fun WorldPaperTile(emoji: String, title: String, subtitle: String, angle: Float, tint: Color,
-    onClick: () -> Unit, modifier: Modifier = Modifier, wishJar: Boolean = false) {
+    onClick: () -> Unit, modifier: Modifier = Modifier, wishJar: Boolean = false, skin: LittleWorldSkin? = null) {
     Box(modifier.height(112.dp).rotate(angle).clickable(onClickLabel = "打开$title", onClick = onClick)) {
-        StickerPaperArtwork(Modifier.matchParentSize(), tint)
+        StickerPaperArtwork(Modifier.matchParentSize(), skin?.let { lerp(tint, it.noteColor, .3f) } ?: tint)
         Column(Modifier.fillMaxSize().padding(horizontal = 12.dp).padding(top = 13.dp, bottom = 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
             if (wishJar) StarWishJar(.55f, Modifier.size(36.dp))

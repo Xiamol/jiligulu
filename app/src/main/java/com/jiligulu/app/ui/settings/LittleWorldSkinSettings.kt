@@ -62,7 +62,7 @@ internal fun LittleWorldSkinSettings(enabled: Boolean) {
                         }) {
                         Column(Modifier.padding(7.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                             Box(Modifier.fillMaxWidth().height(116.dp).clip(RoundedCornerShape(10.dp))) {
-                                LittleWorldSkinArtwork(skin, Modifier.align(Alignment.Center).fillMaxHeight().aspectRatio(2f / 3f), preview = true)
+                                LittleWorldSkinArtwork(skin, Modifier.fillMaxSize().padding(horizontal = 8.dp))
                             }
                             Row(Modifier.fillMaxWidth().padding(horizontal = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Text(skin.title, style = MaterialTheme.typography.labelMedium, modifier = Modifier.weight(1f))

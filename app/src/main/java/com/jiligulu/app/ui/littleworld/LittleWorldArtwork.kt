@@ -27,7 +27,8 @@ internal object LittleWorldArtwork {
     private val cache = ConcurrentHashMap<Int, ImageBitmap>()
     fun preload(resources: Resources) {
         listOf(R.drawable.sticker_paper_painting,R.drawable.sticker_wall_board,R.drawable.sticker_illustrations_atlas,
-            R.drawable.wish_star_bottle,R.drawable.wish_puffy_stars_atlas_v3).forEach { image(resources,it) }
+            R.drawable.wish_star_bottle,R.drawable.wish_puffy_stars_atlas_v3,
+            R.drawable.world_skin_sticker_atlas_v1).forEach { image(resources,it) }
     }
     fun image(resources: Resources, id: Int): ImageBitmap = cache.computeIfAbsent(id) {
         BitmapFactory.decodeResource(resources,id,BitmapFactory.Options().apply { inSampleSize=2; inScaled=false }).asImageBitmap()
