@@ -17,6 +17,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
@@ -45,7 +46,6 @@ internal fun DraftEditorRow(
 ) {
     var showCategories by rememberSaveable(tag) { mutableStateOf(false) }
     var showTime by rememberSaveable(tag) { mutableStateOf(false) }
-    var showType by rememberSaveable(tag) { mutableStateOf(false) }
     var showNote by rememberSaveable(tag) { mutableStateOf(false) }
     val category = remember(categories, draft.categoryName) {
         categories.firstOrNull { it.name.equals(draft.categoryName, true) }
@@ -114,23 +114,13 @@ internal fun DraftEditorRow(
                         color = if (draft.requiresTimeInput) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
                         overflow = TextOverflow.Ellipsis)
             }
-            Box {
-                Row(Modifier.clickable(enabled = enabled) { showType = true }
-                    .padding(vertical = 7.dp, horizontal = 2.dp).testTag("draft-type-$tag"),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(if (draft.type == BillType.EXPENSE) "支出" else "收入", color = moneyColor,
-                        style = MaterialTheme.typography.labelSmall)
-                    Icon(Icons.Outlined.ExpandMore, null, Modifier.size(12.dp), tint = moneyColor)
-                }
-                DropdownMenu(expanded = showType && enabled, onDismissRequest = { showType = false },
-                    modifier = Modifier.widthIn(min = 100.dp)) {
-                    listOf(BillType.EXPENSE, BillType.INCOME).forEach { type ->
-                        DropdownMenuItem(text = { Text(if (type == BillType.EXPENSE) "支出" else "收入",
-                            color = if (type == BillType.EXPENSE) ExpenseCoral else IncomeGreen) },
-                            onClick = { onUpdate { it.copy(type = type) }; showType = false })
-                    }
-                }
+            Row(Modifier.widthIn(min = 40.dp).clickable(enabled = enabled, role = Role.Button,
+                onClickLabel = if (draft.type == BillType.EXPENSE) "切换为收入" else "切换为支出") {
+                    onUpdate { it.copy(type = if (it.type == BillType.EXPENSE) BillType.INCOME else BillType.EXPENSE) }
+                }.padding(vertical = 7.dp, horizontal = 6.dp).testTag("draft-type-$tag"),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+                Text(if (draft.type == BillType.EXPENSE) "支出" else "收入", color = moneyColor,
+                    style = MaterialTheme.typography.labelSmall)
             }
             Icon(Icons.Outlined.EditNote, if (draft.note.isBlank()) "添加备注" else "编辑备注",
                 Modifier.size(26.dp).clickable(enabled = enabled) { showNote = !showNote }.padding(5.dp),
