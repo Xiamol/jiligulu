@@ -1,7 +1,6 @@
 package com.jiligulu.app.ui.littleworld
 
 import android.graphics.Paint
-import android.os.SystemClock
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
@@ -37,6 +36,8 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
@@ -63,15 +64,13 @@ internal fun ColumnScope.SecretXiangqiGame(state: XiangqiState, mode: XiangqiPla
     onHost: () -> Unit, onJoin: (String) -> Unit, onDisconnect: () -> Unit, onPuzzle:(XiangqiState)->Unit,
     remoteSelection: GridCell? = null, onSelectionChanged: (GridCell?) -> Unit = {},
     helpBusy: Boolean = false, assistedSelection: GridCell? = null,
-    onSecretHelp: () -> Unit = {}, onModalOpened: () -> Unit = {}) {
-    val taps = remember(state.board, state.turnSide, mode, paused, helpBusy) { HiddenGameHelpTapSequence() }
-    val latestHelp by rememberUpdatedState(onSecretHelp)
+    onModalOpened: () -> Unit = {}, onControlsBottom: (Float) -> Unit = {}) {
     var modeMenu by remember { mutableStateOf(false) }
     val modeNames = remember { mapOf(XiangqiPlayMode.CPU to "和阿噜下", XiangqiPlayMode.ONLINE to "远程双人",
         XiangqiPlayMode.LAN to "局域网双人", XiangqiPlayMode.HOTSEAT to "同屏双人") }
     Row(Modifier.width(boardWidth).height(42.dp), verticalAlignment = Alignment.CenterVertically) {
         Box {
-            TextButton(onClick = { taps.reset(); onModalOpened(); modeMenu = true }, contentPadding = PaddingValues(horizontal = 8.dp)) {
+            TextButton(onClick = { onModalOpened(); modeMenu = true }, contentPadding = PaddingValues(horizontal = 8.dp)) {
                 Text(modeNames.getValue(mode), color = Color(0xFF766A7F))
                 Icon(Icons.Outlined.ExpandMore, "选择对局方式", Modifier.size(18.dp), tint = Color(0xFF928497))
             }
@@ -95,7 +94,7 @@ internal fun ColumnScope.SecretXiangqiGame(state: XiangqiState, mode: XiangqiPla
     var showRules by remember { mutableStateOf(false) }
     if (networkMode && !lan.connected) {
         SecretXiangqiConnection(lan, online = mode == XiangqiPlayMode.ONLINE, onHost, onJoin, onDisconnect,
-            onFallback = { onMode(XiangqiPlayMode.LAN) })
+            onFallback = { onMode(XiangqiPlayMode.LAN) }, onControlsBottom = onControlsBottom)
         return
     }
     if(choosePuzzle) com.jiligulu.app.ui.components.GuluDialog("一着小残局",{choosePuzzle=false},compact=true) {
@@ -143,9 +142,7 @@ internal fun ColumnScope.SecretXiangqiGame(state: XiangqiState, mode: XiangqiPla
     XiangqiBoard(state, boardWidth, canMove,
         flipped = networkMode && lan.localSide == XiangqiSide.BLACK, onMove = onMove,
         remoteSelection = remoteSelection, onSelectionChanged = onSelectionChanged, assistedSelection = assistedSelection)
-    Text(status, modifier = Modifier.padding(vertical = 10.dp).width(boardWidth).pointerInput(taps, canMove) {
-        detectTapGestures { if (taps.tap(SystemClock.elapsedRealtime(), canMove)) latestHelp() }
-    }, color = Color(0xFF766A7F),
+    Text(status, modifier = Modifier.padding(vertical = 10.dp).width(boardWidth), color = Color(0xFF766A7F),
         style = MaterialTheme.typography.bodySmall, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
         Row(Modifier.width(boardWidth).padding(horizontal = 6.dp, vertical = 4.dp)) {
             if (networkMode) {
@@ -156,14 +153,16 @@ internal fun ColumnScope.SecretXiangqiGame(state: XiangqiState, mode: XiangqiPla
                 GameIconTool(if (paused) Icons.Outlined.PlayCircleOutline else Icons.Outlined.PauseCircleOutline,
                     if (paused) "继续" else "暂停", onToggle, Modifier.weight(1f), enabled = state.outcome == XiangqiOutcome.PLAYING)
                 GameIconTool(Icons.Outlined.Refresh, "重开", onRestart, Modifier.weight(1f))
-                GameIconTool(Icons.Outlined.Extension, "残局", { taps.reset(); onModalOpened(); if (!paused) onToggle(); choosePuzzle = true }, Modifier.weight(1f))
+                GameIconTool(Icons.Outlined.Extension, "残局", { onModalOpened(); if (!paused) onToggle(); choosePuzzle = true }, Modifier.weight(1f))
             }
-            GameIconTool(Icons.Outlined.HelpOutline, "规则", { taps.reset(); onModalOpened(); if (!networkMode && !paused) onToggle(); showRules = true }, Modifier.weight(1f))
+            GameIconTool(Icons.Outlined.HelpOutline, "规则", { onModalOpened(); if (!networkMode && !paused) onToggle(); showRules = true }, Modifier.weight(1f))
         }
+    Column(Modifier.onGloballyPositioned { onControlsBottom(it.boundsInRoot().bottom) }, horizontalAlignment = Alignment.CenterHorizontally) {
     Text(if (networkMode) "联机棋桌 · 不限时" else "每手 ${thinkingClock.durationMillis / 1000} 秒 · 点小钟可以调整",
         Modifier.padding(top = 8.dp, bottom = 8.dp), style = MaterialTheme.typography.labelSmall, color = Color(0xFF9C8D98))
     lan.error?.takeIf { networkMode }?.let {
         Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+    }
     }
 }
 
@@ -225,7 +224,7 @@ internal fun GameIconTool(icon: ImageVector, label: String, onClick: () -> Unit,
 
 @Composable
 private fun ColumnScope.SecretXiangqiConnection(lan: XiangqiLanUiState, online: Boolean, onHost: () -> Unit,
-    onJoin: (String) -> Unit, onDisconnect: () -> Unit, onFallback: () -> Unit) {
+    onJoin: (String) -> Unit, onDisconnect: () -> Unit, onFallback: () -> Unit, onControlsBottom: (Float) -> Unit) {
     var address by rememberSaveable(online) { mutableStateOf("") }
     Box(Modifier.weight(1f).fillMaxWidth().imePadding(), contentAlignment = Alignment.Center) {
     com.jiligulu.app.ui.components.SpringScrollColumn(Modifier.fillMaxWidth().padding(start = 8.dp, top = 12.dp, bottom = 12.dp),
@@ -268,7 +267,7 @@ private fun ColumnScope.SecretXiangqiConnection(lan: XiangqiLanUiState, online: 
     Text("切去分享时，棋桌会替你留两分钟。", Modifier.padding(top = 10.dp),
         style = MaterialTheme.typography.labelSmall, color = Color(0xFF9C8D98))
     if (online) TextButton(onClick = onFallback) { Text("也可以改用局域网双人") }
-    Spacer(Modifier.height(12.dp))
+    Spacer(Modifier.height(12.dp).onGloballyPositioned { onControlsBottom(it.boundsInRoot().bottom) })
     }
     }
 }

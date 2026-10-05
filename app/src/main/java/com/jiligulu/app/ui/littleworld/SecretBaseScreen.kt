@@ -7,6 +7,7 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -22,6 +23,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -33,6 +35,11 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -154,6 +161,7 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
     var assistedSelection by remember { mutableStateOf<GridCell?>(null) }
     var helpXiangqiPosition by remember { mutableStateOf<XiangqiState?>(null) }
     var helpGomokuPosition by remember { mutableStateOf<GomokuState?>(null) }
+    var gameControlsBottom by remember { mutableFloatStateOf(0f) }
 
     fun currentXiangqiPosition(): XiangqiState = when (xiangqiMode) {
         XiangqiPlayMode.ONLINE -> onlineSession.state.value.game
@@ -253,6 +261,7 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
     fun closeToy() { pauseToys(); activity = null; clockSetupVisible = false; resumeAfterClockSetup = false }
     fun openToy(value: SecretActivity) {
         pauseToys()
+        gameControlsBottom = 0f
         if (!sleeping && foreground) {
             activity = value
             if (value == SecretActivity.GOMOKU && gomoku.board.all { it == 0 }) gomokuPaused = false
@@ -386,7 +395,7 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
                     onMove = { x, y -> if (!helpBusy && !gomokuPaused && foreground && gomoku.currentPlayer == 1) gomoku = GomokuEngine.play(gomoku, x, y) },
                     onToggle = { cancelHelp(); gomokuPaused = !gomokuPaused },
                     onRestart = { cancelHelp(); gomoku = GomokuEngine.newGame(); gomokuPaused = false },
-                    helpBusy = helpBusy, onSecretHelp = ::requestGomokuHelp)
+                    helpBusy = helpBusy, onControlsBottom = { gameControlsBottom = it })
                 SecretActivity.BOARD -> {
                     Text("棋盘替你铺好了，今天想下哪一种？", style = MaterialTheme.typography.bodyMedium)
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -429,7 +438,7 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
                     onPuzzle = { position -> cancelHelp(); xiangqi=position; xiangqiClock=XiangqiThinkingClock.reset(position, thinkingSeconds)
                         clockEpoch++; xiangqiStarted=true; xiangqiPaused=false },
                     helpBusy = helpBusy, assistedSelection = assistedSelection,
-                    onSecretHelp = ::requestXiangqiHelp, onModalOpened = ::cancelHelp)
+                    onModalOpened = ::cancelHelp, onControlsBottom = { gameControlsBottom = it })
                 SecretActivity.PAPER -> {
                     AlbumPaperPage { Text(secretNotes[note % secretNotes.size],
                         style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(vertical = 20.dp)) }
@@ -464,7 +473,7 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
             boardAspect = if (toy == SecretActivity.XIANGQI) 1.13f else 1f,
             reservedHeight = when (toy) {
                 SecretActivity.SNAKE -> 320
-                SecretActivity.XIANGQI -> 340
+                SecretActivity.XIANGQI -> 410
                 else -> 270
             },
             headerTrailing = {
@@ -486,6 +495,15 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
                 }
             },
             centeredHeader = toy == SecretActivity.XIANGQI,
+            gameDecor = toy == SecretActivity.XIANGQI || toy == SecretActivity.GOMOKU,
+            decorEnabled = !helpBusy && when (toy) {
+                SecretActivity.XIANGQI -> eligibleXiangqiTurn()
+                SecretActivity.GOMOKU -> foreground && !sleeping && !gomokuPaused && gomoku.currentPlayer == 1 && gomoku.outcome == GomokuOutcome.PLAYING
+                else -> false
+            },
+            decorResetKey = if (toy == SecretActivity.XIANGQI) helpGeneration to currentXiangqiPosition() else helpGeneration to gomoku,
+            controlsBottom = gameControlsBottom,
+            onDecorSecret = { if (toy == SecretActivity.XIANGQI) requestXiangqiHelp() else if (toy == SecretActivity.GOMOKU) requestGomokuHelp() },
             content = toyContent)
         else SecretToyDialog(title, ::closeToy, reservedHeight = 265, content = toyContent)
         }
@@ -512,14 +530,17 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
 private fun SecretGamePage(title: String, onBack: () -> Unit, boardAspect: Float, reservedHeight: Int,
     headerTrailing: @Composable () -> Unit = {},
     centeredHeader: Boolean = false,
+    gameDecor: Boolean = false, decorEnabled: Boolean = false, decorResetKey: Any? = null,
+    controlsBottom: Float = 0f,
+    onDecorSecret: () -> Unit = {},
     content: @Composable ColumnScope.(androidx.compose.ui.unit.Dp) -> Unit) {
-    BoxWithConstraints(Modifier.fillMaxSize().background(Color(0xFFFAF7F1)).safeDrawingPadding()) {
-        val boardSize = minOf((maxWidth - 24.dp).coerceAtLeast(60.dp),
+    var stageBottom by remember(title) { mutableFloatStateOf(0f) }
+    val density = LocalDensity.current
+    BoxWithConstraints(Modifier.fillMaxSize().background(Color(0xFFFAF7F1)).safeDrawingPadding()
+        .onGloballyPositioned { stageBottom = it.boundsInRoot().bottom }) {
+        val centeredBoardLimit = if (title == "五子棋") (maxHeight - 400.dp).coerceAtLeast(60.dp) else 560.dp
+        val boardSize = minOf((maxWidth - 24.dp).coerceAtLeast(60.dp), centeredBoardLimit,
             ((maxHeight - reservedHeight.dp) / boardAspect).coerceAtLeast(60.dp), 560.dp)
-        if (title == "阿噜棋桌" && maxHeight - boardSize * boardAspect - reservedHeight.dp > 145.dp) {
-            Image(painterResource(R.drawable.gulu_idle), null,
-                Modifier.align(Alignment.BottomEnd).padding(end = 9.dp, bottom = 9.dp).size(65.dp).graphicsLayer { alpha = .82f })
-        }
         Column(Modifier.fillMaxSize().padding(horizontal = 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally) {
             Row(Modifier.fillMaxWidth().height(56.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -534,6 +555,42 @@ private fun SecretGamePage(title: String, onBack: () -> Unit, boardAspect: Float
             if (centeredHeader) Box(Modifier.fillMaxWidth().height(64.dp), contentAlignment = Alignment.Center) { headerTrailing() }
             content(boardSize)
         }
+        val mascotSize = if (maxHeight < 740.dp) 52.dp else 65.dp
+        val requiredSpace = with(density) { (mascotSize + 8.dp).toPx() }
+        if (gameDecor && controlsBottom > 0f && stageBottom - controlsBottom >= requiredSpace) {
+            GameGuluDecoration(enabled = decorEnabled, resetKey = decorResetKey, onSecret = onDecorSecret,
+                mascotSize = mascotSize,
+                modifier = Modifier.align(Alignment.BottomEnd).padding(end = 9.dp, bottom = 8.dp))
+        }
+    }
+}
+
+@Composable
+private fun GameGuluDecoration(enabled: Boolean, resetKey: Any?, onSecret: () -> Unit,
+    mascotSize: androidx.compose.ui.unit.Dp, modifier: Modifier) {
+    val taps = remember(resetKey, enabled) { HiddenGameHelpTapSequence() }
+    val latestSecret by rememberUpdatedState(onSecret)
+    Box(modifier.width(126.dp).height(mascotSize).testTag("game-gulu-decor")
+        .semantics { contentDescription = "阿噜" }
+        .pointerInput(taps, enabled) {
+            detectTapGestures { if (taps.tap(SystemClock.elapsedRealtime(), enabled)) latestSecret() }
+        }) {
+        Canvas(Modifier.matchParentSize().drawWithCache {
+            val line = Path().apply {
+                moveTo(size.width * .04f, size.height * .88f)
+                lineTo(size.width * .29f, size.height * .84f)
+                lineTo(size.width * .52f, size.height * .9f)
+                lineTo(size.width * .79f, size.height * .85f)
+                lineTo(size.width, size.height * .9f)
+            }
+            onDrawBehind {
+                drawPath(line, Color(0xFFAB94B8).copy(alpha = .3f), style = Stroke(1.2.dp.toPx()))
+                drawOval(Color(0xFFB29BC6).copy(alpha = .24f), Offset(size.width * .17f, size.height * .67f), Size(8.dp.toPx(), 4.dp.toPx()))
+                drawOval(Color(0xFFB29BC6).copy(alpha = .19f), Offset(size.width * .37f, size.height * .91f), Size(7.dp.toPx(), 3.dp.toPx()))
+            }
+        }) { }
+        Image(painterResource(R.drawable.gulu_idle), null,
+            Modifier.align(Alignment.BottomEnd).size(mascotSize).graphicsLayer { alpha = .92f })
     }
 }
 
@@ -601,7 +658,8 @@ private fun SecretRoomStage(sleeping: Boolean, onBack: () -> Unit, onPet: () -> 
         if (sparkleToken > 0) { sparkle.snapTo(1f); sparkle.animateTo(0f, tween(1100)) }
     }
     BoxWithConstraints(Modifier.fillMaxSize().clipToBounds()) {
-        val ratio = art?.let { it.width.toFloat() / it.height } ?: .67f
+        // Keep first-frame hotspots at the same scale while the portrait decodes on IO.
+        val ratio = art?.let { it.width.toFloat() / it.height } ?: (941f / 1672f)
         val naturalWidth = maxOf(maxWidth, maxHeight * ratio)
         val naturalHeight = naturalWidth / ratio
         // Keep the whole toy arrangement reachable even on a narrow phone.

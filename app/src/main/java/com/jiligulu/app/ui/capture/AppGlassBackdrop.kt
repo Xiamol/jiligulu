@@ -36,10 +36,17 @@ internal object AppGlassBackdrop {
         queued=false
         watched.get()?.takeIf {it.isAttachedToWindow && it.isShown}?.refreshBackdrop()
     }
-    fun watch(view:GlassFloatingBubbleView) {watched=WeakReference(view)}
+    fun watch(view:GlassFloatingBubbleView) {
+        watched=WeakReference(view)
+        switchWindow(source.get())
+    }
     fun unwatch(view:GlassFloatingBubbleView) {
         if(watched.get()===view) {
             watched.clear();cancelRefresh()
+            source.get()?.let { window -> drawListener?.let {
+                if(window.decorView.viewTreeObserver.isAlive) window.decorView.viewTreeObserver.removeOnDrawListener(it)
+            } }
+            drawListener=null
         }
     }
     private fun cancelRefresh() {
@@ -62,7 +69,7 @@ internal object AppGlassBackdrop {
         cancelRefresh()
         source.get()?.let {old ->drawListener?.let {if(old.decorView.viewTreeObserver.isAlive) old.decorView.viewTreeObserver.removeOnDrawListener(it)}}
         drawListener=null;source=WeakReference(window);watched.get()?.clearBackdrop()
-        if(window==null) return
+        if(window==null || watched.get()==null) return
         val listener=ViewTreeObserver.OnDrawListener {
             if(!queued) {queued=true;handler.post(drawTask)}
         }

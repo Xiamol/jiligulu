@@ -1,6 +1,5 @@
 package com.jiligulu.app.ui.littleworld
 
-import android.os.SystemClock
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -27,6 +26,8 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
@@ -129,11 +130,9 @@ private fun SnakeDirectionButton(symbol: String, label: String, enabled: Boolean
 @Composable
 internal fun ColumnScope.SecretGomokuGame(state: GomokuState, paused: Boolean, boardSize: Dp,
     onMove: (Int, Int) -> Unit, onToggle: () -> Unit, onRestart: () -> Unit,
-    helpBusy: Boolean = false, onSecretHelp: () -> Unit = {}) {
+    helpBusy: Boolean = false, onControlsBottom: (Float) -> Unit = {}) {
     val latestMove by rememberUpdatedState(onMove)
     val canMove = !paused && !helpBusy && state.currentPlayer == 1 && state.outcome == GomokuOutcome.PLAYING
-    val taps = remember(state.board, state.currentPlayer, paused, helpBusy) { HiddenGameHelpTapSequence() }
-    val latestHelp by rememberUpdatedState(onSecretHelp)
     val wood = remember { Brush.linearGradient(listOf(Color(0xFFF2DFB9), Color(0xFFE5C79A))) }
     val status = when (state.outcome) {
         GomokuOutcome.HUMAN_WON -> "你连成五颗啦，阿噜给你鼓掌 ♡"
@@ -202,16 +201,15 @@ internal fun ColumnScope.SecretGomokuGame(state: GomokuState, paused: Boolean, b
             drawCircle(Color(0xFFE6A149), step * .16f, Offset(padding + move.x * step, padding + move.y * step), style = Stroke(1.5.dp.toPx()))
         }
     }
-    Text(status, modifier = Modifier.padding(top = 14.dp).pointerInput(taps, canMove) {
-        detectTapGestures { if (taps.tap(SystemClock.elapsedRealtime(), canMove)) latestHelp() }
-    }, color = Color(0xFF766A7F), style = MaterialTheme.typography.bodyMedium)
+    Text(status, modifier = Modifier.padding(top = 14.dp), color = Color(0xFF766A7F), style = MaterialTheme.typography.bodyMedium)
     Spacer(Modifier.height(20.dp))
     Row(Modifier.width(boardSize).padding(horizontal = 48.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
         GameIconTool(if (paused) Icons.Outlined.PlayCircleOutline else Icons.Outlined.PauseCircleOutline,
             if (paused) "继续" else "暂停", onToggle, Modifier.weight(1f), enabled = state.outcome == GomokuOutcome.PLAYING)
         GameIconTool(Icons.Outlined.Refresh, "重开", onRestart, Modifier.weight(1f))
     }
-    Text("黑棋先行 · 连成五子获胜", Modifier.padding(top = 4.dp, bottom = 10.dp),
+    Text("黑棋先行 · 连成五子获胜", Modifier.padding(top = 4.dp, bottom = 10.dp)
+        .onGloballyPositioned { onControlsBottom(it.boundsInRoot().bottom) },
         style = MaterialTheme.typography.labelSmall, color = Color(0xFF9C8D98))
     }
     }
