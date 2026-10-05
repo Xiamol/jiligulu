@@ -27,16 +27,15 @@ internal object LittleWorldArtwork {
     private val cache = ConcurrentHashMap<Int, ImageBitmap>()
     fun cachedImage(id:Int):ImageBitmap? = cache[id]
     fun preload(resources: Resources) {
+        // The three main pages share these small assets. Destination paintings already
+        // decode on IO when opened; loading them here delays startup for unseen rooms.
         listOf(R.drawable.sticker_paper_painting,R.drawable.sticker_wall_board,R.drawable.sticker_illustrations_atlas,
-            R.drawable.wish_star_bottle_anime,R.drawable.wish_puffy_stars_anime,
-            R.drawable.world_skin_sticker_atlas_v1,R.drawable.world_scene_atlas_anime,
-            R.drawable.wish_shelf_ocean_palace_v4,R.drawable.world_secret_awake_anime,
-            R.drawable.world_interactive_room_v2).forEach { image(resources,it) }
+            R.drawable.world_skin_sticker_atlas_v1,R.drawable.world_interactive_room_v3).forEach { image(resources,it) }
     }
     fun image(resources: Resources, id: Int): ImageBitmap = cache.computeIfAbsent(id) {
         BitmapFactory.decodeResource(resources,id,BitmapFactory.Options().apply {
-            inSampleSize=if(id==R.drawable.world_scene_atlas_anime || id==R.drawable.world_interactive_room_v2 ||
-                id==R.drawable.wish_shelf_ocean_palace_v4) 1 else 2
+            inSampleSize=if(id==R.drawable.world_scene_atlas_anime || id==R.drawable.world_interactive_room_v3 ||
+                id==R.drawable.wish_shelf_ocean_palace_v4 || id==R.drawable.world_destination_portraits_v3 || id==R.drawable.world_secret_room_portrait_v3) 1 else 2
             inScaled=false
         }).asImageBitmap()
     }

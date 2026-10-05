@@ -6,6 +6,7 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
@@ -62,7 +63,7 @@ private val LightColors = lightColorScheme(
 )
 
 /**
- * 全局唯一主题入口。换皮 = 改 Color.kt 的 token，业务页面零改动。
+ * 全局唯一主题入口：颜色、纸张材质和组件轮廓共同随已保存的皮肤切换。
  */
 @Composable
 fun GuluTheme(
@@ -70,30 +71,27 @@ fun GuluTheme(
     skin: LittleWorldSkin = LittleWorldSkin.DEFAULT,
     content: @Composable () -> Unit
 ) {
-    val accent = when(skin) {
-        LittleWorldSkin.MOONLIGHT -> if(darkTheme) Color(0xFFC4B6EF) else Color(0xFF7760AC)
-        LittleWorldSkin.SCRAPBOOK -> if(darkTheme) GuluPurple else ActionPurple
-        LittleWorldSkin.STRAWBERRY -> if(darkTheme) Color(0xFFF2B8CB) else Color(0xFFB95D7C)
-        LittleWorldSkin.WOODLAND -> if(darkTheme) Color(0xFFAAD8BA) else Color(0xFF477D63)
-    }
-    val paper = when(skin) {
-        LittleWorldSkin.MOONLIGHT -> Color(0xFFF4F1FC)
-        LittleWorldSkin.SCRAPBOOK -> BgLight
-        LittleWorldSkin.STRAWBERRY -> Color(0xFFFFF6F5)
-        LittleWorldSkin.WOODLAND -> Color(0xFFF5F8F1)
-    }
+    val material = remember(skin, darkTheme) { skinMaterialFor(skin, darkTheme) }
+    val accent = material.accent
     val base = if(darkTheme) DarkColors else LightColors
-    val scheme = base.copy(primary = accent, secondary = accent,
-        primaryContainer = if(darkTheme) accent.copy(alpha=.18f).compositeOver(SurfaceDark) else accent.copy(alpha=.1f).compositeOver(paper),
-        onPrimaryContainer = if(darkTheme) OnBgDark else accent,
-        secondaryContainer = if(darkTheme) SurfaceVariantDark else accent.copy(alpha=.065f).compositeOver(paper),
-        onSecondaryContainer = if(darkTheme) OnBgDark else accent,
-        background = if(darkTheme) BgDark else paper,
-        tertiaryContainer = if(darkTheme) PaperNoteDark else paper)
-    CompositionLocalProvider(LocalGuluSkin provides skin) { MaterialTheme(
+    val scheme = base.copy(primary = accent, onPrimary = material.onAccent, secondary = accent,
+        onSecondary = material.onAccent, surfaceTint = accent,
+        primaryContainer = accent.copy(alpha = if (darkTheme) .18f else .1f).compositeOver(material.paper),
+        onPrimaryContainer = if (darkTheme) material.ink else accent,
+        secondaryContainer = material.raisedPaper,
+        onSecondaryContainer = material.ink,
+        background = material.page, onBackground = material.ink,
+        surface = material.paper, onSurface = material.ink,
+        surfaceVariant = material.raisedPaper, onSurfaceVariant = material.secondaryInk,
+        surfaceContainer = material.paper, surfaceContainerHigh = material.raisedPaper,
+        surfaceContainerHighest = material.raisedPaper,
+        surfaceContainerLow = material.paper, surfaceContainerLowest = material.page,
+        outline = material.border, outlineVariant = material.border.copy(alpha = .55f),
+        tertiaryContainer = material.note, onTertiaryContainer = material.ink)
+    CompositionLocalProvider(LocalGuluSkin provides skin, LocalSkinMaterial provides material) { MaterialTheme(
         colorScheme = scheme,
         typography = GuluTypography,
-        shapes = GuluShapes,
+        shapes = material.shapes,
         content = content
     ) }
 }

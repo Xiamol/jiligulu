@@ -139,9 +139,11 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         windowRefresh.onResume()
+        com.jiligulu.app.ui.capture.AppGlassBackdrop.resume(window)
     }
 
     override fun onPause() {
+        com.jiligulu.app.ui.capture.AppGlassBackdrop.pause(window)
         windowRefresh.onPause()
         super.onPause()
     }

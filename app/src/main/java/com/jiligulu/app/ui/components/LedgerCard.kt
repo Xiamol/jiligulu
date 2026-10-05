@@ -1,28 +1,28 @@
 package com.jiligulu.app.ui.components
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.jiligulu.app.ui.theme.LocalSkinMaterial
+import com.jiligulu.app.ui.theme.skinPaperSurface
 
-/** Shared content surface; spacing and borders stay consistent across ledger pages. */
+/** Shared ledger/dialog paper adopts the selected skin's material and printed edges. */
 @Composable
 fun LedgerCard(
     modifier: Modifier = Modifier,
     content: @Composable ColumnScope.() -> Unit
 ) {
+    val material = LocalSkinMaterial.current
     Surface(
         modifier = modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.large,
-        color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.55f))
+        shape = material.shapes.large,
+        color = material.paper
     ) {
-        Column(Modifier.padding(16.dp), content = content)
+        Column(Modifier.skinPaperSurface(material).padding(16.dp), content = content)
     }
 }

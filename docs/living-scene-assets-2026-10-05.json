@@ -1,0 +1,30 @@
+{
+  "date": "2026-10-05",
+  "mode": "built-in image_gen",
+  "note": "Original generation prompts were not retained across the interrupted session; briefs below record the intended composition, not verbatim prompts.",
+  "assets": [
+    {
+      "output": "app/src/main/res/drawable-nodpi/world_destination_portraits_v3.png",
+      "source": "exec-3c440ac4-e873-442e-b765-292d60504385.png",
+      "width": 1717,
+      "height": 916,
+      "brief": "Three portrait anime-style panels for future-letter post office, scrapbook workbench and nostalgic purple train station. Physical props support app-rendered labels; warm paper/wood, lavender sprout-cloud mascot. Panels are cropped by native scene coordinates."
+    },
+    {
+      "output": "app/src/main/res/drawable-nodpi/world_secret_room_portrait_v3.png",
+      "source": "exec-9ce36f4a-ec6e-4b78-85d8-b07b2b791bc4.png",
+      "width": 941,
+      "height": 1672,
+      "brief": "Portrait secret room with tabletop wheel, snake handheld, chess table, secret paper, hanging star, oil lamp and mascot cushion. Full scene for physical object hot spots, no card dashboard."
+    },
+    {
+      "output": "app/src/main/res/drawable-nodpi/world_interactive_room_v3.png",
+      "source": "exec-e7f40cd9-e578-4cea-8c07-2110ccb6742b.png",
+      "width": 1086,
+      "height": 1448,
+      "brief": "Localized edit of the previous interactive room: replace electronic calculator with traditional wood-and-bead abacus, preserve other navigation props and blank plaques."
+    }
+  ],
+  "generated_root": "C:/Users/lumo/.codex/generated_images/01a0c36b-7763-7ba2-8004-ee34ac1f6421",
+  "rendering": "Original outputs copied to drawable-nodpi, never image-edited with Python. SceneTone applies .78 saturation during native rendering; user photos are unaffected."
+}

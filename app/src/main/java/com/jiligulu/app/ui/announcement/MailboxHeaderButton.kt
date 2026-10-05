@@ -20,13 +20,14 @@ import com.jiligulu.app.data.announcement.AnnouncementRepository
 
 /** The mailbox belongs to the shared main toolbar, leaving room for the daily ledger. */
 @Composable
-fun MailboxHeaderButton(repository: AnnouncementRepository) {
+fun MailboxHeaderButton(repository: AnnouncementRepository, tagged:Boolean=true) {
     val state by repository.state.collectAsStateWithLifecycle()
     IconButton(enabled = !state.loading, onClick = {
         repository.open((state.entries.firstOrNull { it.id in state.unreadIds } ?: state.entries.firstOrNull())?.id.orEmpty())
-    }, modifier = Modifier.testTag("main-mailbox")) {
-        if (state.loading) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-        else BadgedBox(badge = {
+    }, modifier = if(tagged) Modifier.testTag("main-mailbox") else Modifier) {
+        BadgedBox(badge = {
+            if(state.loading) CircularProgressIndicator(Modifier.size(10.dp),strokeWidth=1.dp)
+            else
             if (state.unreadIds.isNotEmpty()) Badge(containerColor = MaterialTheme.colorScheme.primaryContainer,
                 contentColor = MaterialTheme.colorScheme.primary) {
                 Text(if (state.unreadIds.size > 9) "9+" else state.unreadIds.size.toString())

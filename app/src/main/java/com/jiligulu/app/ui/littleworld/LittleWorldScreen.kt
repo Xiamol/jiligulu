@@ -98,10 +98,11 @@ fun LittleWorldScreen(
     var showCalculator by rememberSaveable { mutableStateOf(false) }
     var secretPullAt by remember { mutableLongStateOf(0L) }
     var secretHint by remember { mutableStateOf(false) }
-    LaunchedEffect(active) { secretPullAt=0L;secretHint=false }
+    var secretEntrance by remember { mutableStateOf<SecretEntrance?>(null) }
+    LaunchedEffect(active) { secretPullAt=0L;secretHint=false;if(!active) secretEntrance=null }
     LaunchedEffect(secretHint) { if(secretHint) {delay(2600);secretHint=false} }
     val notifyModal by rememberUpdatedState(onModalChanged)
-    val modalOpen = active && (showFavorites || showCalculator || showFortune || error != null)
+    val modalOpen = active && (showFavorites || showCalculator || showFortune || secretEntrance!=null || error != null)
     LaunchedEffect(modalOpen) { notifyModal(modalOpen) }
     DisposableEffect(Unit) { onDispose { notifyModal(false) } }
 
@@ -138,7 +139,7 @@ fun LittleWorldScreen(
             onTopPull={ distance->
                 val now=android.os.SystemClock.uptimeMillis()
                 if(active&&distance>=44f) {
-                    if(secretPullAt>0&&now-secretPullAt<2600) {secretPullAt=0;secretHint=false;onOpenSecretBase()}
+                    if(secretPullAt>0&&now-secretPullAt<2600) {secretPullAt=0;secretHint=false;secretEntrance=SecretEntrance.PULL}
                     else {secretPullAt=now;secretHint=true}
                 } else secretPullAt=0
             },
@@ -151,9 +152,14 @@ fun LittleWorldScreen(
                         announcements.open((mailbox.entries.firstOrNull { it.id in mailbox.unreadIds }
                             ?: mailbox.entries.firstOrNull())?.id.orEmpty())
                     }, onSettings = onOpenSettings, controlsActive = active,
-                    mailboxLoading = mailbox.loading, unreadCount = mailbox.unreadIds.size)
+                    mailboxLoading = mailbox.loading, unreadCount = mailbox.unreadIds.size,
+                    onSecretLogo={secretEntrance=SecretEntrance.LOGO})
             }
         }
+        secretEntrance?.let {entry -> SecretEntranceOverlay(entry,{
+            secretEntrance=null
+            if(active && lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) onOpenSecretBase()
+        },Modifier.matchParentSize()) }
         if(secretHint) Surface(Modifier.align(Alignment.TopCenter)
             .then(if (embedded) Modifier.statusBarsPadding() else Modifier)
             .padding(horizontal=18.dp,vertical=5.dp),

@@ -5,12 +5,9 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -18,10 +15,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.jiligulu.app.JiliguluApp
 import com.jiligulu.app.core.util.Formatters
 import com.jiligulu.app.data.littleworld.LittleWorldState
@@ -31,17 +26,14 @@ import com.jiligulu.app.data.local.entity.BillType
 import com.jiligulu.app.data.local.entity.CategoryEntity
 import com.jiligulu.app.ui.billdetail.BillDetailSheet
 import com.jiligulu.app.ui.components.GuluDialog
-import com.jiligulu.app.ui.components.LedgerCard
 import com.jiligulu.app.ui.components.rememberPageData
-import com.jiligulu.app.ui.components.SpringLazyColumn
-import com.jiligulu.app.ui.theme.GuluBrandFont
 import com.jiligulu.app.ui.theme.IncomeGreen
 import com.jiligulu.app.ui.theme.ExpenseCoral
-import com.jiligulu.app.ui.littleworld.WorldScene
-import com.jiligulu.app.ui.littleworld.WorldSceneBanner
-import com.jiligulu.app.ui.littleworld.WorldScenePanel
 import com.jiligulu.app.ui.littleworld.AlbumPaperPage
-import com.jiligulu.app.ui.littleworld.CountedTab
+import com.jiligulu.app.ui.littleworld.DestinationDrawer
+import com.jiligulu.app.ui.littleworld.DestinationObject
+import com.jiligulu.app.ui.littleworld.ImmersiveDestination
+import com.jiligulu.app.ui.littleworld.ImmersiveDestinationScene
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -90,64 +82,73 @@ fun MemoriesScreen(onBack: () -> Unit) {
         "${start.format(format)} — ${end.format(format)}"
     }
     val summary = remember(bills, categories, dates) { summarizeMemoryWeek(bills, categories, dates) }
-    var tab by rememberSaveable { mutableIntStateOf(0) }
+    var drawer by rememberSaveable { mutableIntStateOf(-1) }
     var selectedBill by remember { mutableStateOf<Long?>(null) }
     var selectedCard by remember { mutableStateOf<MemoryCard?>(null) }
     var selectedPhoto by remember { mutableStateOf<BillEntity?>(null) }
     var makeWeek by remember { mutableStateOf(false) }
 
-    SpringLazyColumn(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)
-        .statusBarsPadding().navigationBarsPadding().padding(horizontal = 20.dp),
-        contentPadding = PaddingValues(bottom = 28.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        item { WorldScenePanel(WorldScene.ALBUM,"打开生活纪念册",onBack,listOf("生活明信片","生活照片"),tab,{tab=it},
-            "周明信片",{makeWeek=true},onObject={
-                if(tab==0) state.cards.maxByOrNull {it.createdAt}?.let {selectedCard=it}
-                else photos.firstOrNull()?.let {selectedPhoto=it}
-            }) }
-        item {
-            AlbumPaperPage {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text("💌",fontSize=22.sp,modifier=Modifier.padding(end=8.dp))
-                    Text("给这一周起个名字", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                    Text("${summary.billsCount} 笔", color = MaterialTheme.colorScheme.primary)
-                }
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(onClick = { offset-- }) { Text("‹") }
-                    Text(dates, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium,textAlign=TextAlign.Center)
-                    TextButton(onClick = { offset++ }, enabled = offset < 0) { Text("›") }
-                }
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("支出 ¥${Formatters.fenToYuanText(summary.expenseFen)}", style = MaterialTheme.typography.bodySmall, color = ExpenseCoral)
-                    Text("收入 ¥${Formatters.fenToYuanText(summary.incomeFen)}", style = MaterialTheme.typography.bodySmall, color = IncomeGreen)
-                }
-                Spacer(Modifier.height(10.dp))
-                Button(onClick = { makeWeek = true }, enabled = weekRows != null && categoryRows != null,
-                    modifier = Modifier.fillMaxWidth()) { Text("做一张周明信片") }
+    ImmersiveDestinationScene(ImmersiveDestination.MEMORIES, "生活纪念册", onBack,
+        listOf(
+            DestinationObject("生活明信片", .15f, .33f, .74f, .25f,
+                labelX = .52f, labelY = .57f) { drawer = 0 },
+            DestinationObject("生活照片", .04f, .52f, .29f, .25f,
+                labelX = .22f, labelY = .74f, tilt = 2f) { drawer = 1 },
+            DestinationObject("周明信片", .35f, .67f, .28f, .16f,
+                labelX = .51f, labelY = .82f, tilt = 2f) { drawer = 2 }
+        ), Modifier.fillMaxSize().navigationBarsPadding())
+    if (drawer == 0 || drawer == 1) DestinationDrawer(
+        title = if(drawer == 0) "夹好的生活明信片" else "一张张生活照片",
+        subtitle = if(drawer == 0) "${state.cards.size} 张，翻开就能重新遇见那一天。" else "${photos.size} 张，和记过的账一起收在这里。",
+        onDismiss = { drawer = -1 },
+        actions = { TextButton(onClick = { drawer = 2 }) { Text("做周明信片") } }
+    ) {
+        if (drawer == 0) {
+            if (state.cards.isEmpty()) item {
+                Text("还没有夹进明信片呢 ♡", style = MaterialTheme.typography.bodyMedium)
+                Text("点桌上的明信片工具，做一张周记；也能从账单详情把照片变成海报。",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-        }
-        if (tab == 0) {
-            if (state.cards.isEmpty()) item { LedgerCard { Text("还没有夹进小明信片呢 ♡"); Text("做一张周账单，或从账单详情把照片变成海报。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) } }
             items(state.cards.sortedByDescending { it.createdAt }, key = { "card-${it.id}" }) { card ->
                 AlbumPaperPage(Modifier.clickable { selectedCard = card }) {
-                    MemoryPhoto(card.imagePath, Modifier.fillMaxWidth().height(240.dp).clip(RoundedCornerShape(14.dp)), androidx.compose.ui.layout.ContentScale.Fit)
-                    Spacer(Modifier.height(10.dp))
+                    MemoryPhoto(card.imagePath, Modifier.fillMaxWidth().height(180.dp).clip(RoundedCornerShape(14.dp)),
+                        androidx.compose.ui.layout.ContentScale.Fit)
                     Text(card.title, style = MaterialTheme.typography.titleMedium)
                     if (card.caption.isNotBlank()) Text(card.caption, style = MaterialTheme.typography.bodySmall, maxLines = 2)
-                    Text("收好于 ${Formatters.dayLabel(card.createdAt)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("收好于 ${Formatters.dayLabel(card.createdAt)}", style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         } else {
-            if (photos.isEmpty()) item { LedgerCard { Text("相册里还空空的，等一个小瞬间。", style = MaterialTheme.typography.bodyMedium); Text("打开任意账单 → 夹一张生活照片 → 保存修改。", style = MaterialTheme.typography.bodySmall) } }
+            if (photos.isEmpty()) item {
+                Text("相册还等着第一个小瞬间。", style = MaterialTheme.typography.bodyMedium)
+                Text("打开一笔账，夹一张生活照片，再保存修改。", style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             items(photos, key = { "bill-${it.id}" }) { bill ->
                 AlbumPaperPage(Modifier.clickable { selectedPhoto = bill }) {
-                    MemoryPhoto(bill.photoUri.orEmpty(), Modifier.fillMaxWidth().height(190.dp).clip(RoundedCornerShape(14.dp)))
-                    Spacer(Modifier.height(10.dp))
+                    MemoryPhoto(bill.photoUri.orEmpty(), Modifier.fillMaxWidth().height(165.dp).clip(RoundedCornerShape(14.dp)))
                     Text(bill.detail.ifBlank { "一张生活照片" }, style = MaterialTheme.typography.titleMedium)
                     if (bill.note.isNotBlank()) Text(bill.note, style = MaterialTheme.typography.bodySmall, maxLines = 3)
-                    Text(Formatters.dayLabel(bill.timestamp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(Formatters.dayLabel(bill.timestamp), style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
+    }
+    if (drawer == 2) GuluDialog("给这一周起个名字", onDismiss = { drawer = -1 }, compact = true,
+        confirmLabel = "收好工具") {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            TextButton(onClick = { offset-- }) { Text("‹") }
+            Text(dates, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center)
+            TextButton(onClick = { offset++ }, enabled = offset < 0) { Text("›") }
+        }
+        Text(if(weekRows == null || categoryRows == null) "正在翻这一周的生活记录…" else "${summary.billsCount} 笔认真过日子的证据。",
+            style = MaterialTheme.typography.bodySmall)
+        Text("支出 ¥${Formatters.fenToYuanText(summary.expenseFen)}", color = ExpenseCoral)
+        Text("收入 ¥${Formatters.fenToYuanText(summary.incomeFen)}", color = IncomeGreen)
+        Button(onClick = { makeWeek = true }, enabled = weekRows != null && categoryRows != null,
+            modifier = Modifier.fillMaxWidth()) { Text("做一张周明信片") }
     }
     if (makeWeek) MemoryPosterDialog(PosterData("${if (offset == -1) "上周" else if (offset == 0) "这周" else "那一周"}的生活小记", "认真过日子的证据，阿噜替你夹好啦。", dateMillis = range.first, week = summary), { makeWeek = false })
     selectedBill?.let { BillDetailSheet(it, { selectedBill = null }) }

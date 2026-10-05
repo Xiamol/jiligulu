@@ -6,13 +6,10 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.background
 import androidx.compose.ui.draw.rotate
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.CalendarToday
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material3.*
@@ -20,7 +17,6 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -30,10 +26,10 @@ import com.jiligulu.app.JiliguluApp
 import com.jiligulu.app.data.littleworld.FutureNote
 import com.jiligulu.app.data.littleworld.LittleWorldState
 import com.jiligulu.app.ui.components.*
-import com.jiligulu.app.ui.theme.GuluBrandFont
-import com.jiligulu.app.ui.littleworld.WorldScene
-import com.jiligulu.app.ui.littleworld.WorldSceneBanner
-import com.jiligulu.app.ui.littleworld.WorldScenePanel
+import com.jiligulu.app.ui.littleworld.DestinationDrawer
+import com.jiligulu.app.ui.littleworld.DestinationObject
+import com.jiligulu.app.ui.littleworld.ImmersiveDestination
+import com.jiligulu.app.ui.littleworld.ImmersiveDestinationScene
 import com.jiligulu.app.ui.littleworld.StickerPaperArtwork
 import kotlinx.coroutines.launch
 import java.time.*
@@ -53,6 +49,7 @@ fun FutureNotesScreen(onBack: () -> Unit) {
         }
     }
     var tab by rememberSaveable { mutableIntStateOf(0) }
+    var drawer by rememberSaveable { mutableStateOf(false) }
     var editing by remember { mutableStateOf<FutureNote?>(null) }
     var creating by remember { mutableStateOf(false) }
     var opened by remember { mutableStateOf<FutureNote?>(null) }
@@ -66,33 +63,56 @@ fun FutureNotesScreen(onBack: () -> Unit) {
             catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
             catch (e: Exception) { error = e.message ?: "还没保存好，请再试试" } finally { busy = false } }
     }
-    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).statusBarsPadding().navigationBarsPadding()) {
-        Column(Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
-            val now = clock
-            val rows = remember(state.futureNotes, now, tab) { state.futureNotes.filter { n -> when(tab) { 0 -> n.dueAt > now && n.readAt == null; 1 -> n.dueAt <= now && n.readAt == null; else -> n.readAt != null } }.sortedByDescending { it.dueAt } }
-            SpringLazyColumn(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(top = 4.dp, bottom=24.dp)) {
-                item { WorldScenePanel(when(tab) { 0->WorldScene.COURIER;1->WorldScene.INBOX;else->WorldScene.ARCHIVE },
-                    when(tab) {0->"查看阿噜手里的信";1->"打开收件箱";else->"打开旧信匣"},onBack,
-                    listOf("还在路上","收件箱","旧信匣"),tab,{tab=it},"写一封",{editing=null;creating=true},
-                    onObject={rows.minByOrNull {it.dueAt}?.let {opened=it} ?: run {editing=null;creating=true}}) }
-                if (rows.isEmpty()) item { Text("这一次还空着，写封信，阿噜就出发啦 ♡",style=MaterialTheme.typography.bodySmall,
-                    color=MaterialTheme.colorScheme.onSurfaceVariant,modifier=Modifier.padding(vertical=12.dp)) }
-                items(rows,key={it.id}) { n -> Box(Modifier.fillMaxWidth().rotate(if(n.id.hashCode()%2==0) -.7f else .6f)) {
-                    StickerPaperArtwork(Modifier.matchParentSize(),MaterialTheme.colorScheme.tertiaryContainer)
-                    Column(Modifier.fillMaxWidth().clickable { opened=n }.padding(horizontal=24.dp,vertical=18.dp)) {
-                    Row(verticalAlignment=Alignment.CenterVertically) {
-                        Text("💌", Modifier.padding(end=10.dp), style=MaterialTheme.typography.headlineSmall)
-                        Column(Modifier.weight(1f)) { Text(n.title,style=MaterialTheme.typography.titleMedium,maxLines=1,overflow=TextOverflow.Ellipsis); Text(noteDate(n.dueAt),style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant) }
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    Text(n.body, maxLines=2, overflow=TextOverflow.Ellipsis, style=MaterialTheme.typography.bodyMedium)
-                    Row(Modifier.fillMaxWidth()) {
-                        TextButton(onClick={ opened = n }) { Text("读一读") }
-                        if(n.dueAt>now) TextButton(onClick={ editing=n; creating=true }){Text("修改",color=MaterialTheme.colorScheme.onSurfaceVariant)}
+    val now = clock
+    val rows = remember(state.futureNotes, now, tab) {
+        state.futureNotes.filter { n -> when(tab) {
+            0 -> n.dueAt > now && n.readAt == null
+            1 -> n.dueAt <= now && n.readAt == null
+            else -> n.readAt != null
+        } }.sortedByDescending { it.dueAt }
+    }
+    val inTransit = state.futureNotes.count { it.dueAt > now && it.readAt == null }
+    val arrived = state.futureNotes.count { it.dueAt <= now && it.readAt == null }
+    val archived = state.futureNotes.count { it.readAt != null }
+    ImmersiveDestinationScene(ImmersiveDestination.FUTURE_POST, "未来邮局", onBack,
+        listOf(
+            DestinationObject("在路上", .14f, .25f, .40f, .30f,
+                labelX = .33f, labelY = .52f) { tab = 0; drawer = true },
+            DestinationObject("收件箱", .70f, .21f, .28f, .23f,
+                labelX = .81f, labelY = .43f, tilt = 2f) { tab = 1; drawer = true },
+            DestinationObject("旧信匣", .18f, .62f, .62f, .22f,
+                labelX = .43f, labelY = .78f, tilt = 2f) { tab = 2; drawer = true },
+            DestinationObject("写一封信", .50f, .82f, .42f, .14f,
+                labelX = .72f, labelY = .92f) { editing = null; creating = true }
+        ), Modifier.fillMaxSize().navigationBarsPadding())
+    if (drawer) DestinationDrawer(
+        title = when(tab) { 0 -> "阿噜还在送信"; 1 -> "今天的收件箱"; else -> "收好的旧信笺" },
+        subtitle = when(tab) { 0 -> "${rows.size} 封信，正走向未来的你。"; 1 -> "${rows.size} 封信，到了可以拆开的日子。"; else -> "${rows.size} 封信，藏着过去的心事。" },
+        onDismiss = { drawer = false },
+        actions = { TextButton(onClick = { editing = null; creating = true }) { Text("写一封") } }
+    ) {
+        if (rows.isEmpty()) item {
+            Text(when(tab) {
+                0 -> "阿噜的邮袋还空着。写封信，约好未来再见吧 ♡"
+                1 -> "邮筒里还没有到期的信，阿噜会替你守好。"
+                else -> "读过的信会收进这只木匣。"
+            }, style = MaterialTheme.typography.bodyMedium)
+        }
+        items(rows, key = { it.id }) { n ->
+            Box(Modifier.fillMaxWidth().rotate(if(n.id.hashCode() % 2 == 0) -.7f else .6f)) {
+                StickerPaperArtwork(Modifier.matchParentSize(), MaterialTheme.colorScheme.tertiaryContainer)
+                Column(Modifier.fillMaxWidth().clickable { opened = n }.padding(horizontal = 21.dp, vertical = 16.dp)) {
+                    Text(n.title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(noteDate(n.dueAt), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.height(7.dp))
+                    Text(n.body, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium)
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        TextButton(onClick = { opened = n }) { Text("读一读") }
+                        if(n.dueAt > now) TextButton(onClick = { editing = n; creating = true }) { Text("修改") }
                         Spacer(Modifier.weight(1f))
-                        TextButton(onClick={ deleting=n }){Text("删除",color=MaterialTheme.colorScheme.onSurfaceVariant)}
+                        TextButton(onClick = { deleting = n }) { Text("删除", color = MaterialTheme.colorScheme.onSurfaceVariant) }
                     }
-                } } }
+                }
             }
         }
     }

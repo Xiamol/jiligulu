@@ -53,7 +53,7 @@ fun WishShelfStage(items:List<ShelfWish>,kind:Int,onBack:()->Unit,onAdd:()->Unit
     Column(verticalArrangement=Arrangement.spacedBy(7.dp)) {
         BoxWithConstraints(Modifier.fillMaxWidth().height(maxOf(minHeight,LocalConfiguration.current.screenWidthDp.dp/(9f/16f)))
             .combinedClickable(onClick={},onLongClick={whisper=true})) {
-            art?.let {Image(it,null,Modifier.matchParentSize(),contentScale=ContentScale.FillBounds)}
+            art?.let {Image(it,null,Modifier.matchParentSize(),contentScale=ContentScale.FillBounds,colorFilter=MutedSceneColorFilter)}
             val visible=items.drop(page*12).take(12)
             ShelfPearlButton("‹ 小窝",Modifier.align(Alignment.TopStart).padding(8.dp),onClick=onBack)
             ShelfPearlButton("＋ 愿望",Modifier.align(Alignment.TopEnd).padding(8.dp),onClick=onAdd)

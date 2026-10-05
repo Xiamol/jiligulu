@@ -38,6 +38,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.ui.layout.onSizeChanged
@@ -61,6 +62,8 @@ import com.jiligulu.app.ui.persona.GuluCompanionHeader
 import com.jiligulu.app.ui.persona.PersonaViewModel
 import com.jiligulu.app.ui.stats.StatsScreen
 import com.jiligulu.app.ui.littleworld.LittleWorldScreen
+import com.jiligulu.app.ui.littleworld.SecretEntrance
+import com.jiligulu.app.ui.littleworld.SecretEntranceOverlay
 import com.jiligulu.app.ui.components.forwardMainPageSwipe
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.channels.Channel
@@ -88,6 +91,7 @@ fun MainScreen(
 ) {
     val app = LocalContext.current.applicationContext as JiliguluApp
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
+    var secretEntrance by remember { mutableStateOf<SecretEntrance?>(null) }
     RoomStatusBarAppearance(selectedTab == 1)
     val message by personaVm.bubble.collectAsStateWithLifecycle()
     val drinkingId by personaVm.drinkingId.collectAsStateWithLifecycle()
@@ -175,6 +179,7 @@ fun MainScreen(
     LaunchedEffect(selectedTab) { if (selectedTab == 0) homeVm.showToday() }
     val lifecycleOwner = LocalLifecycleOwner.current
     BackHandler(enabled = showDrinking, onBack = personaVm::cancelDrinking)
+    BackHandler(enabled = secretEntrance!=null) {secretEntrance=null}
 
     LaunchedEffect(lifecycleOwner, personaVm) {
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -189,8 +194,9 @@ fun MainScreen(
     }
 
     Box(Modifier.fillMaxSize()) {
+        com.jiligulu.app.ui.littleworld.SkinSceneDecor(Modifier.matchParentSize())
         Scaffold(
-            containerColor = MaterialTheme.colorScheme.background,
+            containerColor = androidx.compose.ui.graphics.Color.Transparent,
             // The room paints behind the status bar; other pages apply their own safe header.
             // Keeping the inset policy fixed avoids resizing outgoing pages during a swipe.
             contentWindowInsets = WindowInsets(0, 0, 0, 0),
@@ -208,7 +214,7 @@ fun MainScreen(
                     verticalAlignment = Alignment.Top, key = { it }) { page ->
                     when (page) {
                         0 -> Column(Modifier.fillMaxSize()) {
-                            MainPageHeader(app, selectedTab == 0, onOpenSettings, onOpenSecretBase)
+                            MainPageHeader(app, selectedTab == 0, onOpenSettings) {secretEntrance=SecretEntrance.LOGO}
                             // The companion belongs to this page, including while it exits.
                             // Switching tabs must not resize the outgoing ledger viewport.
                             GuluCompanionHeader(message = message,
@@ -217,7 +223,7 @@ fun MainScreen(
                                     enabled = { selectedTab == 0 }, onDrag = pageDrag, onDragEnd = pageDragEnd))
                             Spacer(Modifier.height(12.dp))
                             HomeScreen(onOpenChat = onOpenChat, onAddBill = onAddBill, vm = homeVm,
-                                active = selectedTab == 0, onOpenStats = { navigate(1) }, onPickSticker = onPickSticker,
+                                active = selectedTab == 0, onOpenStats = { navigate(2) }, onPickSticker = onPickSticker,
                                 onPageDrag = pageDrag, onPageDragEnd = pageDragEnd)
                         }
                         1 -> LittleWorldScreen(onBack = { navigate(0) }, onOpenWishBook = onOpenWishBook,
@@ -230,13 +236,17 @@ fun MainScreen(
                                 enabled = { selectedTab == 1 && !worldModalOpen }, onDrag = pageDrag,
                                 onDragEnd = pageDragEnd, allowRight = true))
                         2 -> Column(Modifier.fillMaxSize()) {
-                            MainPageHeader(app, selectedTab == 2, onOpenSettings, onOpenSecretBase)
+                            MainPageHeader(app, selectedTab == 2, onOpenSettings) {secretEntrance=SecretEntrance.LOGO}
                             Box(Modifier.weight(1f)) { StatsScreen(active = selectedTab == 2) }
                         }
                     }
                 }
             }
         }
+        secretEntrance?.let {entry -> SecretEntranceOverlay(entry, {
+            secretEntrance=null
+            if(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) onOpenSecretBase()
+        },Modifier.fillMaxSize()) }
         DrinkingOverlay(visible = showDrinking, onFinished = personaVm::completeDrinking,
             onCancel = personaVm::cancelDrinking)
     }
@@ -251,11 +261,9 @@ private fun RoomStatusBarAppearance(active:Boolean) {
         while(context is android.content.ContextWrapper && context !is android.app.Activity) context=context.baseContext
         context as? android.app.Activity
     }
-    if(active && activity!=null) DisposableEffect(view,activity) {
-        val controller=androidx.core.view.WindowCompat.getInsetsController(activity.window,view)
-        val previous=controller.isAppearanceLightStatusBars
-        controller.isAppearanceLightStatusBars=true
-        onDispose {controller.isAppearanceLightStatusBars=previous}
+    val dark=MaterialTheme.colorScheme.background.luminance()<.5f
+    androidx.compose.runtime.SideEffect {
+        activity?.let {androidx.core.view.WindowCompat.getInsetsController(it.window,view).isAppearanceLightStatusBars=active||!dark}
     }
 }
 
@@ -267,8 +275,7 @@ private fun MainPageHeader(app: JiliguluApp, active: Boolean, onOpenSettings: ()
             Text("叽里咕噜", fontFamily = GuluBrandFont, fontSize = 28.sp,
                 color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.weight(1f).combinedClickable(onClick = {}, onLongClick = onOpenSecretBase))
-            if (active) MailboxHeaderButton(app.container.announcements)
-            else Spacer(Modifier.size(48.dp))
+            MailboxHeaderButton(app.container.announcements,tagged=active)
             IconButton(onClick = onOpenSettings) {
                 Icon(Icons.Outlined.Settings, contentDescription = "设置",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant)

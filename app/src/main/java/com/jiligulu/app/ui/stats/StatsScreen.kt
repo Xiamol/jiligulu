@@ -6,6 +6,10 @@ import com.jiligulu.app.ui.components.EdgeSpringState
 import androidx.compose.material3.Surface
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
+import androidx.compose.material.icons.outlined.CheckBox
+import androidx.compose.material.icons.outlined.CheckBoxOutlineBlank
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.sp
 import androidx.compose.material.icons.outlined.Restaurant
 import androidx.compose.material.icons.outlined.DirectionsBus
@@ -94,7 +98,11 @@ import com.jiligulu.app.ui.components.LedgerBillRow
 import com.jiligulu.app.ui.billdetail.BillDetailSheet
 import com.jiligulu.app.ui.stats.charts.CashFlowBarChart
 import com.jiligulu.app.ui.stats.charts.DonutChart
+import com.jiligulu.app.ui.stats.charts.SpendingLineChart
+import com.jiligulu.app.ui.stats.charts.SpendingLinePoint
+import com.jiligulu.app.ui.stats.charts.rememberCashFlowViewport
 import com.jiligulu.app.ui.theme.ExpenseCoral
+import com.jiligulu.app.ui.theme.ActionPurple
 import com.jiligulu.app.ui.theme.IncomeGreen
 import com.jiligulu.app.ui.components.billDatePickerYearRange
 import java.time.Instant
@@ -116,6 +124,22 @@ fun StatsScreen(
     val dayDetails by vm.dayDetails.collectAsStateWithLifecycle()
     val sort by vm.sort.collectAsStateWithLifecycle()
     val budget by vm.budgetUi.collectAsStateWithLifecycle()
+    val forecasts by vm.expenseForecast.collectAsStateWithLifecycle()
+    val today by vm.forecastToday.collectAsStateWithLifecycle()
+
+    var showTrend by rememberSaveable { mutableStateOf(false) }
+    var showActual by rememberSaveable { mutableStateOf(true) }
+    var showPrediction by rememberSaveable { mutableStateOf(true) }
+    val chartViewport = rememberCashFlowViewport()
+    val forecastMap = remember(forecasts) { forecasts.associateBy { it.date } }
+    val linePoints = remember(bars, forecastMap, today, flowType) {
+        val zone = ZoneId.systemDefault()
+        bars.map { bar ->
+            val date = Instant.ofEpochMilli(bar.dayStartMillis).atZone(zone).toLocalDate()
+            SpendingLinePoint(bar.dayStartMillis, bar.amountFen.takeIf { !date.isAfter(today) },
+                forecastMap[date]?.expectedFen.takeIf { flowType == BillType.EXPENSE })
+        }
+    }
 
     var showBudgetDialog by rememberSaveable { mutableStateOf(false) }
     var selectedBillId by rememberSaveable { mutableStateOf<Long?>(null) }
@@ -150,7 +174,7 @@ fun StatsScreen(
                 Surface(Modifier.weight(1f).height(44.dp).clickable { showDateFilter = true },
                     shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surface) {
                     val date = Instant.ofEpochMilli(selectedDay).atZone(ZoneId.systemDefault()).toLocalDate()
-                    val range = visibleRange
+                    val range = if (showTrend && bars.isNotEmpty()) bars.first().dayStartMillis to bars.last().dayStartMillis else visibleRange
                     fun shortDate(value: Long) = Instant.ofEpochMilli(value).atZone(ZoneId.systemDefault()).toLocalDate().let { "${it.monthValue}月${it.dayOfMonth}日" }
                     Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.Center) {
@@ -178,15 +202,53 @@ fun StatsScreen(
         // ---------- 收支长河 ----------
         item(key = "cash_flow") {
             ChartCard(title = "每日收支", action = {
-                Text("单位：元", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(Modifier.background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = .35f), RoundedCornerShape(20.dp)).padding(2.dp)) {
+                        listOf(false to "柱图", true to "折线").forEach { (trend, label) ->
+                            Surface(onClick = { showTrend = trend }, shape = RoundedCornerShape(20.dp),
+                                color = if (showTrend == trend) MaterialTheme.colorScheme.surface else Color.Transparent) {
+                                Text(label, Modifier.padding(horizontal = 9.dp, vertical = 5.dp), style = MaterialTheme.typography.labelSmall,
+                                    color = if (showTrend == trend) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+                    Text("元", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }) {
-                CashFlowBarChart(
+                if (showTrend) {
+                    val actualColor = if (flowType == BillType.EXPENSE) ExpenseCoral else IncomeGreen
+                    // Keep the semantic forecast ink distinct even in the strawberry (pink) skin.
+                    val predictionColor = ActionPurple
+                    val selectedDate = Instant.ofEpochMilli(selectedDay).atZone(ZoneId.systemDefault()).toLocalDate()
+                    Row(Modifier.fillMaxWidth().height(24.dp), verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text((if (flowType == BillType.EXPENSE) "消费轻估计" else "每日收入") + " · ${selectedDate.dayOfMonth}日", Modifier.weight(1f),
+                            style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        LineVisibilityChoice("实际", showActual, actualColor) { showActual = it }
+                        if (flowType == BillType.EXPENSE) LineVisibilityChoice("预测", showPrediction, predictionColor) { showPrediction = it }
+                    }
+                    SpendingLineChart(bars, linePoints, selectedDay, showActual,
+                        showPrediction && flowType == BillType.EXPENSE, actualColor, predictionColor,
+                        onSelectDay = { vm.selectDay(it) }, modifier = Modifier.fillMaxWidth().height(168.dp))
+                    val point = linePoints.firstOrNull { it.dayStartMillis == selectedDay }
+                    Row(Modifier.fillMaxWidth().padding(top = 3.dp).height(18.dp),
+                        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        if (showActual) Text(point?.actualFen?.let { "实际 ¥${Formatters.fenToYuanText(it)}${if (selectedDay == Formatters.dayStart(System.currentTimeMillis())) " · 截至现在" else ""}" } ?: "实际 —",
+                            modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.labelSmall, color = actualColor)
+                        if (showPrediction && flowType == BillType.EXPENSE) Text(point?.predictedFen?.let { "预测 ≈¥${forecastYuan(it)}" }
+                            ?: "积累 7 个完整日后预测",
+                            modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.labelSmall, color = predictionColor)
+                    }
+                } else CashFlowBarChart(
                     bars = bars,
                     onVisibleRange = { first, last -> visibleRange = first to last },
                     selectedDayMillis = selectedDay,
                     onSelectDay = { vm.selectDay(it) },
                     color = if (flowType == BillType.EXPENSE) ExpenseCoral else IncomeGreen,
                     trackColor = MaterialTheme.colorScheme.outlineVariant,
+                    viewport = chartViewport,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(202.dp)
@@ -352,6 +414,20 @@ fun StatsScreen(
             onSelect = { vm.selectCalendarDate(it); showDateFilter = false })
     }
 
+}
+
+/** Prediction amounts deliberately avoid displaying cents as if the estimate were exact. */
+private fun forecastYuan(fen: Long): String = java.math.BigDecimal.valueOf(fen).divide(java.math.BigDecimal(100))
+    .setScale(0, java.math.RoundingMode.HALF_UP).toPlainString()
+
+@Composable
+private fun LineVisibilityChoice(label: String, checked: Boolean, color: Color, onChange: (Boolean) -> Unit) {
+    Row(Modifier.toggleable(value = checked, role = Role.Checkbox, onValueChange = onChange).padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+        Icon(if (checked) Icons.Outlined.CheckBox else Icons.Outlined.CheckBoxOutlineBlank, contentDescription = null,
+            tint = if (checked) color else MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
+        Text(label, style = MaterialTheme.typography.labelSmall, color = if (checked) color else MaterialTheme.colorScheme.onSurfaceVariant)
+    }
 }
 
 @Composable

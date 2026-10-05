@@ -21,6 +21,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.jiligulu.app.JiliguluApp
 import com.jiligulu.app.data.prefs.LittleWorldSkin
 import com.jiligulu.app.ui.littleworld.LittleWorldSkinArtwork
+import com.jiligulu.app.ui.theme.skinMaterialFor
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.NonCancellable
@@ -35,13 +36,14 @@ internal fun LittleWorldSkinSettings(enabled: Boolean) {
     var saving by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf(false) }
     Text("全局皮肤", style = MaterialTheme.typography.titleSmall)
-    Text("账本、统计和阿噜的小世界一起换装 ♡", style = MaterialTheme.typography.bodySmall,
+    Text("纸张、卡片边框和水彩贴纸，随整个小世界一起换装 ♡", style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant)
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         LittleWorldSkin.entries.chunked(2).forEach { row ->
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 row.forEach { skin ->
                     val checked = saved == skin
+                    val previewMaterial = remember(skin) { skinMaterialFor(skin) }
                     Surface(onClick = {
                         if (checked) return@Surface
                         scope.launch(start = CoroutineStart.UNDISPATCHED) {
@@ -52,7 +54,7 @@ internal fun LittleWorldSkinSettings(enabled: Boolean) {
                             catch (_: Exception) { error = true }
                             finally { saving = false }
                         }
-                    }, enabled = enabled && saved != null && !saving, shape = RoundedCornerShape(16.dp),
+                    }, enabled = enabled && saved != null && !saving, shape = previewMaterial.shapes.large,
                         color = MaterialTheme.colorScheme.surface,
                         border = BorderStroke(if (checked) 2.dp else 1.dp,
                             if (checked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant),
@@ -68,6 +70,9 @@ internal fun LittleWorldSkinSettings(enabled: Boolean) {
                                 Text(skin.title, style = MaterialTheme.typography.labelMedium, modifier = Modifier.weight(1f))
                                 if (checked) Icon(Icons.Rounded.CheckCircle, "已选中", Modifier.size(17.dp), tint = MaterialTheme.colorScheme.primary)
                             }
+                            Text(previewMaterial.description, style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 2.dp, vertical = 2.dp))
                         }
                     }
                 }

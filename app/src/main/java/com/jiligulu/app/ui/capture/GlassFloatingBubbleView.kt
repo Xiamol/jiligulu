@@ -58,6 +58,12 @@ class GlassFloatingBubbleView @JvmOverloads constructor(
     private val lightMatrix=Matrix()
     private var lightX=.3f
     private var lightY=.3f
+    private val backdropPaint=Paint(Paint.ANTI_ALIAS_FLAG)
+    private var lens:GlassLensShader?=null
+    private var backdrop:Bitmap?=null
+    private var backdropX=0f
+    private var backdropY=0f
+    private val backdropRefreshTask=Runnable {refreshBackdrop()}
 
     init {
         background = null
@@ -74,6 +80,7 @@ class GlassFloatingBubbleView @JvmOverloads constructor(
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
+        backdrop=null;backdropPaint.shader=null
         if (w <= 0 || h <= 0) return
         side = min(w, h).toFloat()
         val cx = w / 2f
@@ -141,6 +148,8 @@ class GlassFloatingBubbleView @JvmOverloads constructor(
         canvas.scale(1f - pressure * .07f,1f + pressure * .018f,cx,cy)
         canvas.translate(0f, pressure * side * .011f)
         softShadow?.let { canvas.drawBitmap(it, 0f, 0f, bitmapPaint) }
+        if(!AppGlassBackdrop.available()) {backdrop=null;backdropPaint.shader=null}
+        if(backdrop!=null && backdropPaint.shader!=null) canvas.drawPath(glassPath,backdropPaint)
         canvas.drawRoundRect(glassBounds, radius, radius, glassPaint)
         canvas.drawPath(glassPath, glowPaint)
         canvas.drawRoundRect(innerBounds, radius - side * .018f, radius - side * .018f, innerRimPaint)
@@ -170,8 +179,34 @@ class GlassFloatingBubbleView @JvmOverloads constructor(
         lightX=nextX;lightY=nextY
         lightMatrix.setRotate((lightX-.5f)*110f+(lightY-.5f)*45f,width/2f,height/2f)
         rimPaint.shader?.setLocalMatrix(lightMatrix)
+        refreshBackdropAfterMove()
         invalidate()
     }
+
+    /** Sample after WindowManager has applied the newest position, including the final UP. */
+    fun refreshBackdropAfterMove() {
+        if(android.os.Build.VERSION.SDK_INT<33 || !isAttachedToWindow) return
+        removeCallbacks(backdropRefreshTask)
+        postOnAnimation(backdropRefreshTask)
+    }
+
+    fun refreshBackdrop() {
+        if(android.os.Build.VERSION.SDK_INT<33) return
+        AppGlassBackdrop.copyBehind(this) {bitmap,x,y ->
+            backdrop=bitmap
+            if(bitmap==null) backdropPaint.shader=null
+            else runCatching {
+                val next=lens ?: GlassLensShader().also {lens=it;android.util.Log.d("GlassLens","Own-window refraction initialized")}
+                backdropX=x;backdropY=y
+                next.bind(bitmap,x,y,width,height,lightX,lightY)
+                backdropPaint.shader=next.shader
+            }.onFailure {backdropPaint.shader=null;backdrop=null;android.util.Log.w("GlassLens","Shader unavailable",it)}
+            invalidate()
+        }
+    }
+
+    fun clearBackdrop() {backdrop=null;backdropPaint.shader=null;invalidate()}
+    override fun onAttachedToWindow() {super.onAttachedToWindow();AppGlassBackdrop.watch(this);postDelayed(backdropRefreshTask,100)}
 
     /** Call on DOWN, and release on UP/CANCEL/configuration changes in the service. */
     fun setGlassPressed(pressed: Boolean) {
@@ -198,11 +233,15 @@ class GlassFloatingBubbleView @JvmOverloads constructor(
 
     override fun onVisibilityChanged(changedView: View, visibility: Int) {
         super.onVisibilityChanged(changedView, visibility)
-        if (visibility != VISIBLE) resetPress()
+        if (visibility != VISIBLE) {removeCallbacks(backdropRefreshTask);resetPress()}
+        else if(isAttachedToWindow) refreshBackdropAfterMove()
     }
 
     override fun onDetachedFromWindow() {
+        removeCallbacks(backdropRefreshTask)
+        AppGlassBackdrop.unwatch(this)
         resetPress()
+        backdrop=null;backdropPaint.shader=null;lens=null
         super.onDetachedFromWindow()
     }
 

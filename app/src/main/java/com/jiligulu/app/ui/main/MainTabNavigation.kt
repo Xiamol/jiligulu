@@ -59,12 +59,12 @@ internal fun MainTabNavigation(
     val drag by rememberUpdatedState(onScrub)
     val end by rememberUpdatedState(onScrubEnd)
     val select by rememberUpdatedState(onSelect)
-    val thumbWidth = 70.dp
+    val thumbWidth = 56.dp
     val thumbPx = with(density) { thumbWidth.toPx() }
 
     Box(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).navigationBarsPadding()) {
         androidx.compose.foundation.layout.BoxWithConstraints(
-            Modifier.fillMaxWidth().height(80.dp).testTag("main-tab-scrubber")
+            Modifier.fillMaxWidth().height(58.dp).testTag("main-tab-scrubber")
                 .pointerInput(pager, thumbPx) {
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
@@ -107,26 +107,26 @@ internal fun MainTabNavigation(
                 }
         ) {
             val widthPx = constraints.maxWidth.toFloat()
-            Box(Modifier.padding(top = 11.dp).size(thumbWidth, 34.dp)
+            Box(Modifier.padding(top = 5.dp).size(thumbWidth, 29.dp)
                 .graphicsLayer { translationX = TabScrubPosition.center(progress, widthPx) - thumbPx / 2f }
                 .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = .76f), RoundedCornerShape(50)))
-            Row(Modifier.fillMaxWidth().height(80.dp)) {
+            Row(Modifier.fillMaxWidth().height(58.dp)) {
                 listOf("账本", "小窝", "统计").forEachIndexed { index, label ->
                     val proximity = (1f - abs(progress - index)).coerceIn(0f, 1f)
                     val tint = androidx.compose.ui.graphics.lerp(MaterialTheme.colorScheme.onSurfaceVariant,
                         MaterialTheme.colorScheme.primary, proximity)
-                    Column(Modifier.weight(1f).height(80.dp)
+                    Column(Modifier.weight(1f).height(58.dp)
                         .selectable(selected = selectedTab == index, onClick = { onSelect(index) }, role = Role.Tab)
                         .testTag(when (index) { 0 -> "main-tab-home"; 1 -> "main-tab-world"; else -> "main-tab-stats" })
-                        .padding(top = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        .padding(top = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         Icon(when (index) {
                             0 -> Icons.AutoMirrored.Outlined.ReceiptLong
                             1 -> if (proximity > .5f) Icons.Filled.Cottage else Icons.Outlined.Cottage
                             else -> if (proximity > .5f) Icons.Filled.BarChart else Icons.Outlined.BarChart
                         },
-                            contentDescription = null, modifier = Modifier.size(25.dp), tint = tint)
-                        Text(label, Modifier.padding(top = 6.dp), color = tint,
-                            style = MaterialTheme.typography.labelMedium)
+                            contentDescription = null, modifier = Modifier.size(22.dp), tint = tint)
+                        Text(label, Modifier.padding(top = 2.dp), color = tint,
+                            style = MaterialTheme.typography.labelSmall)
                     }
                 }
             }

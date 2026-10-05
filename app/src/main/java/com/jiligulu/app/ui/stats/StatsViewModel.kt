@@ -17,21 +17,30 @@ import com.jiligulu.app.data.repository.CategoryRepository
 import com.jiligulu.app.domain.budget.BudgetStatus
 import com.jiligulu.app.domain.category.CategoryLabels
 import com.jiligulu.app.domain.color.GoldenAnglePalette
+import com.jiligulu.app.domain.forecast.DailySpending
+import com.jiligulu.app.domain.forecast.SpendingForecast
+import com.jiligulu.app.domain.forecast.SpendingForecastDay
 import com.jiligulu.app.ui.stats.charts.DayBar
 import com.jiligulu.app.ui.stats.charts.DonutSlice
 import com.jiligulu.app.ui.theme.BudgetRemainGreen
 import com.jiligulu.app.ui.theme.DangerRed
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.util.Calendar
 import java.time.Instant
+import java.time.LocalDate
 import java.time.YearMonth
 import java.time.ZoneId
 import java.time.temporal.ChronoUnit
@@ -170,6 +179,28 @@ class StatsViewModel(
                 )
             }
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    /** Forecast work stays bounded to the displayed month plus its preceding 28 days. */
+    val forecastToday: StateFlow<LocalDate> = flow {
+        while (true) { emit(LocalDate.now()); delay(60_000L) }
+    }.distinctUntilChanged().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), LocalDate.now())
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val expenseForecast: StateFlow<List<SpendingForecastDay>> = combine(displayedMonth, forecastToday) { range, now -> range to now }
+        .flatMapLatest { (range, now) ->
+            val zone = ZoneId.systemDefault()
+            val start = Instant.ofEpochMilli(range.first).atZone(zone).toLocalDate()
+            val end = Instant.ofEpochMilli(range.second).atZone(zone).toLocalDate()
+            billRepository.observeBetween(start.minusDays(SpendingForecast.HISTORY_DAYS.toLong()).atStartOfDay(zone).toInstant().toEpochMilli(),
+                minOf(range.second, now.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()))
+                .map { bills ->
+                    val expenses = bills.asSequence().filter { it.type == BillType.EXPENSE }
+                        .map { DailySpending(Instant.ofEpochMilli(it.timestamp).atZone(zone).toLocalDate(), it.amountFen) }.toList()
+                    val days = (0 until ChronoUnit.DAYS.between(start, end).toInt()).map { start.plusDays(it.toLong()) }
+                    SpendingForecast.forDates(expenses, days, now)
+                }
+        }.flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     /** 今日瓜分：选中日的分类切片（≤7 片，超出合并「其他」） */
     val dayDonut: StateFlow<DayDonutUi> =

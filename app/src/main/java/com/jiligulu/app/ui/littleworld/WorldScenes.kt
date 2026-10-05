@@ -57,7 +57,7 @@ fun WorldSceneArt(scene:WorldScene,modifier:Modifier=Modifier,onClick:(()->Unit)
             val scale=min(size.width/crop.width,size.height/crop.height)
             val dst=IntSize((crop.width*scale).roundToInt(),(crop.height*scale).roundToInt())
             drawImage(image,srcOffset=IntOffset(crop.left,crop.top),srcSize=IntSize(crop.width,crop.height),
-                dstOffset=IntOffset(((size.width-dst.width)/2).roundToInt(),((size.height-dst.height)/2).roundToInt()),dstSize=dst)
+                dstOffset=IntOffset(((size.width-dst.width)/2).roundToInt(),((size.height-dst.height)/2).roundToInt()),dstSize=dst,colorFilter=MutedSceneColorFilter)
         }
     }
 }

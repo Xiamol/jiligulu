@@ -111,7 +111,7 @@ class FloatingCaptureService : Service() {
                     if (moved) {
                         val point = FloatingCaptureGeometry.clamp(x + dx.toInt(), y + dy.toInt(), params.width, usableBounds())
                         params.x = point.x; params.y = point.y
-                        runCatching { glassHost.update(params) }
+                        runCatching { glassHost.update(params) }.onSuccess {view.refreshBackdropAfterMove()}
                     }
                     val target = dismissTarget
                     val inside = overDismissTarget(event.rawX, event.rawY)
@@ -133,7 +133,7 @@ class FloatingCaptureService : Service() {
                         val finalPoint = FloatingCaptureGeometry.clamp(x + (event.rawX - startX).toInt(),
                             y + (event.rawY - startY).toInt(), params.width, usableBounds())
                         params.x = finalPoint.x; params.y = finalPoint.y
-                        runCatching { glassHost.update(params) }
+                        runCatching { glassHost.update(params) }.onSuccess {view.refreshBackdropAfterMove()}
                         // One write per completed drag; never persist intermediate movement,
                         // the trash target or temporary screenshot invisibility.
                         persistPosition(FloatingCaptureGeometry.normalize(params.x, params.y, params.width, usableBounds()))
@@ -189,7 +189,7 @@ class FloatingCaptureService : Service() {
         val side = iconPixels()
         val point = FloatingCaptureGeometry.restore(position, side, usableBounds())
         params.width = side; params.height = side; params.x = point.x; params.y = point.y
-        runCatching { glassHost.update(params) }
+        runCatching { glassHost.update(params) }.onSuccess {(view as? GlassFloatingBubbleView)?.refreshBackdropAfterMove()}
     }
 
     private fun persistPosition(position: FloatingCapturePosition, stopAfterSave: Boolean = false) {

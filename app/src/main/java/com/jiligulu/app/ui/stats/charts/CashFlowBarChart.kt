@@ -43,11 +43,12 @@ internal fun cashFlowAxisTop(maxYuan: Double): Double = cashFlowAxis(maxYuan).to
 /** Fixed value axis and scrollable 44dp day slots. Selection uses outline, label and color. */
 @Composable
 fun CashFlowBarChart(bars: List<DayBar>, selectedDayMillis: Long?, onSelectDay: (Long) -> Unit,
-    color: Color, trackColor: Color, modifier: Modifier = Modifier, onVisibleRange: (Long, Long) -> Unit = { _, _ -> }) {
+    color: Color, trackColor: Color, modifier: Modifier = Modifier, onVisibleRange: (Long, Long) -> Unit = { _, _ -> },
+    viewport: CashFlowViewport = rememberCashFlowViewport()) {
     val maxYuan = (bars.maxOfOrNull { it.amountFen } ?: 0L) / 100.0
     val axis = cashFlowAxis(maxYuan)
     val top = axis.top
-    val scroll = rememberScrollState()
+    val scroll = viewport.scroll
     val density = LocalDensity.current
     fun tick(value: Double): String = java.math.BigDecimal.valueOf(value).setScale(if (top < 1) 3 else if (top < 100) 2 else 0, java.math.RoundingMode.HALF_UP).stripTrailingZeros().toPlainString()
     Column(modifier) {
@@ -60,8 +61,7 @@ fun CashFlowBarChart(bars: List<DayBar>, selectedDayMillis: Long?, onSelectDay: 
                 val slotPx = with(density) { slot.toPx() }
                 val notifyRange by rememberUpdatedState(onVisibleRange)
                 LaunchedEffect(selectedDayMillis, bars.size, slotPx) {
-                    val index = bars.indexOfFirst { it.dayStartMillis == selectedDayMillis }
-                    if (index >= 0) scroll.animateScrollTo(((index - 2).coerceAtLeast(0) * slotPx).roundToInt())
+                    viewport.anchorSelection(bars, selectedDayMillis, slotPx)
                 }
                 LaunchedEffect(bars, slotPx) {
                     snapshotFlow { (scroll.value / slotPx).roundToInt().coerceIn(0, (bars.size - 5).coerceAtLeast(0)) }

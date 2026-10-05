@@ -1,0 +1,481 @@
+package com.jiligulu.app.ui.littleworld
+
+import android.graphics.Paint
+import android.os.SystemClock
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material.icons.outlined.Extension
+import androidx.compose.material.icons.outlined.HelpOutline
+import androidx.compose.material.icons.outlined.Logout
+import androidx.compose.material.icons.outlined.PauseCircleOutline
+import androidx.compose.material.icons.outlined.PlayCircleOutline
+import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.Schedule
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.jiligulu.app.R
+import kotlin.math.abs
+import kotlin.math.cos
+import kotlin.math.roundToInt
+import kotlin.math.sin
+
+enum class XiangqiPlayMode { CPU, ONLINE, LAN, HOTSEAT }
+
+@Composable
+internal fun ColumnScope.SecretXiangqiGame(state: XiangqiState, mode: XiangqiPlayMode, paused: Boolean,
+    boardWidth: Dp, thinkingClock: XiangqiThinkingClock, lan: XiangqiLanUiState, onMode: (XiangqiPlayMode) -> Unit,
+    onMove: (XiangqiMove) -> Unit, onToggle: () -> Unit, onRestart: () -> Unit,
+    onHost: () -> Unit, onJoin: (String) -> Unit, onDisconnect: () -> Unit, onPuzzle:(XiangqiState)->Unit,
+    remoteSelection: GridCell? = null, onSelectionChanged: (GridCell?) -> Unit = {},
+    helpBusy: Boolean = false, assistedSelection: GridCell? = null,
+    onSecretHelp: () -> Unit = {}, onModalOpened: () -> Unit = {}) {
+    val taps = remember(state.board, state.turnSide, mode, paused, helpBusy) { HiddenGameHelpTapSequence() }
+    val latestHelp by rememberUpdatedState(onSecretHelp)
+    var modeMenu by remember { mutableStateOf(false) }
+    val modeNames = remember { mapOf(XiangqiPlayMode.CPU to "和阿噜下", XiangqiPlayMode.ONLINE to "远程双人",
+        XiangqiPlayMode.LAN to "局域网双人", XiangqiPlayMode.HOTSEAT to "同屏双人") }
+    Row(Modifier.width(boardWidth).height(42.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box {
+            TextButton(onClick = { taps.reset(); onModalOpened(); modeMenu = true }, contentPadding = PaddingValues(horizontal = 8.dp)) {
+                Text(modeNames.getValue(mode), color = Color(0xFF766A7F))
+                Icon(Icons.Outlined.ExpandMore, "选择对局方式", Modifier.size(18.dp), tint = Color(0xFF928497))
+            }
+            DropdownMenu(expanded = modeMenu, onDismissRequest = { modeMenu = false }) {
+                modeNames.forEach { (value, label) ->
+                    DropdownMenuItem(text = { Text(label) }, onClick = {
+                        modeMenu = false
+                        if (mode != value) onMode(value)
+                    })
+                }
+            }
+        }
+        Spacer(Modifier.weight(1f))
+        Text(if (state.outcome != XiangqiOutcome.PLAYING) "本局结束" else if (paused && mode != XiangqiPlayMode.ONLINE && mode != XiangqiPlayMode.LAN)
+            "已暂停" else if (state.turnSide == XiangqiSide.RED) "红方回合" else "黑方回合",
+            style = MaterialTheme.typography.bodySmall,
+            color = if (state.turnSide == XiangqiSide.RED) Color(0xFFAF766A) else Color(0xFF766A7F))
+    }
+    val networkMode = mode == XiangqiPlayMode.LAN || mode == XiangqiPlayMode.ONLINE
+    var choosePuzzle by remember {mutableStateOf(false)}
+    var showRules by remember { mutableStateOf(false) }
+    if (networkMode && !lan.connected) {
+        SecretXiangqiConnection(lan, online = mode == XiangqiPlayMode.ONLINE, onHost, onJoin, onDisconnect,
+            onFallback = { onMode(XiangqiPlayMode.LAN) })
+        return
+    }
+    if(choosePuzzle) com.jiligulu.app.ui.components.GuluDialog("一着小残局",{choosePuzzle=false},compact=true) {
+        Text("红方一步取胜。选一种小棋子，试试它的庆祝方式 ♡",style=MaterialTheme.typography.bodySmall)
+        XiangqiPuzzles.all.forEach {puzzle-> TextButton(onClick={choosePuzzle=false;onPuzzle(puzzle.position)}) {Text(puzzle.title)} }
+    }
+    if (showRules) com.jiligulu.app.ui.components.GuluDialog("棋桌上的小约定", { showRules = false }, compact = true) {
+        Text("先点棋子，再点落点。小圆点是可走的位置，空心圈表示可以吃子；再点一次已选棋子可以取消。",
+            style = MaterialTheme.typography.bodyMedium)
+        Text("人机和同屏：开局可以设置本步思考秒数，暂停或离开软件会停表。时间到了也可以继续想，不判负。",
+            style = MaterialTheme.typography.bodySmall)
+        Text("联机棋桌不限时。双方可以看见对方正在选中的棋子，落子后提示自动收好。",
+            style = MaterialTheme.typography.bodySmall)
+    }
+    val playerName = if (state.turnSide == XiangqiSide.RED) "红方" else "黑方"
+    val winningPiece = state.lastMove?.let { abs(state.pieceAt(it.to.x, it.to.y)) } ?: 0
+    val winningFlavor = when (winningPiece) {
+        XiangqiEngine.ROOK -> "小车走出了一条金色星轨"
+        XiangqiEngine.CANNON -> "小炮放了一圈星星烟花"
+        XiangqiEngine.HORSE -> "小马跳着给你撒花"
+        XiangqiEngine.PAWN -> "小兵一步步走到了好位置"
+        XiangqiEngine.ELEPHANT -> "小相把一片好运带了过来"
+        XiangqiEngine.ADVISOR -> "小士替棋桌系上庆祝彩带"
+        else -> "阿噜替这一局撒一把星星"
+    }
+    val inCheck = remember(state) { state.outcome == XiangqiOutcome.PLAYING && XiangqiEngine.isInCheck(state, state.turnSide) }
+    val status = when (state.outcome) {
+        XiangqiOutcome.RED_WON -> "红方赢啦 · $winningFlavor ♡"
+        XiangqiOutcome.BLACK_WON -> "黑方赢啦 · $winningFlavor ♡"
+        XiangqiOutcome.PLAYING -> when {
+            !networkMode && paused -> "棋局已暂停"
+            networkMode && lan.awaitingAck -> "正在等另一张棋桌回应…"
+            !networkMode && thinkingClock.expired && thinkingClock.side == state.turnSide -> "提醒时间到啦，继续慢慢想也可以 ♡"
+            mode == XiangqiPlayMode.CPU && state.turnSide == XiangqiSide.BLACK -> "阿噜在想下一步…"
+            inCheck -> "$playerName 被将军了，先保护将帅"
+            else -> "轮到${playerName}落子"
+        }
+    }
+    val canMove = !helpBusy && state.outcome == XiangqiOutcome.PLAYING && when (mode) {
+        XiangqiPlayMode.CPU -> !paused && state.turnSide == XiangqiSide.RED
+        XiangqiPlayMode.HOTSEAT -> !paused
+        XiangqiPlayMode.LAN, XiangqiPlayMode.ONLINE -> lan.connected && !lan.awaitingAck && state.turnSide == lan.localSide
+    }
+    Spacer(Modifier.height(10.dp))
+    XiangqiBoard(state, boardWidth, canMove,
+        flipped = networkMode && lan.localSide == XiangqiSide.BLACK, onMove = onMove,
+        remoteSelection = remoteSelection, onSelectionChanged = onSelectionChanged, assistedSelection = assistedSelection)
+    Text(status, modifier = Modifier.padding(vertical = 10.dp).width(boardWidth).pointerInput(taps, canMove) {
+        detectTapGestures { if (taps.tap(SystemClock.elapsedRealtime(), canMove)) latestHelp() }
+    }, color = Color(0xFF766A7F),
+        style = MaterialTheme.typography.bodySmall, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+        Row(Modifier.width(boardWidth).padding(horizontal = 6.dp, vertical = 4.dp)) {
+            if (networkMode) {
+                GameIconTool(Icons.Outlined.Logout, "离开棋桌", onDisconnect, Modifier.weight(1f))
+                GameIconTool(Icons.Outlined.Refresh, "重开", onRestart, Modifier.weight(1f),
+                    enabled = lan.localSide == XiangqiSide.RED && !lan.awaitingAck)
+            } else {
+                GameIconTool(if (paused) Icons.Outlined.PlayCircleOutline else Icons.Outlined.PauseCircleOutline,
+                    if (paused) "继续" else "暂停", onToggle, Modifier.weight(1f), enabled = state.outcome == XiangqiOutcome.PLAYING)
+                GameIconTool(Icons.Outlined.Refresh, "重开", onRestart, Modifier.weight(1f))
+                GameIconTool(Icons.Outlined.Extension, "残局", { taps.reset(); onModalOpened(); if (!paused) onToggle(); choosePuzzle = true }, Modifier.weight(1f))
+            }
+            GameIconTool(Icons.Outlined.HelpOutline, "规则", { taps.reset(); onModalOpened(); if (!networkMode && !paused) onToggle(); showRules = true }, Modifier.weight(1f))
+        }
+    Text(if (networkMode) "联机棋桌 · 不限时" else "每手 ${thinkingClock.durationMillis / 1000} 秒 · 点小钟可以调整",
+        Modifier.padding(top = 8.dp, bottom = 8.dp), style = MaterialTheme.typography.labelSmall, color = Color(0xFF9C8D98))
+    lan.error?.takeIf { networkMode }?.let {
+        Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+@Composable
+internal fun SharedThinkingClock(side: XiangqiSide, seconds: Int, paused: Boolean, network: Boolean, onClick: () -> Unit) {
+    Box(Modifier.size(52.dp).testTag("xiangqi-shared-clock").clickable(enabled = !network, role = Role.Button, onClick = onClick)
+        .semantics { contentDescription = "${if (side == XiangqiSide.RED) "红方" else "黑方"}本步${if (network) "不限时" else if (paused) "已暂停，剩余${seconds}秒" else "剩余${seconds}秒"}" },
+        contentAlignment = Alignment.Center) {
+        Canvas(Modifier.fillMaxSize()) { drawCircle(Color(0xFF897166), radius = size.width * .46f, style = Stroke(1.5.dp.toPx())) }
+        Icon(if (paused && !network) Icons.Outlined.PauseCircleOutline else Icons.Outlined.Schedule,
+            null, Modifier.align(Alignment.TopCenter).padding(top = 6.dp).size(12.dp), tint = Color(0xFF897166))
+        Text(if (network) "∞" else seconds.toString(), modifier = Modifier.padding(top = 9.dp), fontSize = 18.sp,
+            fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Medium,
+            color = if (seconds == 0 && !network) Color(0xFFAD786D) else Color(0xFF796758))
+    }
+}
+
+@Composable
+internal fun XiangqiThinkingTimeDialog(initialSeconds: Int, starting: Boolean, onDismiss: () -> Unit,
+    onConfirm: (Int) -> Unit) {
+    var value by rememberSaveable(initialSeconds, starting) { mutableStateOf(initialSeconds.toString()) }
+    var showError by remember { mutableStateOf(false) }
+    val seconds = value.toIntOrNull()
+    val valid = seconds != null && seconds in XiangqiThinkingClock.MIN_SECONDS..XiangqiThinkingClock.MAX_SECONDS
+    com.jiligulu.app.ui.components.GuluDialog(if (starting) "这局思考几秒？" else "调整本步时间", onDismiss,
+        confirmLabel = if (starting) "开始对弈" else "应用", onConfirm = {
+            if (valid) onConfirm(requireNotNull(seconds)) else showError = true
+        }, dismissLabel = "稍后", compact = true, compactWidth = 270.dp) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf(60, 120, 180).forEach { preset ->
+                TextButton(onClick = { value = preset.toString(); showError = false },
+                    modifier = Modifier.weight(1f).background(if (seconds == preset) Color(0xFFEFE9F5) else Color.Transparent,
+                        RoundedCornerShape(12.dp)), contentPadding = PaddingValues(horizontal = 4.dp)) {
+                    Text("${preset} 秒", fontSize = 12.sp)
+                }
+            }
+        }
+        OutlinedTextField(value = value, onValueChange = { value = it.filter(Char::isDigit).take(3); showError = false },
+            label = { Text("思考时间（秒）", fontSize = 12.sp) }, singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            shape = RoundedCornerShape(14.dp), isError = showError && !valid,
+            modifier = Modifier.fillMaxWidth().heightIn(max = 64.dp).testTag("xiangqi-thinking-seconds"))
+        Text(if (showError && !valid) "填 15～600 秒就好。" else if (starting) "每步到时只提醒，不判负。" else "应用后，这一步会重新计时。",
+            style = MaterialTheme.typography.bodySmall,
+            color = if (showError && !valid) MaterialTheme.colorScheme.error else Color(0xFF9C8D98))
+    }
+}
+
+@Composable
+internal fun GameIconTool(icon: ImageVector, label: String, onClick: () -> Unit, modifier: Modifier,
+    enabled: Boolean = true) {
+    Column(modifier.height(53.dp).clip(RoundedCornerShape(12.dp))
+        .clickable(enabled = enabled, role = Role.Button, onClick = onClick).padding(vertical = 5.dp),
+        horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        Icon(icon, null, Modifier.size(22.dp), tint = Color(0xFF87748E).copy(alpha = if (enabled) 1f else .3f))
+        Text(label, fontSize = 10.sp, color = Color(0xFF87748E).copy(alpha = if (enabled) 1f else .3f))
+    }
+}
+
+@Composable
+private fun ColumnScope.SecretXiangqiConnection(lan: XiangqiLanUiState, online: Boolean, onHost: () -> Unit,
+    onJoin: (String) -> Unit, onDisconnect: () -> Unit, onFallback: () -> Unit) {
+    var address by rememberSaveable(online) { mutableStateOf("") }
+    Box(Modifier.weight(1f).fillMaxWidth().imePadding(), contentAlignment = Alignment.Center) {
+    com.jiligulu.app.ui.components.SpringScrollColumn(Modifier.fillMaxWidth().padding(start = 8.dp, top = 12.dp, bottom = 12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally) {
+    Box(Modifier.size(84.dp).clip(RoundedCornerShape(24.dp)).background(Color(0xFFF0E5D3)), contentAlignment = Alignment.Center) {
+        Text("棋", fontSize = 40.sp, fontFamily = com.jiligulu.app.ui.theme.GuluBrandFont, color = Color(0xFF9C7860))
+    }
+    Text(if (lan.sessionActive) "等棋友坐下来" else if (online) "和远方的棋友下一盘" else "同一张 Wi-Fi 下的小棋桌",
+        Modifier.padding(top = 18.dp, bottom = 8.dp), style = MaterialTheme.typography.titleMedium, color = Color(0xFF665762))
+    Text(if (online) "创建棋桌，再把房间码告诉对方。" else "两部手机连接同一个 Wi-Fi，房主执红棋。",
+        style = MaterialTheme.typography.bodySmall, color = Color(0xFF9C8D98))
+    Spacer(Modifier.height(24.dp))
+    if (lan.sessionActive) {
+        Text(lan.status, style = MaterialTheme.typography.bodySmall, color = Color(0xFF766A7F))
+        if (lan.hostAddress.isNotEmpty()) SelectionFriendlyAddress(lan.hostAddress, online)
+        lan.error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+        TextButton(onClick = onDisconnect, modifier = Modifier.padding(top = 10.dp)) { Text("取消等待") }
+    } else {
+        Button(onClick = onHost, enabled = !lan.busy, shape = RoundedCornerShape(14.dp),
+            modifier = Modifier.widthIn(max = 300.dp).fillMaxWidth(.82f).height(48.dp)) { Text("创建棋桌") }
+        Row(Modifier.widthIn(max = 340.dp).fillMaxWidth(.9f).padding(vertical = 18.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            HorizontalDivider(Modifier.weight(1f), color = Color(0xFFE4DBD4))
+            Text("或者加入棋友", style = MaterialTheme.typography.labelSmall, color = Color(0xFF9C8D98))
+            HorizontalDivider(Modifier.weight(1f), color = Color(0xFFE4DBD4))
+        }
+        Row(Modifier.widthIn(max = 340.dp).fillMaxWidth(.9f), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedTextField(value = address, onValueChange = { address = it.take(64) }, singleLine = true,
+                placeholder = { Text(if (online) "输入房间码" else "房主的局域网地址", style = MaterialTheme.typography.bodySmall) },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii), shape = RoundedCornerShape(14.dp),
+                modifier = Modifier.weight(1f))
+            FilledTonalButton(onClick = { onJoin(address.trim()) }, enabled = address.isNotBlank() && !lan.busy,
+                shape = RoundedCornerShape(14.dp), contentPadding = PaddingValues(horizontal = 16.dp)) { Text("加入") }
+        }
+        Text(lan.status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        lan.error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+    }
+    Spacer(Modifier.height(24.dp))
+    Text("切去分享时，棋桌会替你留两分钟。", Modifier.padding(top = 10.dp),
+        style = MaterialTheme.typography.labelSmall, color = Color(0xFF9C8D98))
+    if (online) TextButton(onClick = onFallback) { Text("也可以改用局域网双人") }
+    Spacer(Modifier.height(12.dp))
+    }
+    }
+}
+
+@Composable
+private fun SelectionFriendlyAddress(address: String, online: Boolean) {
+    val clipboard=androidx.compose.ui.platform.LocalClipboardManager.current
+    var copied by remember(address) {mutableStateOf(false)}
+    androidx.compose.foundation.text.selection.SelectionContainer {
+        Text(address, Modifier.padding(top = 16.dp), fontSize = if (online) 26.sp else 19.sp,
+            color = Color(0xFF766A7F))
+    }
+    TextButton(onClick={clipboard.setText(androidx.compose.ui.text.AnnotatedString(address));copied=true}) {
+        Text(if(copied) "复制好啦 ♡" else if(online) "复制房间码" else "复制房主地址")
+    }
+}
+
+@Composable
+private fun XiangqiBoard(state: XiangqiState, width: Dp, canMove: Boolean, flipped: Boolean,
+    onMove: (XiangqiMove) -> Unit, remoteSelection: GridCell?, onSelectionChanged: (GridCell?) -> Unit,
+    assistedSelection: GridCell?) {
+    val context = LocalContext.current
+    val typeface = remember(context) { context.resources.getFont(R.font.zcool_kuaile) }
+    val wood = remember { Brush.linearGradient(listOf(Color(0xFFF2DFB9), Color(0xFFE5C79A))) }
+    val textPaint = remember(typeface) { Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        this.typeface = typeface
+        textAlign = Paint.Align.CENTER
+    } }
+    var selected by rememberSaveable { mutableIntStateOf(-1) }
+    val latestSelection by rememberUpdatedState(onSelectionChanged)
+    fun updateSelection(value: Int) {
+        if (value != selected) {
+            selected = value
+            latestSelection(if (value < 0) null else GridCell(value % 9, value / 9))
+        }
+    }
+    LaunchedEffect(state.board, state.turnSide, canMove) { updateSelection(-1) }
+    DisposableEffect(Unit) { onDispose { if (selected >= 0) latestSelection(null) } }
+    val selectedCell = assistedSelection ?: if (selected >= 0) GridCell(selected % 9, selected / 9) else null
+    val displaySelection = selectedCell?.let { it.y * 9 + it.x } ?: -1
+    val legal = remember(state, selectedCell, canMove, assistedSelection) {
+        if ((canMove || assistedSelection != null) && selectedCell != null) XiangqiEngine.legalMoves(state, selectedCell) else emptyList()
+    }
+    val latestState by rememberUpdatedState(state)
+    val latestLegal by rememberUpdatedState(legal)
+    val latestMove by rememberUpdatedState(onMove)
+    val checkPulse = remember { Animatable(0f) }
+    val winPulse = remember { Animatable(0f) }
+    LaunchedEffect(state.ply, state.outcome) {
+        checkPulse.snapTo(0f)
+        winPulse.snapTo(0f)
+        if (state.outcome != XiangqiOutcome.PLAYING) {
+            winPulse.snapTo(1f); winPulse.animateTo(0f, tween(1800))
+        } else if (XiangqiEngine.isInCheck(state, state.turnSide)) {
+            checkPulse.snapTo(1f); checkPulse.animateTo(0f, tween(900))
+        }
+    }
+    Canvas(Modifier.size(width, width * 1.13f).shadow(3.dp, RoundedCornerShape(13.dp), clip = false)
+        .clip(RoundedCornerShape(13.dp)).background(wood).drawWithCache {
+            val grains = List(24) { band ->
+                val x = size.width * (band + .4f) / 24f
+                Offset(x, 0f) to Offset(x + 4.dp.toPx(), size.height)
+            }
+            onDrawBehind {
+                grains.forEachIndexed { index, (start, end) ->
+                    drawLine(Color(0xFFB79361).copy(alpha = if (index % 3 == 0) .055f else .023f), start, end,
+                        (1 + index % 3).dp.toPx())
+                }
+                drawRoundRect(Color(0xFFBD9966).copy(alpha = .6f), cornerRadius = CornerRadius(13.dp.toPx()),
+                    style = Stroke(1.dp.toPx()))
+            }
+        }
+        .semantics { contentDescription = "中国象棋棋盘，${if (state.turnSide == XiangqiSide.RED) "红方" else "黑方"}回合，点棋子再点落点。" }
+        .pointerInput(canMove, flipped) {
+            if (canMove) detectTapGestures { tap ->
+                val padding = size.width * .06f
+                val stepX = (size.width - padding * 2) / 8
+                val stepY = (size.height - padding * 2) / 9
+                val viewX = ((tap.x - padding) / stepX).roundToInt()
+                val viewY = ((tap.y - padding) / stepY).roundToInt()
+                if (viewX !in 0..8 || viewY !in 0..9) return@detectTapGestures
+                val cell = if (flipped) GridCell(8 - viewX, 9 - viewY) else GridCell(viewX, viewY)
+                val move = latestLegal.firstOrNull { it.to == cell }
+                if (move != null) { latestMove(move); updateSelection(-1) }
+                else {
+                    val piece = latestState.pieceAt(cell.x, cell.y)
+                    val owns = if (latestState.turnSide == XiangqiSide.RED) piece > 0 else piece < 0
+                    val index = cell.y * 9 + cell.x
+                    updateSelection(if (owns && index != selected) index else -1)
+                }
+            }
+        }) {
+        val padding = size.width * .06f
+        val stepX = (size.width - padding * 2) / 8
+        val stepY = (size.height - padding * 2) / 9
+        val ink = Color(0xFF967553)
+        fun position(cell: GridCell): Offset {
+            val x = if (flipped) 8 - cell.x else cell.x
+            val y = if (flipped) 9 - cell.y else cell.y
+            return Offset(padding + x * stepX, padding + y * stepY)
+        }
+        repeat(10) { y -> drawLine(ink, Offset(padding, padding + y * stepY),
+            Offset(size.width - padding, padding + y * stepY), 1.dp.toPx()) }
+        repeat(9) { x ->
+            val px = padding + x * stepX
+            if (x == 0 || x == 8) drawLine(ink, Offset(px, padding), Offset(px, size.height - padding), 1.dp.toPx())
+            else {
+                drawLine(ink, Offset(px, padding), Offset(px, padding + 4 * stepY), 1.dp.toPx())
+                drawLine(ink, Offset(px, padding + 5 * stepY), Offset(px, size.height - padding), 1.dp.toPx())
+            }
+        }
+        listOf(0, 7).forEach { y ->
+            drawLine(ink, Offset(padding + 3 * stepX, padding + y * stepY),
+                Offset(padding + 5 * stepX, padding + (y + 2) * stepY), 1.dp.toPx())
+            drawLine(ink, Offset(padding + 5 * stepX, padding + y * stepY),
+                Offset(padding + 3 * stepX, padding + (y + 2) * stepY), 1.dp.toPx())
+        }
+        textPaint.textSize = stepX * .59f
+        textPaint.color = android.graphics.Color.rgb(115, 87, 59)
+        drawContext.canvas.nativeCanvas.drawText("楚 河", padding + 2 * stepX, padding + 4.5f * stepY + textPaint.textSize * .35f, textPaint)
+        drawContext.canvas.nativeCanvas.drawText("汉 界", padding + 6 * stepX, padding + 4.5f * stepY + textPaint.textSize * .35f, textPaint)
+        state.lastMove?.let { move ->
+            drawLine(Color(0xFFC1A57E).copy(alpha = .4f), position(move.from), position(move.to), 2.dp.toPx())
+            drawCircle(Color(0xFFC8A968).copy(alpha = .65f), stepX * .18f, position(move.from), style = Stroke(1.5.dp.toPx()))
+            drawCircle(Color(0xFFC8A968), stepX * .47f, position(move.to), style = Stroke(2.dp.toPx()))
+        }
+        legal.forEach { move ->
+            val capture = state.pieceAt(move.to.x, move.to.y) != 0
+            if (capture) drawCircle(Color(0xFFAC765F).copy(alpha = .85f), stepX * .475f,
+                position(move.to), style = Stroke(2.5.dp.toPx()))
+            else {
+                drawCircle(Color(0xFFFFFBF2).copy(alpha = .75f), stepX * .17f, position(move.to))
+                drawCircle(Color(0xFF789783).copy(alpha = .9f), stepX * .12f, position(move.to))
+            }
+        }
+        state.board.forEachIndexed { index, piece ->
+            if (piece != 0) {
+                val center = position(GridCell(index % 9, index / 9))
+                val red = piece > 0
+                drawCircle(Color(0xFF7B5841).copy(alpha = .2f), stepX * .435f, center + Offset(0f, 2.dp.toPx()))
+                drawCircle(Brush.radialGradient(listOf(Color(0xFFFFFAEA), Color(0xFFEAD0A3)),
+                    center = center - Offset(stepX * .14f, stepX * .18f), radius = stepX * .75f),
+                    stepX * .425f, center)
+                drawCircle(if (red) Color(0xFFB76D58) else Color(0xFF6C5A50), stepX * .37f, center, style = Stroke(1.dp.toPx()))
+                textPaint.color = if (red) android.graphics.Color.rgb(166, 65, 56) else android.graphics.Color.rgb(68, 58, 58)
+                textPaint.textSize = stepX * .63f
+                val glyph = when (abs(piece)) {
+                    1 -> if (red) "帅" else "将"
+                    2 -> if (red) "仕" else "士"
+                    3 -> if (red) "相" else "象"
+                    4 -> "马"
+                    5 -> "车"
+                    6 -> if (red) "炮" else "砲"
+                    else -> if (red) "兵" else "卒"
+                }
+                drawContext.canvas.nativeCanvas.drawText(glyph, center.x, center.y - (textPaint.ascent() + textPaint.descent()) / 2, textPaint)
+                if (index == displaySelection) {
+                    drawCircle(Color(0xFF9F87B0).copy(alpha = .2f), stepX * .49f, center)
+                    drawCircle(Color(0xFF8E70A2), stepX * .46f, center, style = Stroke(2.5.dp.toPx()))
+                    val bracket = stepX * .55f
+                    listOf(Offset(-1f, -1f), Offset(1f, -1f), Offset(-1f, 1f), Offset(1f, 1f)).forEach { corner ->
+                        val edge = center + corner * bracket
+                        drawLine(Color(0xFF8E70A2), edge, edge - Offset(corner.x * stepX * .2f, 0f), 2.dp.toPx())
+                        drawLine(Color(0xFF8E70A2), edge, edge - Offset(0f, corner.y * stepX * .2f), 2.dp.toPx())
+                    }
+                }
+            }
+        }
+        remoteSelection?.takeIf { it.x in 0..8 && it.y in 0..9 }?.let { cell ->
+            drawCircle(Color(0xFF688F88), stepX * .48f, position(cell),
+                style = Stroke(2.5.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(5.dp.toPx(), 3.dp.toPx()))))
+        }
+        if (checkPulse.value > 0f) {
+            val general = state.board.indexOf(state.turnSide.sign * XiangqiEngine.GENERAL)
+            if (general >= 0) drawCircle(Color(0xFFC06056).copy(alpha = checkPulse.value * .7f),
+                stepX * (.47f + (1f - checkPulse.value) * .28f), position(GridCell(general % 9, general / 9)),
+                style = Stroke(2.5.dp.toPx()))
+        }
+        if (winPulse.value > 0f && state.lastMove != null) {
+            val finalMove = state.lastMove
+            val center = position(finalMove.to)
+            val piece = abs(state.pieceAt(finalMove.to.x, finalMove.to.y))
+            val phase = 1f - winPulse.value
+            val gold = Color(0xFFD5A455).copy(alpha = winPulse.value * .8f)
+            when (piece) {
+                XiangqiEngine.ROOK -> {
+                    drawLine(gold, Offset(padding, center.y), Offset(size.width - padding, center.y), 3.dp.toPx())
+                    drawLine(gold, Offset(center.x, padding), Offset(center.x, size.height - padding), 3.dp.toPx())
+                }
+                XiangqiEngine.CANNON -> repeat(3) { ring ->
+                    drawCircle(gold, stepX * (.6f + phase * (ring + 1) * .75f), center, style = Stroke(2.dp.toPx()))
+                }
+                XiangqiEngine.HORSE -> listOf(Offset(-2f, -1f), Offset(-1f, -2f), Offset(1f, -2f), Offset(2f, -1f),
+                    Offset(-2f, 1f), Offset(-1f, 2f), Offset(1f, 2f), Offset(2f, 1f)).forEach { step ->
+                    drawCircle(gold, stepX * .14f, center + step * (stepX * (.25f + phase * .8f)))
+                }
+                XiangqiEngine.PAWN -> repeat(7) { i ->
+                    val point = center + Offset((i - 3) * stepX * phase * .42f, -stepY * (phase * 2 + i % 2 * .3f))
+                    drawCircle(gold, stepX * .11f, point)
+                }
+                else -> repeat(8) { i ->
+                    val angle = i * Math.PI / 4
+                    val point = center + Offset(cos(angle).toFloat(), sin(angle).toFloat()) * (stepX * (.6f + phase * 1.8f))
+                    drawLine(gold, point - Offset(3.dp.toPx(), 0f), point + Offset(3.dp.toPx(), 0f), 2.dp.toPx())
+                    drawLine(gold, point - Offset(0f, 3.dp.toPx()), point + Offset(0f, 3.dp.toPx()), 2.dp.toPx())
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,11 @@
+package com.jiligulu.app.ui.littleworld
+
+/** A peer may send the same board, one legal move, or an explicit fresh-board revision. */
+internal object XiangqiSnapshotRules {
+    fun accepts(revision:Int,game:XiangqiState,initialized:Boolean,next:XiangqiLanMessage.Snapshot):Boolean {
+        if(!initialized) return next.revision==0 && next.game==XiangqiEngine.newGame()
+        if(next.revision==revision) return next.game==game
+        if(revision==Int.MAX_VALUE||next.revision!=revision+1) return false
+        return next.game==XiangqiEngine.newGame() || next.game.lastMove?.let {XiangqiEngine.play(game,it)==next.game}==true
+    }
+}

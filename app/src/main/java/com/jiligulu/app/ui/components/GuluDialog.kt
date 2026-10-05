@@ -16,6 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.jiligulu.app.ui.theme.GuluBrandFont
@@ -30,11 +31,15 @@ fun GuluDialog(
     dismissLabel: String? = null,
     busy: Boolean = false,
     compact: Boolean = false,
+    compactWidth: Dp? = null,
     content: @Composable ColumnScope.() -> Unit
 ) {
     Dialog(onDismissRequest = { if (!busy) onDismiss() },
         properties = DialogProperties(dismissOnBackPress = !busy, dismissOnClickOutside = !busy, usePlatformDefaultWidth = !compact)) {
-        LedgerCard(Modifier.fillMaxWidth(if (compact) .84f else 1f).then(if (compact) Modifier.widthIn(max = 330.dp) else Modifier).heightIn(max = (LocalConfiguration.current.screenHeightDp * if (compact) .62f else .82f).dp)) {
+        com.jiligulu.app.ui.capture.DialogGlassBackdrop()
+        val width = if (compact && compactWidth != null) Modifier.widthIn(max = compactWidth).fillMaxWidth()
+            else Modifier.fillMaxWidth(if (compact) .84f else 1f).then(if (compact) Modifier.widthIn(max = 330.dp) else Modifier)
+        LedgerCard(width.heightIn(max = (LocalConfiguration.current.screenHeightDp * if (compact) .62f else .82f).dp)) {
             Text(title, modifier = Modifier.padding(bottom = 16.dp),
                 style = MaterialTheme.typography.titleLarge.copy(fontFamily = GuluBrandFont, fontWeight = FontWeight.Normal),
                 color = MaterialTheme.colorScheme.primary)
