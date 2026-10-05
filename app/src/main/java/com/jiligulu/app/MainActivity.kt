@@ -294,6 +294,7 @@ private fun JiliguluRoot(waterRequest: Int, futureNoteId: String? = null, onNote
                 }
                 composable(Routes.LITTLE_WORLD) {
                     com.jiligulu.app.ui.littleworld.LittleWorldScreen(onBack = { navController.popBackStack() },
+                        onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                         onOpenWishBook = { navController.navigate(Routes.WISH_BOOK) },
                         onOpenFutureNotes = { navController.navigate(Routes.FUTURE_NOTES) },
                         onOpenMemories = { navController.navigate(Routes.MEMORIES) },

@@ -61,10 +61,13 @@ fun LittleWorldScreen(
     embedded: Boolean = false,
     modifier: Modifier = Modifier,
     active: Boolean = true,
-    onModalChanged: (Boolean) -> Unit = {}
+    onModalChanged: (Boolean) -> Unit = {},
+    onOpenSettings: (() -> Unit)? = null
 ) {
     val app = LocalContext.current.applicationContext as JiliguluApp
     val repository = app.container.littleWorld
+    val announcements = app.container.announcements
+    val mailbox by announcements.state.collectAsStateWithLifecycle()
     val skin by app.container.userPrefs.littleWorldSkin.collectAsStateWithLifecycle(initialValue = null)
     val lifecycleOwner = LocalLifecycleOwner.current
     var error by remember { mutableStateOf<String?>(null) }
@@ -143,7 +146,12 @@ fun LittleWorldScreen(
             item {
                 InteractiveRoomStage(onOpenWishBook,onOpenFutureNotes,onOpenMemories,
                     {showCalculator=true},{showFortune=true},onOpenTimeMachine,
-                    {showFortune=true},modifier=Modifier.fillMaxWidth().height(roomHeight))
+                    {showFortune=true},modifier=Modifier.fillMaxWidth().height(roomHeight),
+                    onMailbox = {
+                        announcements.open((mailbox.entries.firstOrNull { it.id in mailbox.unreadIds }
+                            ?: mailbox.entries.firstOrNull())?.id.orEmpty())
+                    }, onSettings = onOpenSettings, controlsActive = active,
+                    mailboxLoading = mailbox.loading, unreadCount = mailbox.unreadIds.size)
             }
         }
         if(secretHint) Surface(Modifier.align(Alignment.TopCenter)

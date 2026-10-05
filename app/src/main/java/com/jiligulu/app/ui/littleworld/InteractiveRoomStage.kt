@@ -12,10 +12,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import com.jiligulu.app.R
@@ -28,10 +32,11 @@ import kotlin.math.roundToInt
 @Composable
 fun InteractiveRoomStage(onWishes:()->Unit,onLetters:()->Unit,onAlbum:()->Unit,
     onCalculator:()->Unit,onFortune:()->Unit,onTimeMachine:()->Unit,onPet:()->Unit,
-    modifier:Modifier=Modifier) {
+    modifier:Modifier=Modifier, onMailbox:()->Unit={}, onSettings:(()->Unit)?=null,
+    controlsActive:Boolean=true, mailboxLoading:Boolean=false, unreadCount:Int=0) {
     val resources=LocalContext.current.resources
-    val art by produceState<ImageBitmap?>(LittleWorldArtwork.cachedImage(R.drawable.world_interactive_room_v1),resources) {
-        value=withContext(Dispatchers.IO) {LittleWorldArtwork.image(resources,R.drawable.world_interactive_room_v1)}
+    val art by produceState<ImageBitmap?>(LittleWorldArtwork.cachedImage(R.drawable.world_interactive_room_v2),resources) {
+        value=withContext(Dispatchers.IO) {LittleWorldArtwork.image(resources,R.drawable.world_interactive_room_v2)}
     }
     BoxWithConstraints(modifier.clipToBounds()) {
         val sourceRatio=art?.let { it.width.toFloat()/it.height } ?: .75f
@@ -74,6 +79,40 @@ fun InteractiveRoomStage(onWishes:()->Unit,onLetters:()->Unit,onAlbum:()->Unit,
         Box(Modifier.offset(sceneLeft+sceneWidth*.34f,sceneTop+sceneHeight*.713f).size(sceneWidth*.33f,sceneHeight*.190f)
             .clickable(onClickLabel="听阿噜说一句悄悄话",onClick=onPet)
             .semantics {contentDescription="听阿噜说一句悄悄话"})
+
+        // The physical envelope and brass gear are painted into the room. Their
+        // transparent adjoining targets avoid overlap and stay below system chrome.
+        val density=LocalDensity.current
+        val statusInset=with(density) { WindowInsets.statusBars.getTop(density).toDp() }
+        val controlWidth=48.dp
+        val split=(sceneLeft+sceneWidth*.784f).coerceIn(controlWidth,maxWidth-controlWidth)
+        val controlTop=maxOf(statusInset,sceneTop+sceneHeight*.028f)
+        val controlHeight=maxOf(48.dp,sceneHeight*.078f)
+        val mailboxDescription=when {
+            mailboxLoading -> "阿噜的小信箱，正在整理来信"
+            unreadCount>0 -> "阿噜的小信箱，${unreadCount}封未读来信"
+            else -> "阿噜的小信箱"
+        }
+        Box(Modifier.offset(split-controlWidth,controlTop).size(controlWidth,controlHeight)
+            .then(if(controlsActive) Modifier.testTag("main-mailbox") else Modifier)
+            .clickable(enabled=controlsActive&&!mailboxLoading,role=Role.Button,
+                onClickLabel="打开阿噜的小信箱",onClick=onMailbox)
+            .semantics { contentDescription=mailboxDescription })
+        Box(Modifier.offset(split,controlTop).size(controlWidth,controlHeight)
+            .then(if(controlsActive) Modifier.testTag("room-settings") else Modifier)
+            .clickable(enabled=controlsActive&&onSettings!=null,role=Role.Button,
+                onClickLabel="打开设置",onClick={onSettings?.invoke()})
+            .semantics { contentDescription="设置" })
+        Text("信箱",Modifier.offset(sceneLeft+sceneWidth*.696f,sceneTop+sceneHeight*.081f)
+            .size(sceneWidth*.078f,sceneHeight*.024f).wrapContentSize(Alignment.Center),
+            fontSize=11.sp,fontWeight=FontWeight.Medium,color=Color(0xFF694F37),maxLines=1)
+        Text("设置",Modifier.offset(sceneLeft+sceneWidth*.801f,sceneTop+sceneHeight*.081f)
+            .size(sceneWidth*.064f,sceneHeight*.024f).wrapContentSize(Alignment.Center),
+            fontSize=11.sp,fontWeight=FontWeight.Medium,color=Color(0xFF694F37),maxLines=1)
+        if(unreadCount>0||mailboxLoading) Text(if(mailboxLoading) "…" else if(unreadCount>9) "9+" else unreadCount.toString(),
+            Modifier.offset(sceneLeft+sceneWidth*.7635f,sceneTop+sceneHeight*.0305f)
+                .size(sceneWidth*.019f,sceneHeight*.016f).wrapContentSize(Alignment.Center),
+            fontSize=7.sp,lineHeight=8.sp,fontWeight=FontWeight.Medium,color=Color(0xFF694F37),maxLines=1)
     }
 }
 

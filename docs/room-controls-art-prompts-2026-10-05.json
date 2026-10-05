@@ -1,0 +1,40 @@
+{
+  "date": "2026-10-05",
+  "mode": "built-in image_gen edit",
+  "use_case": "precise-object-edit",
+  "input_asset": "app/src/main/res/drawable-nodpi/world_interactive_room_v1.png",
+  "output_asset": "app/src/main/res/drawable-nodpi/world_interactive_room_v2.png",
+  "generated_source": "C:/Users/lumo/.codex/generated_images/01a108e3-b013-7b00-bfcf-4b4746d87cea/exec-ce9164aa-cfc6-4a8c-9cb3-2d899ec74daf.png",
+  "dimensions": {
+    "width": 1086,
+    "height": 1448
+  },
+  "prompt": "Use case: precise-object-edit\nAsset type: Android full-screen illustrated room background, version 2.\nInput image 1 is the edit target. Make one strictly localized edit to its upper-right wall only. Preserve the exact portrait 3:4 aspect ratio, camera, framing, lighting, palette, texture, and every existing object and blank sign at its original normalized coordinates. Do not redraw or move the six navigation objects: star bottles, wooden future-letter box, scrapbook, calculator, fortune jar, purple time-train; preserve the lavender mascot and central top hanging title plaque exactly.\nAdd TWO small physical wall fixtures, organically belonging to this cozy hand-painted room:\n1. A cream paper envelope, held to the wall by a tiny antique brass clip, centered at normalized x=0.790, y=0.072. Envelope bounds approximately x=.753.. .827, y=.053.. .092, with a folded flap, faint lavender wax seal, paper texture and a real warm contact shadow.\n2. A small antique brass gear mounted on a narrow wooden plaque, centered at normalized x=.885, y=.072. Gear/plaque bounds approximately x=.857.. .913, y=.048.. .094. The round gear is visually distinct and clearly readable.\nDirectly below each fixture, add a separate tiny rectangular cream paper caption tag, hung with two thread holes and shadow: first centered x=.790,y=.104 with width=.065,height=.018; second centered x=.885,y=.104 with width=.065,height=.018. Both tags must be completely blank for app-rendered Chinese labels.\nOn the envelope's upper-right corner, add a very tiny blank cream-paper unread-count tag with a slight 6-degree tilt, centered x=.827,y=.055, width=.022,height=.016. No digits painted onto it.\nRemove or shift only the few ivy leaves directly occluding these new small fixtures, if necessary. Keep the nearby wooden shelf and all other greenery unchanged. These controls must resemble tangible room props with the same art style and sunlight, not floating interface buttons. Keep all new fixtures inside normalized x=.73.. .924 and y=.04.. .113; do not overlap the existing future-letter box below y=.116.\nText: NONE. Do not add Chinese, Latin letters, numbers, icons inside white circles, screens, UI pills, toolbars, logos or watermarks. Preserve all seven existing large blank plaques and everything below y=.116.",
+  "reviewed_result": {
+    "preserve": "All original six navigation objects, seven large blank plaques, lavender mascot, image framing and 3:4 aspect ratio.",
+    "actual_art_anchors": {
+      "envelope_center": {
+        "x": 0.735,
+        "y": 0.055
+      },
+      "gear_center": {
+        "x": 0.833,
+        "y": 0.054
+      },
+      "envelope_caption_center": {
+        "x": 0.735,
+        "y": 0.093
+      },
+      "gear_caption_center": {
+        "x": 0.833,
+        "y": 0.093
+      },
+      "unread_paper_tag_center": {
+        "x": 0.773,
+        "y": 0.0385
+      }
+    },
+    "integration": "Ink labels and unread count share the bounded scene image transform. Adjoining transparent targets are each 48dp wide and at least 48dp high, clamped horizontally and below the status bar; no floating toolbar or UI capsule.",
+    "mailbox_behavior": "Loading disables opening. Unread count caps at 9+. Open first unread repository entry, else first entry, else the empty mailbox. AnnouncementDialogHost owns marking letters read."
+  }
+}

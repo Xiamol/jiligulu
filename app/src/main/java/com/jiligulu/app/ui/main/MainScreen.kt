@@ -24,9 +24,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -222,28 +220,15 @@ fun MainScreen(
                                 active = selectedTab == 0, onOpenStats = { navigate(1) }, onPickSticker = onPickSticker,
                                 onPageDrag = pageDrag, onPageDragEnd = pageDragEnd)
                         }
-                        1 -> Box(Modifier.fillMaxSize()) {
-                            LittleWorldScreen(onBack = { navigate(0) }, onOpenWishBook = onOpenWishBook,
-                                onOpenFutureNotes = onOpenFutureNotes, onOpenMemories = onOpenMemories,
-                                onOpenTimeMachine=onOpenTimeMachine,onOpenSecretBase=onOpenSecretBase,
-                                onRecordAmount = onRecordAmount, embedded = true, active = selectedTab == 1,
-                                onModalChanged = { worldModalOpen = it },
-                                modifier = Modifier.fillMaxSize().forwardMainPageSwipe(
-                                    enabled = { selectedTab == 1 && !worldModalOpen }, onDrag = pageDrag,
-                                    onDragEnd = pageDragEnd, allowRight = true))
-                            if (selectedTab == 1) Surface(Modifier.align(Alignment.TopEnd).statusBarsPadding()
-                                .padding(top = 4.dp, end = 12.dp),
-                                shape = RoundedCornerShape(24.dp),
-                                color = MaterialTheme.colorScheme.surface.copy(alpha = .86f)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    MailboxHeaderButton(app.container.announcements)
-                                    IconButton(onClick = onOpenSettings) {
-                                        Icon(Icons.Outlined.Settings, contentDescription = "设置",
-                                            tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    }
-                                }
-                            }
-                        }
+                        1 -> LittleWorldScreen(onBack = { navigate(0) }, onOpenWishBook = onOpenWishBook,
+                            onOpenFutureNotes = onOpenFutureNotes, onOpenMemories = onOpenMemories,
+                            onOpenTimeMachine=onOpenTimeMachine,onOpenSecretBase=onOpenSecretBase,
+                            onOpenSettings=onOpenSettings,
+                            onRecordAmount = onRecordAmount, embedded = true, active = selectedTab == 1,
+                            onModalChanged = { worldModalOpen = it },
+                            modifier = Modifier.fillMaxSize().forwardMainPageSwipe(
+                                enabled = { selectedTab == 1 && !worldModalOpen }, onDrag = pageDrag,
+                                onDragEnd = pageDragEnd, allowRight = true))
                         2 -> Column(Modifier.fillMaxSize()) {
                             MainPageHeader(app, selectedTab == 2, onOpenSettings, onOpenSecretBase)
                             Box(Modifier.weight(1f)) { StatsScreen(active = selectedTab == 2) }
