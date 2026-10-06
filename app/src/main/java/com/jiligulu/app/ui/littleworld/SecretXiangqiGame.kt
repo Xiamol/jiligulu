@@ -52,6 +52,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.jiligulu.app.R
+import com.jiligulu.app.core.audio.UiCue
 import com.jiligulu.app.core.audio.UiSound
 import kotlin.math.abs
 import kotlin.math.cos
@@ -119,6 +120,8 @@ internal fun ColumnScope.SecretXiangqiGame(state: XiangqiState, mode: XiangqiPla
             color = if (state.turnSide == XiangqiSide.RED) Color(0xFFAF766A) else Color(0xFF766A7F))
     }
     var matchResponseSent by remember(mode,lan.pendingMatchName) {mutableStateOf(false)}
+    // 有棋友来敲门：匹配成功的声音（上行三音，比「收好」更亮）
+    LaunchedEffect(lan.pendingMatchName) { if (lan.pendingMatchName != null) UiSound.match(soundContext) }
     if(networkMode && lan.pendingMatchName!=null) {
         SecretWoodDialog("棋友来敲门啦",{if(!matchResponseSent){matchResponseSent=true;onMatchResponse(false)}},
             confirmLabel="一起下",onConfirm={if(!matchResponseSent){matchResponseSent=true;onMatchResponse(true)}},
@@ -200,7 +203,8 @@ internal fun ColumnScope.SecretXiangqiGame(state: XiangqiState, mode: XiangqiPla
         style = MaterialTheme.typography.bodySmall, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
         Row(Modifier.width(boardWidth).padding(horizontal = 6.dp, vertical = 4.dp)) {
             GameIconTool(Icons.AutoMirrored.Outlined.Undo, "悔棋", onUndo, Modifier.weight(1f),
-                enabled = canUndo && !helpBusy && (!networkMode || !lan.awaitingAck && lan.pendingUndoRequest == null))
+                enabled = canUndo && !helpBusy && (!networkMode || !lan.awaitingAck && lan.pendingUndoRequest == null),
+                cue = UiCue.UNDO)
             if (networkMode) {
                 GameIconTool(Icons.Outlined.Logout, "离开棋桌", onDisconnect, Modifier.weight(1f))
             } else {
@@ -274,10 +278,10 @@ internal fun XiangqiThinkingTimeDialog(initialSeconds: Int, starting: Boolean, o
 
 @Composable
 internal fun GameIconTool(icon: ImageVector, label: String, onClick: () -> Unit, modifier: Modifier,
-    enabled: Boolean = true) {
+    enabled: Boolean = true, cue: UiCue = UiCue.TOUCH) {
     val context = LocalContext.current
     Column(modifier.height(53.dp).clip(RoundedCornerShape(12.dp))
-        .clickable(enabled = enabled, role = Role.Button, onClick = { UiSound.tap(context); onClick() }).padding(vertical = 5.dp),
+        .clickable(enabled = enabled, role = Role.Button, onClick = { UiSound.play(context, cue); onClick() }).padding(vertical = 5.dp),
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(3.dp)) {
         Icon(icon, null, Modifier.size(22.dp), tint = Color(0xFF87748E).copy(alpha = if (enabled) 1f else .3f))
         Text(label, fontSize = 10.sp, color = Color(0xFF87748E).copy(alpha = if (enabled) 1f else .3f))

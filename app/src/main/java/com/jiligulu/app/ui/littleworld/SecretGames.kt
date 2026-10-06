@@ -202,6 +202,8 @@ internal fun ColumnScope.SecretGomokuGame(state: GomokuState, paused: Boolean, b
         }
     }
     var matchResponseSent by remember(mode,room?.pendingMatchName) { mutableStateOf(false) }
+    // 有棋友来敲门：匹配成功的声音（与象棋共用同一条语义）
+    LaunchedEffect(room?.pendingMatchName) { if (room?.pendingMatchName != null) UiSound.match(context) }
     if(network && room?.pendingMatchName!=null) {
         SecretWoodDialog("棋友来敲门啦", { if(!matchResponseSent) { matchResponseSent=true;onMatchResponse(false) } },
             confirmLabel="一起下",onConfirm={if(!matchResponseSent){matchResponseSent=true;onMatchResponse(true)}},
@@ -340,7 +342,9 @@ internal fun ColumnScope.SecretGomokuGame(state: GomokuState, paused: Boolean, b
             if (paused) "继续" else "暂停", onToggle, Modifier.weight(1f), enabled = state.outcome == GomokuOutcome.PLAYING)
         else GameIconTool(androidx.compose.material.icons.Icons.Outlined.Logout, "离开", onDisconnect, Modifier.weight(1f))
         if(!network) GameIconTool(Icons.Outlined.Refresh, "重开", onRestart, Modifier.weight(1f))
-        GameIconTool(Icons.AutoMirrored.Outlined.Undo, "悔棋", onUndo, Modifier.weight(1f), enabled = canUndo && !helpBusy && (!network || room?.pendingUndoRequest == null))
+        GameIconTool(Icons.AutoMirrored.Outlined.Undo, "悔棋", onUndo, Modifier.weight(1f),
+            enabled = canUndo && !helpBusy && (!network || room?.pendingUndoRequest == null),
+            cue = com.jiligulu.app.core.audio.UiCue.UNDO)
     }
     Text("黑棋先行 · 连成五子获胜", Modifier.padding(top = 4.dp, bottom = 10.dp)
         .onGloballyPositioned { onControlsBottom(it.boundsInRoot().bottom) },

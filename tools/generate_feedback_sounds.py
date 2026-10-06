@@ -75,6 +75,48 @@ specs={
  'ui_pet': impact(.095,[(240,.45,40),(490,.13,53)],17,.08,850),
 }
 specs['ui_drop']=specs['ui_stone_move']  # compatibility only; new callers choose material
+
+# ---------- 细分音效（2026-10-06）----------
+# 需求⑤要求：开信与翻纸要是**两种长度/质感不同的纸**，常用类别各备 3–4 个样本避免机械重复。
+# 这里全部沿用既有的合成方式（滤波噪声 + 模态冲击 + 音阶短语），不引入任何采样素材。
+# 既有 19 条的种子与参数**一字未改**，只做新增。
+
+def paper_layer(seed, cutoff_high, cutoff_low, centers, duration):
+    """纸张类音效的统一骨架：差分噪声 × 若干高斯包络。"""
+    high = noise(duration, seed, cutoff_high)
+    low = noise(duration, seed, cutoff_low)
+    return [(high[i]-low[i])*sum(math.exp(-((t-center)/width)**2)*level
+        for center,width,level in centers)
+        for i in range(len(high)) for t in [i/RATE]]
+
+# 通用纸张的两个额外样本（ui_paper 本身是第 1 个，保留不动）
+specs['ui_paper_2'] = paper_layer(74, 6100, 400, [(.028,.012,.78),(.074,.022,.62),(.132,.016,.40)], .18)
+specs['ui_paper_3'] = paper_layer(75, 5400, 350, [(.034,.015,.72),(.086,.026,.58),(.146,.019,.44)], .20)
+
+# 开信：比通用纸张更长、更闷——信封是厚的，不该像翻书页那样脆（需求明确「信封不用敲击音」）
+specs['ui_envelope'] = paper_layer(76, 4200, 300, [(.045,.023,.75),(.130,.042,.60),(.238,.030,.40)], .31)
+
+# 翻页：短促的一扫 + 尾部极轻的落页
+_turn_raw = noise(.13, 22, 2700)
+specs['ui_page_turn'] = double(
+    [_turn_raw[i]*math.sin(math.pi*i/len(_turn_raw))**2 for i in range(len(_turn_raw))],
+    impact(.019,[(1240,.24,195)],23,.2,3100), .105, .17)
+
+# 信笺：最轻最短的一张纸（铺开 / 收起），比通用纸张更轻
+specs['ui_letter'] = paper_layer(77, 6600, 500, [(.022,.011,.66),(.058,.018,.50)], .12)
+
+# 悔棋：两下低沉短音，「收回来」的感觉，与落子明确区分
+specs['ui_undo'] = double(impact(.032,[(316,.42,158)],24), impact(.028,[(238,.32,150)],25), .030, .10)
+
+# 提示：上行两音，比 ui_confirm 更轻，像「提示你一下」而不是「完成了」
+specs['ui_hint'] = phrase([(0,659.25,.40),(.058,880,.30)], .21)
+
+# 匹配成功：上行三音，比 ui_confirm 更亮、更完整
+specs['ui_match'] = phrase([(0,587.33,.44),(.082,739.99,.36),(.164,880,.30)], .33)
+
+# 计算器键帽的两个额外样本（需求要「极短、柔和」，三个样本轮流用，避免连按呆板）
+specs['ui_calculator_2'] = impact(.030,[(196,.40,145),(528,.12,165)],26,.15,980)
+specs['ui_calculator_3'] = impact(.034,[(164,.38,138),(452,.14,158)],27,.16,900)
 report=[]
 for name,raw in specs.items():
     dc=sum(raw)/len(raw)

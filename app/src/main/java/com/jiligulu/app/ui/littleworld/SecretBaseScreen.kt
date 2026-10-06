@@ -396,7 +396,8 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
                 } ?: return@launch
                 if (helpGeneration != generation || !eligibleXiangqiTurn() || currentXiangqiPosition() != position) return@launch
                 assistedSelection = move.from
-                UiSound.pieceSelect(context)
+                // 提示找到了：用专门的提示音，和「选中棋子」的声音区分开
+                UiSound.hint(context)
                 if (xiangqiMode == XiangqiPlayMode.ONLINE) onlineSession.selectPiece(move.from)
                 else if (xiangqiMode == XiangqiPlayMode.LAN) lanSession.selectPiece(move.from)
                 delay(600)
@@ -421,8 +422,10 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
                     GomokuStrongMoveHelper.chooseMove(position) { !computeContext.isActive }
                 } ?: return@launch
                 delay(500)
-                if (helpGeneration == generation && eligibleGomokuTurn() && currentGomokuPosition() == position)
+                if (helpGeneration == generation && eligibleGomokuTurn() && currentGomokuPosition() == position) {
+                    UiSound.hint(context)
                     playGomokuMove(move)
+                }
             } finally {
                 if (helpGeneration == generation) { helpBusy = false; helpGomokuPosition = null; helpJob = null }
             }

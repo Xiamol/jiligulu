@@ -141,7 +141,7 @@ fun MemoriesScreen(onBack: () -> Unit) {
         compactWidth = 280.dp, confirmLabel = "做张明信片", confirmEnabled = weekRows != null && categoryRows != null,
         onConfirm = { makeWeek = true; drawer = -1 }) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = uiTap(com.jiligulu.app.core.audio.UiCue.PAPER) { offset-- }) { Text("‹") }
+            TextButton(onClick = uiTap(com.jiligulu.app.core.audio.UiCue.PAGE_TURN) { offset-- }) { Text("‹") }
             Text(dates, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center)
             TextButton(onClick = uiTap(com.jiligulu.app.core.audio.UiCue.PAPER) { offset++ }, enabled = offset < 0) { Text("›") }
         }

@@ -140,7 +140,7 @@ fun InteractiveRoomStage(onWishes:()->Unit,onLetters:()->Unit,onAlbum:()->Unit,
         Box(Modifier.offset(split-controlWidth,controlTop).size(controlWidth,controlHeight)
             .then(if(controlsActive) Modifier.testTag("main-mailbox") else Modifier)
             .clickable(enabled=controlsActive&&!mailboxLoading,role=Role.Button,
-                onClickLabel="打开阿噜的小信箱",onClick=uiTap(UiCue.PAPER,onMailbox))
+                onClickLabel="打开阿噜的小信箱",onClick=uiTap(UiCue.ENVELOPE,onMailbox))
             .semantics { contentDescription=mailboxDescription })
         Box(Modifier.offset(split,controlTop).size(controlWidth,controlHeight)
             .then(if(controlsActive) Modifier.testTag("room-settings") else Modifier)

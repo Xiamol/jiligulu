@@ -99,7 +99,7 @@ fun FutureNotesScreen(onBack: () -> Unit) {
         title = when(tab) { 0 -> "阿噜还在送信"; 1 -> "今天的收件箱"; else -> "收好的旧信笺" },
         subtitle = when(tab) { 0 -> "${rows.size} 封信，正走向未来的你。"; 1 -> "${rows.size} 封信，到了可以拆开的日子。"; else -> "${rows.size} 封信，藏着过去的心事。" },
         onDismiss = { drawer = false }, compact = true,
-        actions = { TextButton(onClick = uiTap(UiCue.PAPER) { editing = null; creating = true }) { Text("写一封") } }
+        actions = { TextButton(onClick = uiTap(UiCue.LETTER) { editing = null; creating = true }) { Text("写一封") } }
     ) {
         if (rows.isEmpty()) item {
             Text(when(tab) {

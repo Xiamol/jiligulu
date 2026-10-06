@@ -22,7 +22,7 @@ import com.jiligulu.app.data.announcement.AnnouncementRepository
 @Composable
 fun MailboxHeaderButton(repository: AnnouncementRepository, tagged:Boolean=true) {
     val state by repository.state.collectAsStateWithLifecycle()
-    IconButton(enabled = !state.loading, onClick = com.jiligulu.app.ui.components.uiTap(com.jiligulu.app.core.audio.UiCue.PAPER) {
+    IconButton(enabled = !state.loading, onClick = com.jiligulu.app.ui.components.uiTap(com.jiligulu.app.core.audio.UiCue.ENVELOPE) {
         repository.open((state.entries.firstOrNull { it.id in state.unreadIds } ?: state.entries.firstOrNull())?.id.orEmpty())
     }, modifier = if(tagged) Modifier.testTag("main-mailbox") else Modifier) {
         BadgedBox(badge = {

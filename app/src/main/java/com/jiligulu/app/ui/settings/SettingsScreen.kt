@@ -396,12 +396,21 @@ fun SettingsScreen(
 
     if (showSoundSamples) GuluDialog("听听小声音", { showSoundSamples=false }, compact=true,
         dense=true, compactWidth=260.dp) {
-        val samples = listOf("开信" to com.jiligulu.app.core.audio.UiCue.PAPER,
-            "翻页" to com.jiligulu.app.core.audio.UiCue.NAVIGATE,
+        // 2026-10-06 细分后：纸张拆成三种材质分别试听（拆信/翻页/信笺），
+        // 「翻页」不再借用导航音；顺带把棋局与撤销/提示也列出来，方便逐个比对。
+        val samples = listOf(
+            "拆信" to com.jiligulu.app.core.audio.UiCue.ENVELOPE,
+            "翻页" to com.jiligulu.app.core.audio.UiCue.PAGE_TURN,
+            "信笺" to com.jiligulu.app.core.audio.UiCue.LETTER,
+            "纸张" to com.jiligulu.app.core.audio.UiCue.PAPER,
             "开关" to com.jiligulu.app.core.audio.UiCue.TOGGLE,
-            "棋石" to com.jiligulu.app.core.audio.UiCue.STONE_MOVE,
+            "收好" to com.jiligulu.app.core.audio.UiCue.CONFIRM,
+            "悔棋" to com.jiligulu.app.core.audio.UiCue.UNDO,
+            "提示" to com.jiligulu.app.core.audio.UiCue.HINT,
             "木棋" to com.jiligulu.app.core.audio.UiCue.WOOD_MOVE,
-            "收好" to com.jiligulu.app.core.audio.UiCue.CONFIRM)
+            "棋石" to com.jiligulu.app.core.audio.UiCue.STONE_MOVE,
+            "吃子" to com.jiligulu.app.core.audio.UiCue.CAPTURE,
+            "将军" to com.jiligulu.app.core.audio.UiCue.CHECK)
         samples.chunked(3).forEach { row ->
             Row(Modifier.fillMaxWidth()) {
                 row.forEach { (label,cue) ->
