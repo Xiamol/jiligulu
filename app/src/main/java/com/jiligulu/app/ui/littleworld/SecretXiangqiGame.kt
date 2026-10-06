@@ -490,12 +490,14 @@ private fun XiangqiBoard(state: XiangqiState, width: Dp, canMove: Boolean, flipp
             textPaint.color = if (red) android.graphics.Color.rgb(166, 65, 56) else android.graphics.Color.rgb(68, 58, 58)
             textPaint.alpha = (255 * alpha).toInt().coerceIn(0, 255)
             textPaint.textSize = stepX * .63f * scale
+            // 红黑各用一套字面。双方都写「车」时，扫一眼棋盘分不清是谁的子——
+            // 传统象棋本来就是红方一套、黑方一套，这里沿用：红方简体，黑方繁体。
             val glyph = when (abs(piece)) {
-                1 -> if (red) "帅" else "将"
+                1 -> if (red) "帅" else "將"
                 2 -> if (red) "仕" else "士"
                 3 -> if (red) "相" else "象"
-                4 -> "马"
-                5 -> "车"
+                4 -> if (red) "马" else "馬"
+                5 -> if (red) "车" else "車"
                 6 -> if (red) "炮" else "砲"
                 else -> if (red) "兵" else "卒"
             }
