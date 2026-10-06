@@ -92,6 +92,15 @@ android {
         buildConfig = true
     }
 
+    packaging {
+        jniLibs {
+            // Android 10+ requires executing bundled engines from the installer's library directory.
+            useLegacyPackaging = true
+            // Preserve the verified upstream executable, which is a standalone ELF, not JNI code.
+            keepDebugSymbols += "**/libpikafish.so"
+        }
+    }
+
     testOptions {
         unitTests.isIncludeAndroidResources = true
         unitTests.all {

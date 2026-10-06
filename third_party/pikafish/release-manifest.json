@@ -1,0 +1,28 @@
+{
+  "name": "Pikafish",
+  "release": "Pikafish-2026-09-06",
+  "source_commit": "4c17cee11f888ae1d48a9494f2e2239f019f0a1f",
+  "source_url": "https://github.com/official-pikafish/Pikafish/tree/4c17cee11f888ae1d48a9494f2e2239f019f0a1f",
+  "archive_url": "https://github.com/official-pikafish/Pikafish/releases/download/Pikafish-2026-09-06/Pikafish.2026-09-06.7z",
+  "archive_sha256": "41952bbfe2520faceb5902c69e6ab4845cc999841d2b49a95cc1be7867a25e5b",
+  "engine": {
+    "packaged_as": "libpikafish.so",
+    "bytes": 2413440,
+    "elf_machine": 183,
+    "sha256": "6c06b8752e10c1ed605fa836d2c9bbf885e9c402b216023040ddf4586f4320b1",
+    "member": "Pikafish-Android-arm64-universal",
+    "abi": "arm64-v8a",
+    "modified": false,
+    "elf_type": "ET_EXEC"
+  },
+  "model": {
+    "license_file": "NNUE-License.md",
+    "sha256": "7d13d73569a9b571ba0eb20cf1596247bc2a42738967e61afef6482b231e900e",
+    "bytes": 50706378,
+    "member": "pikafish.nnue"
+  },
+  "source_archive": {
+    "sha256": "2b762c967fae882aa9a8dfe76d868b4665e658f55dead2940b53ce1548f12e0c",
+    "file": "upstream-source-4c17cee.zip"
+  }
+}

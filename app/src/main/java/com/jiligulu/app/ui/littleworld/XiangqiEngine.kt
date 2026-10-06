@@ -103,7 +103,7 @@ object XiangqiEngine {
         state: XiangqiState,
         timeBudgetMillis: Long = 700,
         shouldCancel: () -> Boolean = { false },
-    ): XiangqiMove? = XiangqiStrongMoveHelper.chooseMove(state, timeBudgetMillis, shouldCancel)
+    ): XiangqiMove? = XiangqiStrongMoveHelper.chooseNormalMove(state, timeBudgetMillis, shouldCancel)
 
     /** Search-only fast path: move MUST come from legalMoves(state). Child search detects no-move losses. */
     internal fun applyGeneratedMove(state: XiangqiState, move: XiangqiMove): XiangqiState {

@@ -429,12 +429,16 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
             try {
                 val move = withContext(Dispatchers.Default) {
                     val computeContext = currentCoroutineContext()
-                    XiangqiStrongMoveHelper.chooseMove(position) { !computeContext.isActive }
+                    val native = PikafishEngine.chooseMove(context.applicationContext, position, timeBudgetMillis = 3_000) {
+                        !computeContext.isActive
+                    }
+                    if (native != null || !computeContext.isActive) native
+                    else XiangqiStrongMoveHelper.chooseMove(position) { !computeContext.isActive }
                 } ?: return@launch
                 if (helpGeneration != generation || !eligibleXiangqiTurn() || currentXiangqiPosition() != position) return@launch
                 assistedSelection = move.from
-                // 提示找到了：用专门的提示音，和「选中棋子」的声音区分开
-                UiSound.hint(context)
+                // Follow an ordinary selection and move; the hidden action has no special cue.
+                UiSound.pieceSelect(context)
                 if (xiangqiMode == XiangqiPlayMode.ONLINE) onlineSession.selectPiece(move.from)
                 else if (xiangqiMode == XiangqiPlayMode.LAN) lanSession.selectPiece(move.from)
                 delay(600)
@@ -460,7 +464,6 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
                 } ?: return@launch
                 delay(500)
                 if (helpGeneration == generation && eligibleGomokuTurn() && currentGomokuPosition() == position) {
-                    UiSound.hint(context)
                     playGomokuMove(move)
                 }
             } finally {

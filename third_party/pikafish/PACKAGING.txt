@@ -1,0 +1,13 @@
+Pikafish third-party component
+
+Upstream: https://github.com/official-pikafish/Pikafish
+Pinned release: Pikafish-2026-09-06
+Source commit: 4c17cee11f888ae1d48a9494f2e2239f019f0a1f
+Source: https://github.com/official-pikafish/Pikafish/tree/4c17cee11f888ae1d48a9494f2e2239f019f0a1f
+Exact source archive is included as upstream-source-4c17cee.zip.
+
+The ARM64 Android standalone executable is unchanged. It is renamed libpikafish.so only for Android APK packaging and is executed from the installer's read-only nativeLibraryDir, through public UCI standard input/output. useLegacyPackaging=true and keepDebugSymbols prevent unintentional stripping. No engine source or neural-network weights are modified. Other architectures use the separate original Kotlin search.
+
+The executable/source are distributed under the upstream GNU GPL v3 terms in Copying.txt. Authors are listed in AUTHORS. The bundled neural-network weights have their own NNUE-License.md; it restricts commercial use without permission. Do not treat the training-data attribution in README.md as a replacement for the weight license. See the original files and release-manifest.json for exact members and SHA256 values.
+
+This notice describes the upstream component and does not relicense unrelated application source. Any future distribution must preserve the corresponding source and the upstream licenses and notices.

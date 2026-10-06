@@ -9,12 +9,12 @@ class XiangqiSearchTest {
         for (state in listOf(red, red.copy(board = red.board.reversed().map { -it }, turnSide = XiangqiSide.BLACK))) {
             val original = state.board.toList()
             val moves = listOf(
-                requireNotNull(XiangqiEngine.chooseCpuMove(state, timeBudgetMillis = 700)),
-                requireNotNull(XiangqiStrongMoveHelper.chooseMove(state, timeBudgetMillis = 700)),
+                "CPU700" to requireNotNull(XiangqiEngine.chooseCpuMove(state, timeBudgetMillis = 700)),
+                "HELPER700" to requireNotNull(XiangqiStrongMoveHelper.chooseMove(state, timeBudgetMillis = 700)),
             )
-            for (move in moves) {
+            for ((label, move) in moves) {
                 assertTrue(move in XiangqiEngine.legalMoves(state))
-                assertTrue("Every opponent reply must still allow mate, $move", forcesWinInThree(state, move))
+                assertTrue("$label ${state.turnSide}: every opponent reply must still allow mate, $move", forcesWinInThree(state, move))
             }
             assertEquals(original, state.board)
         }
