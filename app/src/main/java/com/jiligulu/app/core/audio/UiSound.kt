@@ -31,6 +31,17 @@ enum class UiCue(val raw: Int, val volume: Float, val minimumGap: Long = 65) {
     PET(R.raw.ui_pet, .23f, 180)
 }
 
+/**
+ * 音高微扰总幅度（±3%，即 1f ± .03 的播放速率）。
+ *
+ * 需求⑤要求「音高微调约 ±3%」：范围刻意做得很小，小到听不出跑调，
+ * 但足以让连按、连响的同一个声音不像同一份采样在机械重播。
+ */
+private const val PITCH_VARIATION = .06f
+
+/** 音量微扰总幅度（±4%），同样是"刚好听得出不呆板"的量级。 */
+private const val VOLUME_VARIATION = .08f
+
 /** Original short PCM feedback; one cached pool, no music loop or audio-focus stealing. */
 object UiSound {
     private var engine: Engine? = null
@@ -75,6 +86,15 @@ object UiSound {
         private var touchStream = 0
         private var touchAt = 0L
         private var semanticAt = 0L
+        /**
+         * 微扰用的随机源。
+         *
+         * 需求⑤：常用音效准备多个样本、并做音高 ±3% / 音量 ±4% 的微调，
+         * 让连续触发听起来像"同一件乐器在手上有细微差别"，而不是一串复制的采样。
+         * 当前每一类只有一个音频资源（程序合成），所以**先靠微扰制造自然变化**；
+         * 同类的多样本素材补上之后，这里再加"避免连续用同一个样本"的轮换。
+         */
+        private val jitter = kotlin.random.Random(System.nanoTime())
         private val pool = SoundPool.Builder().setMaxStreams(3).setAudioAttributes(
             // Custom application feedback follows media volume, like the chess sounds.
             // ASSISTANCE_SONIFICATION would route to system volume while our guard checked music.
@@ -103,7 +123,11 @@ object UiSound {
             }
             if (cue == UiCue.WIN || cue == UiCue.LOSE || cue == UiCue.DRAW) silence()
             last[cue.ordinal] = now
-            val stream = pool.play(id, cue.volume, cue.volume, 1, 0, 1f)
+            // ±3% 音高 / ±4% 音量：范围刻意做得很小，小到听不出"跑调"，
+            // 但足以让连按、连响的同一声音不显得是同一份采样在重播。
+            val rate = 1f + (jitter.nextFloat() - .5f) * PITCH_VARIATION
+            val volume = (cue.volume * (1f + (jitter.nextFloat() - .5f) * VOLUME_VARIATION)).coerceIn(0f, 1f)
+            val stream = pool.play(id, volume, volume, 1, 0, rate)
             streams[nextStream] = stream; nextStream = (nextStream+1)%streams.size
             if (cue == UiCue.TOUCH) touchStream=stream
         }

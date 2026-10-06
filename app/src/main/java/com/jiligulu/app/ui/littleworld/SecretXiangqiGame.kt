@@ -57,7 +57,9 @@ import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.roundToInt
 import kotlin.math.sin
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 enum class XiangqiPlayMode { CPU, ONLINE, LAN, HOTSEAT }
 
@@ -74,12 +76,25 @@ internal fun ColumnScope.SecretXiangqiGame(state: XiangqiState, mode: XiangqiPla
     canUndo: Boolean = false, onUndo: () -> Unit = {}, onUndoResponse: (Boolean) -> Unit = {},
     nearby: NearbyRoomsState? = null, onNearbyRetry: () -> Unit = {},
     onMatchResponse: (Boolean) -> Unit = {}, onRematchResponse: (Boolean) -> Unit = {}, onExit: () -> Unit = onDisconnect,
-    onModalOpened: () -> Unit = {}, onControlsBottom: (Float) -> Unit = {}) {
+    onModalOpened: () -> Unit = {}, onControlsBottom: (Float) -> Unit = {},
+    onMoveSettled: (captured: Boolean) -> Unit = {}) {
     val soundContext = LocalContext.current
     val finished = state.outcome!=XiangqiOutcome.PLAYING
     val networkMode = mode == XiangqiPlayMode.LAN || mode == XiangqiPlayMode.ONLINE
     val finish = remember(state,mode,lan.localSide,humanSide) { GameFinishPresenter.xiangqi(state,
         when(mode){XiangqiPlayMode.CPU->humanSide;XiangqiPlayMode.HOTSEAT->null;else->lan.localSide}) }
+    // 结果牌出现时机：等最后一手走完 → 停顿 → 杀法演出 → 字印停留之后才亮牌。
+    // 读档恢复的终局直接亮牌，不重播旧演出（需求：恢复终局时只显示结果）。
+    // outcomeSeen 记「进入本局时它就已经是终局了」——那种情况就是读档。
+    var outcomeSeen by remember(restorationToken) { mutableStateOf(state.outcome != XiangqiOutcome.PLAYING) }
+    var finishRevealed by remember(restorationToken) { mutableStateOf(state.outcome != XiangqiOutcome.PLAYING) }
+    LaunchedEffect(state.outcome, restorationToken) {
+        if (state.outcome == XiangqiOutcome.PLAYING) { finishRevealed = false; return@LaunchedEffect }
+        if (outcomeSeen) { finishRevealed = true; return@LaunchedEffect }
+        outcomeSeen = true
+        delay(XiangqiMoveAnimator.FINISH_REVEAL_MS.toLong())
+        finishRevealed = true
+    }
     var modeMenu by remember { mutableStateOf(false) }
     val modeNames = remember { mapOf(XiangqiPlayMode.CPU to "和阿噜下", XiangqiPlayMode.ONLINE to "创建房间",
         XiangqiPlayMode.LAN to "附近的人", XiangqiPlayMode.HOTSEAT to "同屏双人") }
@@ -171,12 +186,17 @@ internal fun ColumnScope.SecretXiangqiGame(state: XiangqiState, mode: XiangqiPla
         flipped = mode==XiangqiPlayMode.CPU && humanSide==XiangqiSide.BLACK || networkMode && lan.localSide == XiangqiSide.BLACK, onMove = onMove,
         remoteSelection = remoteSelection, onSelectionChanged = onSelectionChanged, assistedSelection = assistedSelection,
         restorationToken = restorationToken,
-        onAnimatingChange = { boardAnimating = it })
-    if(finish!=null) {
+        onAnimatingChange = { boardAnimating = it },
+        // 落稳那一刻才把"该出声了"传上去：声音要落在棋子上，而不是落在点击上
+        onStepSettled = { _, captured -> onMoveSettled(captured) })
+    if(finish!=null && finishRevealed) {
         GameFinishPlate(finish,onRestart,onExit,networkMode,lan.roomEnded,lan.resultSecondsLeft,lan.myRematchRequested,
             Modifier.width(boardWidth).padding(top=10.dp).onGloballyPositioned{onControlsBottom(it.boundsInRoot().bottom)})
     } else {
-    Text(status, modifier = Modifier.padding(vertical = 10.dp).width(boardWidth), color = Color(0xFF766A7F),
+    Text(
+        // 演出期间不剧透胜负：结果牌还没亮，这里就先别说谁赢了
+        if (finish != null && !finishRevealed) "这一局结束啦，看棋盘上的印记…" else status,
+        modifier = Modifier.padding(vertical = 10.dp).width(boardWidth), color = Color(0xFF766A7F),
         style = MaterialTheme.typography.bodySmall, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
         Row(Modifier.width(boardWidth).padding(horizontal = 6.dp, vertical = 4.dp)) {
             GameIconTool(Icons.AutoMirrored.Outlined.Undo, "悔棋", onUndo, Modifier.weight(1f),
@@ -305,6 +325,7 @@ private fun XiangqiBoard(state: XiangqiState, width: Dp, canMove: Boolean, flipp
     var trailAlpha by remember { mutableStateOf(1f) }
     val travelProgress = remember { Animatable(1f) }
     val landingFlash = remember { Animatable(0f) }
+    val sealPulse = remember { Animatable(0f) }
     val latestBusy by rememberUpdatedState(onAnimatingChange)
     val latestSettled by rememberUpdatedState(onStepSettled)
     LaunchedEffect(state.ply, state.outcome, restorationToken) {
@@ -312,11 +333,8 @@ private fun XiangqiBoard(state: XiangqiState, width: Dp, canMove: Boolean, flipp
         animationInitialized = true
         checkPulse.snapTo(0f)
         winPulse.snapTo(0f)
-        if (animate && state.outcome != XiangqiOutcome.PLAYING) {
-            winPulse.snapTo(1f); winPulse.animateTo(0f, tween(3200))
-        } else if (animate && XiangqiEngine.isInCheck(state, state.turnSide)) {
-            checkPulse.snapTo(1f); checkPulse.animateTo(0f, tween(900))
-        }
+        sealPulse.snapTo(0f)
+
         // 走子演出：首帧、读档、棋盘没变（悔棋/纠正）→ 不演，避免重播旧棋
         val next = XiangqiViewSnapshot(state.board, state.lastMove)
         val step = if (animate) XiangqiMoveAnimator.stepFrom(snapshot, next) else null
@@ -333,6 +351,26 @@ private fun XiangqiBoard(state: XiangqiState, width: Dp, canMove: Boolean, flipp
             landingFlash.animateTo(0f, tween(XiangqiMoveAnimator.LANDING_FLASH_MS))
             latestSettled(step.mover, step.captured != 0)
             latestBusy(false)
+        }
+
+        // 落稳之后才是结局演出——最后一手必须先走完，
+        // 否则棋子会凭空出现在终点，或者演出盖在还在路上的棋子上。
+        if (animate && state.outcome != XiangqiOutcome.PLAYING) {
+            delay(XiangqiMoveAnimator.FINISH_PAUSE_MS.toLong())
+            coroutineScope {
+                // 杀法演出与字印并行：演出走到 SEAL_AT_MS 时盖印，
+                // 字印随后一直留到结果牌出现（≥1 秒，满足需求的停留要求）
+                launch {
+                    winPulse.snapTo(1f)
+                    winPulse.animateTo(0f, tween(XiangqiMoveAnimator.FINISH_SHOW_MS))
+                }
+                launch {
+                    delay(XiangqiMoveAnimator.SEAL_AT_MS.toLong())
+                    sealPulse.animateTo(1f, tween(XiangqiMoveAnimator.SEAL_FADE_MS))
+                }
+            }
+        } else if (animate && XiangqiEngine.isInCheck(state, state.turnSide)) {
+            checkPulse.snapTo(1f); checkPulse.animateTo(0f, tween(900))
         }
     }
     // 轨迹不是永久高亮：清晰留一会儿，之后留一道很淡的记号
@@ -568,6 +606,26 @@ private fun XiangqiBoard(state: XiangqiState, width: Dp, canMove: Boolean, flipp
                     drawLine(gold, point - Offset(0f, 3.dp.toPx()), point + Offset(0f, 3.dp.toPx()), 2.dp.toPx())
                 }
             }
+        }
+
+        // 结算字印：演出中段盖下，一直到结果牌出现都留在棋盘上。
+        // 需求要求「字印清楚停留至少 1 秒、棋盘保持可见」，所以用半透明印章压在中央：
+        // 字认得出，局面也没有被盖死。
+        val seal = sealPulse.value
+        if (seal > 0f) {
+            val text = xiangqiSealText(finishProof, state.outcome)
+            val sealCenter = Offset(size.width / 2, size.height * .43f)
+            val scale = 1f + (1f - seal) * .75f
+            val radius = stepX * 1.5f * scale
+            drawCircle(Color(0xFF9E3B32).copy(alpha = seal * .90f), radius, sealCenter)
+            drawCircle(Color(0xFFFFF3E2).copy(alpha = seal), radius, sealCenter, style = Stroke(3.dp.toPx()))
+            drawCircle(Color(0xFFFFF3E2).copy(alpha = seal * .65f), radius * .87f, sealCenter, style = Stroke(1.5.dp.toPx()))
+            textPaint.color = android.graphics.Color.rgb(255, 243, 226)
+            textPaint.alpha = (255 * seal).toInt().coerceIn(0, 255)
+            textPaint.textSize = stepX * (if (text.length > 2) .55f else .78f) * scale
+            drawContext.canvas.nativeCanvas.drawText(text, sealCenter.x,
+                sealCenter.y - (textPaint.ascent() + textPaint.descent()) / 2, textPaint)
+            textPaint.alpha = 255
         }
     }
 }

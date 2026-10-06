@@ -119,6 +119,22 @@ private val xiangqiClockSaver = listSaver<XiangqiThinkingClock, Long>(
     restore = { XiangqiThinkingClock(it[0].toInt(), XiangqiSide.entries[it[1].toInt()], it[2], it.getOrNull(3) ?: XiangqiThinkingClock.TURN_MILLIS) }
 )
 
+/**
+ * 待播的落子声。
+ *
+ * 用类型而不是裸 Boolean 是为了让"这一次"可辨认：兜底计时器要能判断
+ * 自己等的那一声是否已经被落稳回调提前播掉了，避免同一手响两遍。
+ */
+private data class PendingMoveSound(val captured: Boolean)
+
+/**
+ * 落稳回调的兜底时限。
+ *
+ * 超过这么久还没收到回调，说明这一步没有动画（读档、界面不可见、联机首帧），
+ * 就自己补一声——宁可稍晚，不能没有。
+ */
+private const val MOVE_SOUND_FALLBACK_MS = 700L
+
 /** One room, with toys on the furniture. Opening a toy never starts a background game. */
 @Composable
 fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories: () -> Unit) {
@@ -279,6 +295,24 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
         checkpointGomoku()
         if (foreground && activity == SecretActivity.GOMOKU) UiSound.stoneMove(context)
     }
+    /**
+     * 待播的落子声。
+     *
+     * 落子声要落在**棋子落稳**那一刻，而不是状态提交那一刻——否则声音已经响了、
+     * 棋子还在半路上。这里只登记"该出一声"，由棋盘的落稳回调真正播放；
+     * 不走动画的路径（读档、界面不可见、联机首帧）由超时兜底补上，
+     * 既不会漏声，也不会和回调重复响。
+     */
+    var pendingMoveSound by remember { mutableStateOf<PendingMoveSound?>(null) }
+    LaunchedEffect(pendingMoveSound) {
+        val pending = pendingMoveSound ?: return@LaunchedEffect
+        delay(MOVE_SOUND_FALLBACK_MS)
+        if (pendingMoveSound === pending) {
+            if (pending.captured) UiSound.capture(context) else UiSound.woodMove(context)
+            pendingMoveSound = null
+        }
+    }
+
     fun commitXiangqi(next: XiangqiState) {
         if (next == xiangqi) return
         val capture = next.lastMove?.let { xiangqi.pieceAt(it.to.x,it.to.y)!=0 }==true
@@ -286,7 +320,8 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
         xiangqi = next
         clockTickAt = 0L; clockEpoch++; xiangqiClock = xiangqiClock.forPosition(next)
         checkpointXiangqi()
-        if (foreground && activity == SecretActivity.XIANGQI) { if(capture) UiSound.capture(context) else UiSound.woodMove(context) }
+        // 先只登记，不在这里出声：等棋盘的移动动画落稳再响（落子声要落在棋子上）
+        if (foreground && activity == SecretActivity.XIANGQI) pendingMoveSound = PendingMoveSound(capture)
     }
 
     fun currentXiangqiPosition(): XiangqiState = when (xiangqiMode) {
@@ -590,7 +625,8 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
             (xiangqiMode == XiangqiPlayMode.ONLINE || xiangqiMode == XiangqiPlayMode.LAN) &&
             next.ply == lastNetworkGame.ply + 1 && next.board != lastNetworkGame.board) {
             val capture=next.lastMove?.let{lastNetworkGame.pieceAt(it.to.x,it.to.y)!=0}==true
-            if(capture) UiSound.capture(context) else UiSound.woodMove(context)
+            // 联机对手走子同样等落稳再响，和本地走子走同一条时间线
+            pendingMoveSound = PendingMoveSound(capture)
         }
         lastNetworkGame = next
     }
@@ -859,7 +895,14 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
                     } },
                     onUndoResponse = { accept -> if (xiangqiMode == XiangqiPlayMode.ONLINE) onlineSession.respondToUndo(accept)
                         else if (xiangqiMode == XiangqiPlayMode.LAN) lanSession.respondToUndo(accept) },
-                    onModalOpened = ::cancelHelp, onControlsBottom = { gameControlsBottom = it })
+                    onModalOpened = ::cancelHelp, onControlsBottom = { gameControlsBottom = it },
+                    onMoveSettled = { captured ->
+                        // 棋子落稳：这才是有声音的那一刻（回调只在真有动画时才会到）
+                        pendingMoveSound?.let {
+                            if (captured) UiSound.capture(context) else UiSound.woodMove(context)
+                            pendingMoveSound = null
+                        }
+                    })
                 SecretActivity.PAPER -> Unit // A fixed-size paper desk owns its own dialog below.
                 SecretActivity.WHEEL -> {
                     SecretPrizeWheel(rotation.value, minOf(boardSize, 270.dp))

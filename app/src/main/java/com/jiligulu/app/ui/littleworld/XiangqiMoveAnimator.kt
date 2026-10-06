@@ -44,6 +44,23 @@ internal object XiangqiMoveAnimator {
     /** 绝杀时间线：落稳后先停一下，再进杀法演出。 */
     const val FINISH_PAUSE_MS = 80
 
+    /** 杀法演出总长（需求：临时演出约 2.5–3 秒）。 */
+    const val FINISH_SHOW_MS = 3000
+
+    /** 演出走到这里盖下字印——留出的 1.5 秒正好满足「字印清楚停留至少 1 秒」。 */
+    const val SEAL_AT_MS = 1500
+
+    /** 字印落下的时长。 */
+    const val SEAL_FADE_MS = 380
+
+    /**
+     * 从落子那一刻算起，结果牌该在多久之后出现。
+     *
+     * = 走子(最长) + 被吃子缩没 + 停顿 + 杀法演出。用最长走子时间算，
+     * 保证短距离的棋也不会让结果牌抢在字印前面冒出来。
+     */
+    const val FINISH_REVEAL_MS = MAX_DURATION_MS + CAPTURE_FADE_MS + FINISH_PAUSE_MS + FINISH_SHOW_MS
+
     /** 落点闪烁与轨迹停留。 */
     const val LANDING_FLASH_MS = 320
     const val TRAIL_HOLD_MS = 1500

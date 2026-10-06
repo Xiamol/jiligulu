@@ -3,6 +3,20 @@ package com.jiligulu.app.ui.littleworld
 internal enum class FinishMood { WIN, LOSE, DRAW, SHARED }
 internal data class GameFinishPresentation(val headline: String, val detail: String, val mood: FinishMood)
 
+/**
+ * 结算字印文案。
+ *
+ * 需求要求字印只写**确证**的杀法名；拿不到 proof（普通终局）时退回胜负，
+ * 不为了好看编一个杀法名。超过两字的会由绘制侧自动缩小。
+ */
+internal fun xiangqiSealText(proof: XiangqiFinishProof?, outcome: XiangqiOutcome): String = when (proof?.family) {
+    XiangqiFinishFamily.CHECKMATE -> "将死"
+    XiangqiFinishFamily.DOUBLE_CANNON -> "重炮"
+    XiangqiFinishFamily.SMOTHERED_CANNON -> "闷宫"
+    XiangqiFinishFamily.STALEMATE -> "困毙"
+    else -> if (outcome == XiangqiOutcome.RED_WON) "红方胜" else "黑方胜"
+}
+
 internal object GameFinishPresenter {
     fun gomoku(game: GomokuState, humanPlayer: Int?, opponentName: String = "棋友"): GameFinishPresentation? {
         if (game.outcome == GomokuOutcome.PLAYING) return null
