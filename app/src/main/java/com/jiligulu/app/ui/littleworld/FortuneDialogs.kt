@@ -20,7 +20,8 @@ import com.jiligulu.app.ui.components.uiTap
 @Composable
 internal fun DailyFortuneDialog(note: LittleFortune, saved: Boolean, onDismiss: () -> Unit,
     onBookmark: () -> Unit, onCollection: () -> Unit) {
-    GuluDialog("今日小签", onDismiss, compact = true, compactWidth = 280.dp, dense = true) {
+    GuluDialog("今日小签", onDismiss, compact = true, compactWidth = 280.dp, dense = true,
+        confirmCue = com.jiligulu.app.core.audio.UiCue.PAPER) {
         Text("${note.mark}  ${note.title}", style = MaterialTheme.typography.titleSmall,
             color = MaterialTheme.colorScheme.primary, maxLines = 1, overflow = TextOverflow.Ellipsis,
             modifier = Modifier.height(26.dp))
@@ -28,13 +29,13 @@ internal fun DailyFortuneDialog(note: LittleFortune, saved: Boolean, onDismiss: 
             Text(note.text, style = MaterialTheme.typography.bodyMedium)
         }
         Row(Modifier.fillMaxWidth().height(40.dp), verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = uiTap(onBookmark), modifier = Modifier.weight(1f)) {
+            TextButton(onClick = uiTap(com.jiligulu.app.core.audio.UiCue.TOGGLE,onBookmark), modifier = Modifier.weight(1f)) {
                 Icon(if (saved) Icons.Outlined.Favorite else Icons.Outlined.FavoriteBorder,
                     contentDescription = null, modifier = Modifier.size(16.dp))
                 Text(if (saved) "已收藏" else "收藏", style = MaterialTheme.typography.labelMedium,
                     modifier = Modifier.padding(start = 5.dp))
             }
-            TextButton(onClick = uiTap(onCollection), modifier = Modifier.weight(1f)) {
+            TextButton(onClick = uiTap(com.jiligulu.app.core.audio.UiCue.PAPER,onCollection), modifier = Modifier.weight(1f)) {
                 Text("翻翻收藏", style = MaterialTheme.typography.labelMedium)
             }
         }
@@ -44,7 +45,8 @@ internal fun DailyFortuneDialog(note: LittleFortune, saved: Boolean, onDismiss: 
 @Composable
 internal fun FortuneCollectionDialog(savedIds: Set<Int>, onDismiss: () -> Unit, onBookmark: (Int) -> Unit) {
     val notes = DailyFortunes.all.filter { it.id in savedIds }
-    GuluDialog("夹在书里的小签", onDismiss, compact = true, compactWidth = 280.dp, dense = true) {
+    GuluDialog("夹在书里的小签", onDismiss, compact = true, compactWidth = 280.dp, dense = true,
+        confirmCue = com.jiligulu.app.core.audio.UiCue.PAPER) {
         SpringLazyColumn(Modifier.fillMaxWidth().height(220.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             if (notes.isEmpty()) item {
                 Box(Modifier.fillMaxWidth().height(180.dp), contentAlignment = Alignment.Center) {
@@ -58,7 +60,7 @@ internal fun FortuneCollectionDialog(savedIds: Set<Int>, onDismiss: () -> Unit, 
                             color = MaterialTheme.colorScheme.primary)
                         Text(note.text, Modifier.padding(top = 4.dp), style = MaterialTheme.typography.bodySmall)
                     }
-                    IconButton(onClick = uiTap { onBookmark(note.id) }, modifier = Modifier.size(32.dp)) {
+                    IconButton(onClick = uiTap(com.jiligulu.app.core.audio.UiCue.TOGGLE) { onBookmark(note.id) }, modifier = Modifier.size(32.dp)) {
                         Icon(Icons.Outlined.Favorite, "取消收藏", modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
                     }
                 }

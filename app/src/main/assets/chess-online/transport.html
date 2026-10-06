@@ -4,7 +4,7 @@ let peer=null,connection=null,host=false;
 function emit(type,value=''){if(window.GuluTransport)GuluTransport.event(type,String(value).slice(0,2048));}
 function bind(c){
   if(connection){c.close();return;}
-  if(c.metadata?.protocol!=='gulu-xq-1'){c.close();return;}
+  if(c.metadata?.protocol!=='gulu-xq-2'){c.close();if(!host)emit('error','protocol');return;}
   connection=c;
   c.on('open',()=>emit('connected'));
   c.on('data',data=>{if(typeof data==='string'&&data.length<=1024)emit('data',data);else emit('error','invalid-data');});
@@ -17,7 +17,7 @@ function guluStart(code,isHost){
   peer=new Peer(host?'gulu-xq-'+code:undefined,{secure:true,debug:0});
   peer.on('open',()=>{
     emit('ready');
-    if(!host){bind(peer.connect('gulu-xq-'+code,{serialization:'json',reliable:true,metadata:{protocol:'gulu-xq-1'}}));}
+    if(!host){bind(peer.connect('gulu-xq-'+code,{serialization:'json',reliable:true,metadata:{protocol:'gulu-xq-2'}}));}
   });
   peer.on('connection',c=>{if(host)bind(c);else c.close();});
   peer.on('error',err=>{if(connection?.open&&err.type==='network')emit('warning');else emit('error',err.type||'network');});

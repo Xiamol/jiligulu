@@ -26,6 +26,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.jiligulu.app.JiliguluApp
 import com.jiligulu.app.core.util.Formatters
+import com.jiligulu.app.core.audio.UiCue
+import com.jiligulu.app.core.audio.UiSound
 import com.jiligulu.app.data.littleworld.LittleWorldState
 import com.jiligulu.app.data.littleworld.Sticker
 import com.jiligulu.app.data.littleworld.WaitingWish
@@ -73,12 +75,12 @@ fun WishBookScreen(onBack: () -> Unit, onRecordWaiting: (Sticker) -> Unit) {
     var selectedWaiting by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedMemory by rememberSaveable { mutableStateOf<String?>(null) }
 
-    fun perform(block: suspend () -> Unit) {
+    fun perform(successCue: UiCue = UiCue.CONFIRM, block: suspend () -> Unit) {
         if (busy) return
         busy = true
         error = null
         scope.launch {
-            try { block() }
+            try { block(); UiSound.play(app, successCue) }
             catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
             catch (failure: Exception) { error = failure.message ?: "没有保存成功，请再试一次" }
             finally { busy = false }
@@ -102,7 +104,7 @@ fun WishBookScreen(onBack: () -> Unit, onRecordWaiting: (Sticker) -> Unit) {
             }
             if(tab==1) {
                 val archived=state.waiting.filter {it.archived}
-                if(archived.isNotEmpty()) item { TextButton(onClick=uiTap {showArchived=!showArchived}) {Text(if(showArchived) "收起已经放下的愿望" else "看看已经放下的愿望") } }
+                if(archived.isNotEmpty()) item { TextButton(onClick=uiTap(UiCue.TOGGLE) {showArchived=!showArchived}) {Text(if(showArchived) "收起已经放下的愿望" else "看看已经放下的愿望") } }
                 if(showArchived) items(archived,key={"archived-${it.id}"}) {wish->
                     Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
                         Text(wish.title,Modifier.weight(1f),style=MaterialTheme.typography.bodySmall)
@@ -126,20 +128,20 @@ fun WishBookScreen(onBack: () -> Unit, onRecordWaiting: (Sticker) -> Unit) {
         if(wish.caption.isNotBlank()) Text(wish.caption,style=MaterialTheme.typography.bodySmall)
         Row {
             TextButton(onClick=uiTap {selected=null;editWish=wish},enabled=!busy){Text("编辑愿望")}
-            TextButton(onClick=uiTap {selected=null;recordsWish=wish.id},enabled=!busy){Text("攒星记录")}
+            TextButton(onClick=uiTap(UiCue.PAPER) {selected=null;recordsWish=wish.id},enabled=!busy){Text("攒星记录")}
         }
     } }
     selectedWaiting?.let {id->waiting.firstOrNull {it.id==id}?.let {wish->GuluDialog(wish.title,{selectedWaiting=null},compact=true,dense=true,compactWidth=280.dp,busy=busy,
         confirmLabel="开始攒",onConfirm={selectedWaiting=null;promotion=wish},dismissLabel="收起来") {
         Text(if(wish.amountFen>0) "大约 ¥${Formatters.fenToYuanText(wish.amountFen)}" else "价格可以慢慢想，先留下喜欢。")
-        TextButton(onClick=uiTap {selectedWaiting=null;onRecordWaiting(Sticker(id="waiting:${wish.id}",title=wish.title,emoji=wish.emoji,amountFen=wish.amountFen))},enabled=!busy){Text("买到了 · 记一笔")}
+        TextButton(onClick=uiTap(UiCue.NAVIGATE) {selectedWaiting=null;onRecordWaiting(Sticker(id="waiting:${wish.id}",title=wish.title,emoji=wish.emoji,amountFen=wish.amountFen))},enabled=!busy){Text("买到了 · 记一笔")}
         Row {
             TextButton(onClick=uiTap {selectedWaiting=null;editWaiting=wish},enabled=!busy){Text("编辑")}
             TextButton(onClick=uiTap {perform {repository.archiveWaiting(wish.id);selectedWaiting=null}},enabled=!busy){Text("轻轻放下")}
         }
     } } }
     selectedMemory?.let {id->completed.firstOrNull {it.id==id}?.let {wish->GuluDialog(wish.title,{selectedMemory=null},compact=true,dense=true,compactWidth=280.dp,busy=busy,
-        confirmLabel="攒星回忆",onConfirm={selectedMemory=null;recordsWish=wish.id},dismissLabel="收起来") {
+        confirmLabel="攒星回忆",onConfirm={selectedMemory=null;recordsWish=wish.id},dismissLabel="收起来",confirmCue=UiCue.PAPER) {
         Text("${Formatters.dayLabel(wish.completedAt ?: wish.createdAt)} · 实现啦",color=MaterialTheme.colorScheme.primary)
         Text("攒下 ¥${Formatters.fenToYuanText(wish.savedFen)} · ${wish.deposits.size} 次记录",style=MaterialTheme.typography.bodySmall)
         if(wish.caption.isNotBlank()) Text(wish.caption)
@@ -199,10 +201,10 @@ fun WishBookScreen(onBack: () -> Unit, onRecordWaiting: (Sticker) -> Unit) {
         }
     } }
     removeDeposit?.let { (id, record) -> GuluDialog("把这颗星星拿出来？", { removeDeposit = null }, "确认撤销", {
-        perform { repository.removeDeposit(id, record.id); removeDeposit = null }
+        perform(UiCue.REMOVE) { repository.removeDeposit(id, record.id); removeDeposit = null }
     }, dismissLabel = "留下", busy = busy, compact = true, dense = true, compactWidth = 280.dp) { Text("将撤销 ¥${Formatters.fenToYuanText(record.amountFen)} 的进度。如果不再达到目标，瓶子会回到正在攒。") } }
     deleteWish?.let { wish -> GuluDialog("收走这个愿望瓶？", { deleteWish = null }, "删除愿望", {
-        perform { repository.deleteWish(wish.id); deleteWish = null; editWish = null; recordsWish = null }
+        perform(UiCue.REMOVE) { repository.deleteWish(wish.id); deleteWish = null; editWish = null; recordsWish = null }
     }, dismissLabel = "留下", busy = busy, compact = true, dense = true, compactWidth = 280.dp) { Text("「${wish.title}」和它的攒星记录都会删除。已经夹进生活纪念册的海报会保留。") } }
     completedMessage?.let { (id, title) -> GuluDialog("愿望实现啦！✨", { completedMessage = null }, "去留个纪念", {
         editWish = state.wishes.firstOrNull { it.id == id }
@@ -237,7 +239,7 @@ private fun WaitingCard(wish: WaitingWish, onEdit: () -> Unit, onPromote: () -> 
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             TextButton(onClick = uiTap(onPromote)) { Text("认真攒") }
-            TextButton(onClick = uiTap(onBought)) { Text("买到了 · 记一笔") }
+            TextButton(onClick = uiTap(UiCue.NAVIGATE, onBought)) { Text("买到了 · 记一笔") }
             TextButton(onClick = uiTap(onArchive)) { Text("放下了", color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
     }
@@ -340,7 +342,7 @@ private fun DepositDialog(wish: Wish, onDismiss: () -> Unit, busy: Boolean = fal
         Text("还差 ¥${Formatters.fenToYuanText((wish.targetFen - wish.savedFen).coerceAtLeast(0))}", color = MaterialTheme.colorScheme.primary)
         CompactFormField("这次攒", amount, { amount = it.take(14) }, prefix = "¥", minHeight = 50.dp,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), enabled = !busy)
-        TextButton(onClick = uiTap { amount = Formatters.fenToYuanText((wish.targetFen - wish.savedFen).coerceAtLeast(0)) }, enabled = !busy) { Text("刚好装满这个愿望") }
+        TextButton(onClick = uiTap(UiCue.SELECT) { amount = Formatters.fenToYuanText((wish.targetFen - wish.savedFen).coerceAtLeast(0)) }, enabled = !busy) { Text("刚好装满这个愿望") }
         CompactFormField("小事", note, { note = it.take(100) }, placeholder = "可选", enabled = !busy)
         Text("只更新愿望进度，不会增加账单。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
@@ -351,7 +353,7 @@ private fun DepositDialog(wish: Wish, onDismiss: () -> Unit, busy: Boolean = fal
 private fun EmojiChooser(selected: String, enabled: Boolean = true, onSelect: (String) -> Unit) {
     LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         items(listOf("⭐", "🎁", "📷", "✈️", "🏡", "📚", "🎧", "🌱", "🐱", "💻", "🧸", "🍰")) { emoji ->
-            Surface(shape = RoundedCornerShape(12.dp), color = if (selected == emoji) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .4f), modifier = Modifier.size(44.dp).clickable(enabled = enabled, onClick = uiTap { onSelect(emoji) })) {
+            Surface(shape = RoundedCornerShape(12.dp), color = if (selected == emoji) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .4f), modifier = Modifier.size(44.dp).clickable(enabled = enabled, onClick = uiTap(UiCue.SELECT) { onSelect(emoji) })) {
                 Box(contentAlignment = Alignment.Center) { Text(emoji, fontSize = 22.sp) }
             }
         }

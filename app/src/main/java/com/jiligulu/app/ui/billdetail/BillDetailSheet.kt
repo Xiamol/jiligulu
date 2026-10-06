@@ -42,6 +42,8 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.jiligulu.app.JiliguluApp
 import com.jiligulu.app.core.util.Formatters
+import com.jiligulu.app.core.audio.UiCue
+import com.jiligulu.app.core.audio.UiSound
 import com.jiligulu.app.data.local.entity.BillSource
 import com.jiligulu.app.data.local.entity.BillType
 import com.jiligulu.app.ui.components.SpringScrollColumn
@@ -78,6 +80,8 @@ fun BillDetailSheet(billId: Long, onDismiss: () -> Unit) {
     var photoPath by rememberSaveable(billId) { mutableStateOf("") }
     var timestamp by rememberSaveable(billId) { mutableStateOf<Long?>(null) }
     var confirmDelete by rememberSaveable(billId) { mutableStateOf(false) }
+    var completionCue by rememberSaveable(billId) { mutableStateOf(UiCue.CONFIRM) }
+    var completionHeard by rememberSaveable(billId) { mutableStateOf(false) }
     val bill = state.bill
 
     LaunchedEffect(bill) {
@@ -90,7 +94,12 @@ fun BillDetailSheet(billId: Long, onDismiss: () -> Unit) {
             initialized = true
         }
     }
-    LaunchedEffect(state.isComplete) { if (state.isComplete) onDismiss() }
+    LaunchedEffect(state.isComplete) {
+        if (state.isComplete) {
+            if (!completionHeard) { completionHeard = true; UiSound.play(app, completionCue) }
+            onDismiss()
+        }
+    }
 
     ModalBottomSheet(onDismissRequest = { if (!busy) onDismiss() }, sheetState = sheetState,
         containerColor = MaterialTheme.colorScheme.background) {
@@ -101,7 +110,7 @@ fun BillDetailSheet(billId: Long, onDismiss: () -> Unit) {
                     Text("把生活的小细节，好好收起来。", style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                TextButton(onClick = uiTap(onDismiss), enabled = !busy) { Text("关闭") }
+                TextButton(onClick = uiTap(UiCue.NAVIGATE, onDismiss), enabled = !busy) { Text("关闭") }
             }
         SpringScrollColumn(Modifier.fillMaxWidth().weight(1f, fill = false),
             verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -152,7 +161,7 @@ fun BillDetailSheet(billId: Long, onDismiss: () -> Unit) {
                     Text("删除", color = MaterialTheme.colorScheme.error)
                 }
                 Spacer(Modifier.weight(1f))
-                Button(onClick = uiTap { timestamp?.let { vm.save(amount, detail, it, note, photoPath.takeIf(String::isNotBlank)) } },
+                Button(onClick = uiTap { timestamp?.let { completionCue = UiCue.CONFIRM; vm.save(amount, detail, it, note, photoPath.takeIf(String::isNotBlank)) } },
                     enabled = !busy && initialized, modifier = Modifier.height(44.dp)) {
                     Text(if (state.isSaving) "正在保存…" else "保存修改")
                 }
@@ -164,9 +173,9 @@ fun BillDetailSheet(billId: Long, onDismiss: () -> Unit) {
         AlertDialog(onDismissRequest = { confirmDelete = false },
             title = { Text("删除这笔账？") },
             text = { Text("${detail.ifBlank { state.categoryName }}  ¥$amount\n删除后可在「设置 → 数据管理 → 回收站」里找回。") },
-            confirmButton = { TextButton(onClick = { confirmDelete = false; vm.delete() }) {
+            confirmButton = { TextButton(onClick = uiTap { confirmDelete = false; completionCue = UiCue.REMOVE; vm.delete() }) {
                 Text("确认删除", color = MaterialTheme.colorScheme.error)
             } },
-            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("保留") } })
+            dismissButton = { TextButton(onClick = uiTap(UiCue.NAVIGATE) { confirmDelete = false }) { Text("保留") } })
     }
 }

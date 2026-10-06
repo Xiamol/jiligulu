@@ -63,30 +63,36 @@ enum class XiangqiPlayMode { CPU, ONLINE, LAN, HOTSEAT }
 internal fun ColumnScope.SecretXiangqiGame(state: XiangqiState, mode: XiangqiPlayMode, paused: Boolean,
     boardWidth: Dp, thinkingClock: XiangqiThinkingClock, lan: XiangqiLanUiState, onMode: (XiangqiPlayMode) -> Unit,
     onMove: (XiangqiMove) -> Unit, onToggle: () -> Unit, onRestart: () -> Unit,
-    onHost: () -> Unit, onJoin: (String) -> Unit, onDisconnect: () -> Unit, onPuzzle:(XiangqiState)->Unit,
+    onHost: (String) -> Unit, onJoin: (String) -> Unit, onDisconnect: () -> Unit, onPuzzle:(XiangqiState)->Unit,
     remoteSelection: GridCell? = null, onSelectionChanged: (GridCell?) -> Unit = {},
     helpBusy: Boolean = false, assistedSelection: GridCell? = null,
     restorationToken: Int = 0,
+    humanSide: XiangqiSide = XiangqiSide.RED,
+    showRoomEntry: Boolean = false,
     canUndo: Boolean = false, onUndo: () -> Unit = {}, onUndoResponse: (Boolean) -> Unit = {},
     nearby: NearbyRoomsState? = null, onNearbyRetry: () -> Unit = {},
+    onMatchResponse: (Boolean) -> Unit = {}, onRematchResponse: (Boolean) -> Unit = {}, onExit: () -> Unit = onDisconnect,
     onModalOpened: () -> Unit = {}, onControlsBottom: (Float) -> Unit = {}) {
     val soundContext = LocalContext.current
+    val finished = state.outcome!=XiangqiOutcome.PLAYING
+    val networkMode = mode == XiangqiPlayMode.LAN || mode == XiangqiPlayMode.ONLINE
+    val finish = remember(state,mode,lan.localSide,humanSide) { GameFinishPresenter.xiangqi(state,
+        when(mode){XiangqiPlayMode.CPU->humanSide;XiangqiPlayMode.HOTSEAT->null;else->lan.localSide}) }
     var modeMenu by remember { mutableStateOf(false) }
     val modeNames = remember { mapOf(XiangqiPlayMode.CPU to "和阿噜下", XiangqiPlayMode.ONLINE to "创建房间",
         XiangqiPlayMode.LAN to "附近的人", XiangqiPlayMode.HOTSEAT to "同屏双人") }
     Row(Modifier.width(boardWidth).height(42.dp), verticalAlignment = Alignment.CenterVertically) {
         Box {
-            TextButton(onClick = { UiSound.tap(soundContext); onModalOpened(); modeMenu = true }, contentPadding = PaddingValues(horizontal = 8.dp)) {
+            TextButton(onClick = { UiSound.select(soundContext); onModalOpened(); modeMenu = true }, enabled=!finished, contentPadding = PaddingValues(horizontal = 8.dp)) {
                 Text(modeNames.getValue(mode), color = Color(0xFF766A7F))
                 Icon(Icons.Outlined.ExpandMore, "选择对局方式", Modifier.size(18.dp), tint = Color(0xFF928497))
             }
-            DropdownMenu(expanded = modeMenu, onDismissRequest = { modeMenu = false }) {
-                modeNames.forEach { (value, label) ->
-                    DropdownMenuItem(text = { Text(label) }, onClick = {
-                        UiSound.tap(soundContext); modeMenu = false
-                        if (mode != value) onMode(value)
-                    })
-                }
+            if(modeMenu) SecretWoodDialog("和谁下？",{modeMenu=false},confirmLabel="返回棋盘") {
+                modeNames.forEach { (value,label)->TextButton(onClick={
+                    UiSound.select(soundContext);modeMenu=false;if(mode!=value)onMode(value)
+                },modifier=Modifier.fillMaxWidth().height(48.dp),colors=ButtonDefaults.textButtonColors(contentColor=SecretWoodInk)) {
+                    Text(if(value==mode) "✓ $label" else label)
+                } }
             }
         }
         Spacer(Modifier.weight(1f))
@@ -95,28 +101,39 @@ internal fun ColumnScope.SecretXiangqiGame(state: XiangqiState, mode: XiangqiPla
             style = MaterialTheme.typography.bodySmall,
             color = if (state.turnSide == XiangqiSide.RED) Color(0xFFAF766A) else Color(0xFF766A7F))
     }
-    val networkMode = mode == XiangqiPlayMode.LAN || mode == XiangqiPlayMode.ONLINE
+    var matchResponseSent by remember(mode,lan.pendingMatchName) {mutableStateOf(false)}
+    if(networkMode && lan.pendingMatchName!=null) {
+        SecretWoodDialog("棋友来敲门啦",{if(!matchResponseSent){matchResponseSent=true;onMatchResponse(false)}},
+            confirmLabel="一起下",onConfirm={if(!matchResponseSent){matchResponseSent=true;onMatchResponse(true)}},
+            dismissLabel="这次先不了",busy=matchResponseSent){Text("${lan.pendingMatchName}想和你下一盘象棋。",style=MaterialTheme.typography.bodyMedium)}
+    }
+    var rematchResponseSent by remember(mode,lan.round,lan.rematchRequestedBy) {mutableStateOf(false)}
+    if(networkMode && lan.rematchRequestedBy!=null && lan.rematchRequestedBy!=lan.localSide && !lan.myRematchRequested) {
+        SecretWoodDialog("再摆一盘？",{if(!rematchResponseSent){rematchResponseSent=true;onRematchResponse(false)}},
+            confirmLabel="好呀，换边再下",onConfirm={if(!rematchResponseSent){rematchResponseSent=true;onRematchResponse(true)}},
+            dismissLabel="这次收桌",busy=rematchResponseSent){Text("棋友想再来一局。这一盘会交换红黑。",style=MaterialTheme.typography.bodySmall)}
+    }
     var undoResponseSent by remember(mode, lan.revision, lan.pendingUndoRequest) { mutableStateOf(false) }
     if (networkMode && lan.pendingUndoRequest != null && lan.pendingUndoRequest != lan.localSide) {
         fun respond(accept: Boolean) { if (!undoResponseSent) { undoResponseSent = true; onUndoResponse(accept) } }
-        com.jiligulu.app.ui.components.GuluDialog("棋友想退回一步", { respond(false) },
-            compact = true, busy = undoResponseSent, confirmLabel = "同意", onConfirm = { respond(true) }, dismissLabel = "继续这局") {
+        SecretWoodDialog("棋友想退回一步", { respond(false) },
+            busy = undoResponseSent, confirmLabel = "同意", onConfirm = { respond(true) }, dismissLabel = "继续这局") {
             Text("同意后，两张棋桌会一起回到上一步。", style = MaterialTheme.typography.bodySmall)
         }
     }
     var choosePuzzle by remember {mutableStateOf(false)}
     var showRules by remember { mutableStateOf(false) }
-    if (networkMode && !lan.connected) {
+    if (networkMode && !lan.connected && (!finished||showRoomEntry)) {
         if (mode == XiangqiPlayMode.LAN) NearbyChessLobby(nearby, lan.status, lan.error, onJoin, onNearbyRetry, onControlsBottom)
         else OnlineChessLobby(lan.sessionActive, lan.busy, lan.hostAddress, lan.status, lan.error,
             onHost, onJoin, onDisconnect, onControlsBottom)
         return
     }
-    if(choosePuzzle) com.jiligulu.app.ui.components.GuluDialog("一着小残局",{choosePuzzle=false},compact=true) {
+    if(choosePuzzle) SecretWoodDialog("一着小残局",{choosePuzzle=false}) {
         Text("红方一步取胜。选一种小棋子，试试它的庆祝方式 ♡",style=MaterialTheme.typography.bodySmall)
         XiangqiPuzzles.all.forEach {puzzle-> TextButton(onClick={UiSound.tap(soundContext);choosePuzzle=false;onPuzzle(puzzle.position)}) {Text(puzzle.title)} }
     }
-    if (showRules) com.jiligulu.app.ui.components.GuluDialog("棋桌上的小约定", { showRules = false }, compact = true) {
+    if (showRules) SecretWoodDialog("棋桌上的小约定", { showRules = false }) {
         Text("先点棋子，再点落点。小圆点是可走的位置，空心圈表示可以吃子；再点一次已选棋子可以取消。",
             style = MaterialTheme.typography.bodyMedium)
         Text("人机和同屏：开局可以设置本步思考秒数，暂停或离开软件会停表。时间到了也可以继续想，不判负。",
@@ -125,40 +142,34 @@ internal fun ColumnScope.SecretXiangqiGame(state: XiangqiState, mode: XiangqiPla
             style = MaterialTheme.typography.bodySmall)
     }
     val playerName = if (state.turnSide == XiangqiSide.RED) "红方" else "黑方"
-    val winningPiece = state.lastMove?.let { abs(state.pieceAt(it.to.x, it.to.y)) } ?: 0
-    val winningFlavor = when (winningPiece) {
-        XiangqiEngine.ROOK -> "小车走出了一条金色星轨"
-        XiangqiEngine.CANNON -> "小炮放了一圈星星烟花"
-        XiangqiEngine.HORSE -> "小马跳着给你撒花"
-        XiangqiEngine.PAWN -> "小兵一步步走到了好位置"
-        XiangqiEngine.ELEPHANT -> "小相把一片好运带了过来"
-        XiangqiEngine.ADVISOR -> "小士替棋桌系上庆祝彩带"
-        else -> "阿噜替这一局撒一把星星"
-    }
     val inCheck = remember(state) { state.outcome == XiangqiOutcome.PLAYING && XiangqiEngine.isInCheck(state, state.turnSide) }
     val status = when (state.outcome) {
-        XiangqiOutcome.RED_WON -> "红方赢啦 · $winningFlavor ♡"
-        XiangqiOutcome.BLACK_WON -> "黑方赢啦 · $winningFlavor ♡"
+        XiangqiOutcome.RED_WON -> "红方胜出"
+        XiangqiOutcome.BLACK_WON -> "黑方胜出"
         XiangqiOutcome.PLAYING -> when {
             !networkMode && paused -> "棋局已暂停"
             networkMode && lan.awaitingAck -> "正在等另一张棋桌回应…"
             networkMode && lan.pendingUndoRequest != null -> "等棋友商量这一步…"
             !networkMode && thinkingClock.expired && thinkingClock.side == state.turnSide -> "提醒时间到啦，继续慢慢想也可以 ♡"
-            mode == XiangqiPlayMode.CPU && state.turnSide == XiangqiSide.BLACK -> "阿噜在想下一步…"
+            mode == XiangqiPlayMode.CPU && state.turnSide != humanSide -> "阿噜在想下一步…"
             inCheck -> "$playerName 被将军了，先保护将帅"
             else -> "轮到${playerName}落子"
         }
     }
     val canMove = !helpBusy && state.outcome == XiangqiOutcome.PLAYING && when (mode) {
-        XiangqiPlayMode.CPU -> !paused && state.turnSide == XiangqiSide.RED
+        XiangqiPlayMode.CPU -> !paused && state.turnSide == humanSide
         XiangqiPlayMode.HOTSEAT -> !paused
         XiangqiPlayMode.LAN, XiangqiPlayMode.ONLINE -> lan.connected && !lan.awaitingAck && lan.pendingUndoRequest == null && state.turnSide == lan.localSide
     }
     Spacer(Modifier.height(10.dp))
     XiangqiBoard(state, boardWidth, canMove,
-        flipped = networkMode && lan.localSide == XiangqiSide.BLACK, onMove = onMove,
+        flipped = mode==XiangqiPlayMode.CPU && humanSide==XiangqiSide.BLACK || networkMode && lan.localSide == XiangqiSide.BLACK, onMove = onMove,
         remoteSelection = remoteSelection, onSelectionChanged = onSelectionChanged, assistedSelection = assistedSelection,
         restorationToken = restorationToken)
+    if(finish!=null) {
+        GameFinishPlate(finish,onRestart,onExit,networkMode,lan.roomEnded,lan.resultSecondsLeft,lan.myRematchRequested,
+            Modifier.width(boardWidth).padding(top=10.dp).onGloballyPositioned{onControlsBottom(it.boundsInRoot().bottom)})
+    } else {
     Text(status, modifier = Modifier.padding(vertical = 10.dp).width(boardWidth), color = Color(0xFF766A7F),
         style = MaterialTheme.typography.bodySmall, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
         Row(Modifier.width(boardWidth).padding(horizontal = 6.dp, vertical = 4.dp)) {
@@ -166,8 +177,6 @@ internal fun ColumnScope.SecretXiangqiGame(state: XiangqiState, mode: XiangqiPla
                 enabled = canUndo && !helpBusy && (!networkMode || !lan.awaitingAck && lan.pendingUndoRequest == null))
             if (networkMode) {
                 GameIconTool(Icons.Outlined.Logout, "离开棋桌", onDisconnect, Modifier.weight(1f))
-                GameIconTool(Icons.Outlined.Refresh, "重开", onRestart, Modifier.weight(1f),
-                    enabled = lan.localSide == XiangqiSide.RED && !lan.awaitingAck)
             } else {
                 GameIconTool(if (paused) Icons.Outlined.PlayCircleOutline else Icons.Outlined.PauseCircleOutline,
                     if (paused) "继续" else "暂停", onToggle, Modifier.weight(1f), enabled = state.outcome == XiangqiOutcome.PLAYING)
@@ -177,10 +186,12 @@ internal fun ColumnScope.SecretXiangqiGame(state: XiangqiState, mode: XiangqiPla
             GameIconTool(Icons.Outlined.HelpOutline, "规则", { onModalOpened(); if (!networkMode && !paused) onToggle(); showRules = true }, Modifier.weight(1f))
         }
     Column(Modifier.onGloballyPositioned { onControlsBottom(it.boundsInRoot().bottom) }, horizontalAlignment = Alignment.CenterHorizontally) {
-    Text(if (networkMode) "联机棋桌 · 不限时" else "每手 ${thinkingClock.durationMillis / 1000} 秒 · 点小钟可以调整",
+    Text(if (networkMode) "你执${if(lan.localSide==XiangqiSide.RED)"红" else "黑"} · 联机不限时"
+        else "你执${if(humanSide==XiangqiSide.RED)"红" else "黑"} · 每手 ${thinkingClock.durationMillis / 1000} 秒",
         Modifier.padding(top = 8.dp, bottom = 8.dp), style = MaterialTheme.typography.labelSmall, color = Color(0xFF9C8D98))
     lan.error?.takeIf { networkMode }?.let {
         Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+    }
     }
     }
 }
@@ -208,10 +219,10 @@ internal fun XiangqiThinkingTimeDialog(initialSeconds: Int, starting: Boolean, o
     var showError by remember { mutableStateOf(false) }
     val seconds = value.toIntOrNull()
     val valid = seconds != null && seconds in XiangqiThinkingClock.MIN_SECONDS..XiangqiThinkingClock.MAX_SECONDS
-    com.jiligulu.app.ui.components.GuluDialog(if (starting) "这局思考几秒？" else "调整本步时间", onDismiss,
+    SecretWoodDialog(if (starting) "这局思考几秒？" else "调整本步时间", onDismiss,
         confirmLabel = if (starting) "开始对弈" else "应用", onConfirm = {
             if (valid) onConfirm(requireNotNull(seconds)) else showError = true
-        }, dismissLabel = "稍后", compact = true, compactWidth = 270.dp) {
+        }, dismissLabel = "稍后", compactWidth = 270.dp) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             listOf(60, 120, 180).forEach { preset ->
                 TextButton(onClick = { UiSound.tap(context); value = preset.toString(); showError = false },
@@ -221,11 +232,14 @@ internal fun XiangqiThinkingTimeDialog(initialSeconds: Int, starting: Boolean, o
                 }
             }
         }
-        OutlinedTextField(value = value, onValueChange = { value = it.filter(Char::isDigit).take(3); showError = false },
-            label = { Text("思考时间（秒）", fontSize = 12.sp) }, singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            shape = RoundedCornerShape(14.dp), isError = showError && !valid,
-            modifier = Modifier.fillMaxWidth().heightIn(max = 64.dp).testTag("xiangqi-thinking-seconds"))
+        Row(Modifier.fillMaxWidth().height(36.dp),verticalAlignment=Alignment.CenterVertically) {
+            Text("每手思考",Modifier.weight(1f),style=MaterialTheme.typography.bodySmall,color=SecretWoodInk)
+            androidx.compose.foundation.text.BasicTextField(value,{value=it.filter(Char::isDigit).take(3);showError=false},singleLine=true,
+                textStyle=MaterialTheme.typography.titleMedium.copy(color=SecretWoodInk,textAlign=androidx.compose.ui.text.style.TextAlign.Center),
+                keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Number),
+                modifier=Modifier.width(58.dp).testTag("xiangqi-thinking-seconds"))
+            Text("秒",Modifier.padding(start=5.dp),style=MaterialTheme.typography.bodySmall,color=SecretWoodInk)
+        }
         Text(if (showError && !valid) "填 15～600 秒就好。" else if (starting) "每步到时只提醒，不判负。" else "应用后，这一步会重新计时。",
             style = MaterialTheme.typography.bodySmall,
             color = if (showError && !valid) MaterialTheme.colorScheme.error else Color(0xFF9C8D98))
@@ -260,7 +274,7 @@ private fun XiangqiBoard(state: XiangqiState, width: Dp, canMove: Boolean, flipp
     fun updateSelection(value: Int) {
         if (value != selected) {
             selected = value
-            if (value >= 0) UiSound.select(context)
+            if (value >= 0) UiSound.pieceSelect(context)
             latestSelection(if (value < 0) null else GridCell(value % 9, value / 9))
         }
     }
@@ -276,6 +290,7 @@ private fun XiangqiBoard(state: XiangqiState, width: Dp, canMove: Boolean, flipp
     val latestMove by rememberUpdatedState(onMove)
     val checkPulse = remember { Animatable(0f) }
     val winPulse = remember { Animatable(0f) }
+    val finishProof = remember(state) { XiangqiMateClassifier.classify(state) }
     var animationInitialized by remember(restorationToken) { mutableStateOf(false) }
     LaunchedEffect(state.ply, state.outcome, restorationToken) {
         val animate = animationInitialized
@@ -283,7 +298,7 @@ private fun XiangqiBoard(state: XiangqiState, width: Dp, canMove: Boolean, flipp
         checkPulse.snapTo(0f)
         winPulse.snapTo(0f)
         if (animate && state.outcome != XiangqiOutcome.PLAYING) {
-            winPulse.snapTo(1f); winPulse.animateTo(0f, tween(1800))
+            winPulse.snapTo(1f); winPulse.animateTo(0f, tween(3200))
         } else if (animate && XiangqiEngine.isInCheck(state, state.turnSide)) {
             checkPulse.snapTo(1f); checkPulse.animateTo(0f, tween(900))
         }
@@ -312,7 +327,7 @@ private fun XiangqiBoard(state: XiangqiState, width: Dp, canMove: Boolean, flipp
                 val viewX = ((tap.x - padding) / stepX).roundToInt()
                 val viewY = ((tap.y - padding) / stepY).roundToInt()
                 if (viewX !in 0..8 || viewY !in 0..9) return@detectTapGestures
-                val cell = if (flipped) GridCell(8 - viewX, 9 - viewY) else GridCell(viewX, viewY)
+                val cell = XiangqiBoardCoordinates.model(GridCell(viewX,viewY),flipped)
                 val move = latestLegal.firstOrNull { it.to == cell }
                 if (move != null) { latestMove(move); updateSelection(-1) }
                 else {
@@ -328,9 +343,8 @@ private fun XiangqiBoard(state: XiangqiState, width: Dp, canMove: Boolean, flipp
         val stepY = (size.height - padding * 2) / 9
         val ink = Color(0xFF967553)
         fun position(cell: GridCell): Offset {
-            val x = if (flipped) 8 - cell.x else cell.x
-            val y = if (flipped) 9 - cell.y else cell.y
-            return Offset(padding + x * stepX, padding + y * stepY)
+            val shown=XiangqiBoardCoordinates.display(cell,flipped)
+            return Offset(padding + shown.x * stepX, padding + shown.y * stepY)
         }
         repeat(10) { y -> drawLine(ink, Offset(padding, padding + y * stepY),
             Offset(size.width - padding, padding + y * stepY), 1.dp.toPx()) }
@@ -415,6 +429,18 @@ private fun XiangqiBoard(state: XiangqiState, width: Dp, canMove: Boolean, flipp
             val piece = abs(state.pieceAt(finalMove.to.x, finalMove.to.y))
             val phase = 1f - winPulse.value
             val gold = Color(0xFFD5A455).copy(alpha = winPulse.value * .8f)
+            val proof=finishProof
+            if(proof?.family==XiangqiFinishFamily.DOUBLE_CANNON) {
+                val cannons=state.board.indices.filter{state.board[it]==proof.winner.sign*XiangqiEngine.CANNON}
+                    .map{GridCell(it%9,it/9)}
+                cannons.forEach { cell->repeat(2){ring->drawCircle(gold,stepX*(.5f+phase*(ring+1)*.7f),position(cell),style=Stroke(2.dp.toPx()))} }
+                if(cannons.size==2)drawLine(gold,position(cannons[0]),position(cannons[1]),3.dp.toPx(),pathEffect=PathEffect.dashPathEffect(floatArrayOf(5.dp.toPx(),3.dp.toPx())))
+            } else if(proof?.family==XiangqiFinishFamily.SMOTHERED_CANNON||proof?.family==XiangqiFinishFamily.STALEMATE) {
+                val king=state.board.indexOf(proof.winner.opponent.sign*XiangqiEngine.GENERAL)
+                if(king>=0) {val p=position(GridCell(king%9,king/9));drawRoundRect(gold,p-Offset(stepX*.55f,stepY*.55f),
+                    androidx.compose.ui.geometry.Size(stepX*1.1f,stepY*1.1f),CornerRadius(5.dp.toPx()),style=Stroke(2.dp.toPx()))}
+                proof.checkingCells.forEach{cell->drawCircle(gold,stepX*(.45f+phase),position(cell),style=Stroke(2.dp.toPx()))}
+            }
             when (piece) {
                 XiangqiEngine.ROOK -> {
                     drawLine(gold, Offset(padding, center.y), Offset(size.width - padding, center.y), 3.dp.toPx())

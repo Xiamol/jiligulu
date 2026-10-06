@@ -49,6 +49,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.DisposableEffect
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -81,6 +82,7 @@ import com.jiligulu.app.ui.theme.GuluBrandFont
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
@@ -105,6 +107,15 @@ fun ChatScreen(
     val loadingOlderHistory by vm.loadingOlderHistory.collectAsStateWithLifecycle()
     val newestFirst = remember(items) { items.asReversed() }
     val lifecycleOwner = LocalLifecycleOwner.current
+    val today by androidx.compose.runtime.produceState(LocalDate.now(), lifecycleOwner) {
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (true) {
+                value = LocalDate.now()
+                delay(60_000)
+            }
+        }
+    }
+    val timeLabels = remember(items, today) { ChatTimeLabels.separators(items, today, ZoneId.systemDefault()) }
     DisposableEffect(vm, lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_STOP) vm.collapseDrafts()
@@ -190,7 +201,14 @@ fun ChatScreen(
         ) {
             items(newestFirst, key = { it.id }, contentType = { it.javaClass }) { item ->
                 // 设计稿动效③：对话气泡从底部上滑+渐显
-                Box(Modifier.animateItem()) {
+                Column(Modifier.animateItem()) {
+                    timeLabels[item.id]?.let { label ->
+                        Box(Modifier.fillMaxWidth().padding(top = 3.dp, bottom = 13.dp), contentAlignment = Alignment.Center) {
+                            Text(label, modifier = Modifier.testTag("chat-time-${item.id}"),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .74f))
+                        }
+                    }
                     when (item) {
                         is ChatItem.UserMsg -> UserBubble(item.text)
                         is ChatItem.GuluMsg -> GuluBubble(item)

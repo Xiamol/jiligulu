@@ -52,6 +52,7 @@ class UserPrefs(private val context: Context) {
         const val MIN_FLOATING_SIZE_PERCENT = 60
         const val MAX_FLOATING_SIZE_PERCENT = 140
         private val KEY_FLOATING_CAPTURE = booleanPreferencesKey("floating_capture_enabled")
+        private val KEY_GLOBAL_GLASS_REFRACTION = booleanPreferencesKey("global_glass_refraction_enabled")
         private val KEY_NICKNAME = stringPreferencesKey("nickname")
         private val KEY_NAME_SUFFIX = stringPreferencesKey("name_suffix")
         private val KEY_API_KEY = stringPreferencesKey("api_key_override")
@@ -136,6 +137,14 @@ class UserPrefs(private val context: Context) {
     val floatingCaptureEnabled: Flow<Boolean> = context.dataStore.data.map { it[KEY_FLOATING_CAPTURE] ?: false }.distinctUntilChanged()
     suspend fun setFloatingCaptureEnabled(enabled: Boolean) {
         context.dataStore.edit { it[KEY_FLOATING_CAPTURE] = enabled }
+    }
+
+    /** Desired setting only. A live, explicitly approved MediaProjection session is still required. */
+    val globalGlassRefractionEnabled: Flow<Boolean> = context.dataStore.data.map {
+        it[KEY_GLOBAL_GLASS_REFRACTION] ?: false
+    }.distinctUntilChanged()
+    suspend fun setGlobalGlassRefractionEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[KEY_GLOBAL_GLASS_REFRACTION] = enabled }
     }
 
     suspend fun readAnnouncements(): SavedAnnouncements {

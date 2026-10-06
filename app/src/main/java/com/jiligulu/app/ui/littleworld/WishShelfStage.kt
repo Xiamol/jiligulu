@@ -32,6 +32,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
 import com.jiligulu.app.R
+import com.jiligulu.app.core.audio.UiCue
+import com.jiligulu.app.ui.components.uiTap
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -55,7 +57,7 @@ fun WishShelfStage(items:List<ShelfWish>,kind:Int,onBack:()->Unit,onAdd:()->Unit
             .combinedClickable(onClick={},onLongClick={whisper=true})) {
             art?.let {Image(it,null,Modifier.matchParentSize(),contentScale=ContentScale.FillBounds,colorFilter=MutedSceneColorFilter)}
             val visible=items.drop(page*12).take(12)
-            ShelfPearlButton("‹ 小窝",Modifier.align(Alignment.TopStart).padding(8.dp),onClick=onBack)
+            ShelfPearlButton("‹ 小窝",Modifier.align(Alignment.TopStart).padding(8.dp),cue=UiCue.NAVIGATE,onClick=onBack)
             ShelfPearlButton("＋ 愿望",Modifier.align(Alignment.TopEnd).padding(8.dp),onClick=onAdd)
             Text("星星愿望册",Modifier.offset(x=maxWidth*.31f,y=maxHeight*.146f)
                 .size(maxWidth*.38f,maxHeight*.033f).wrapContentSize(Alignment.Center),
@@ -63,7 +65,7 @@ fun WishShelfStage(items:List<ShelfWish>,kind:Int,onBack:()->Unit,onAdd:()->Unit
                 fontSize=18.sp,color=Color(0xFF3D6977))
             listOf("正在攒","候场","纪念").forEachIndexed { i,label->
                 Box(Modifier.offset(x=maxWidth*(.27f+i*.23f)-maxWidth*.11f,y=maxHeight*.198f-22.dp)
-                    .size(maxWidth*.22f,44.dp).clickable {onKind(i)},contentAlignment=Alignment.Center) {
+                    .size(maxWidth*.22f,44.dp).clickable(onClick=uiTap(UiCue.SELECT) {onKind(i)}),contentAlignment=Alignment.Center) {
                     Text(if(kind==i) "· $label ·" else label,style=MaterialTheme.typography.labelMedium,
                         fontWeight=if(kind==i) FontWeight.Bold else FontWeight.Normal,
                         color=if(kind==i) Color(0xFF278B99) else Color(0xFF66838B))
@@ -79,9 +81,9 @@ fun WishShelfStage(items:List<ShelfWish>,kind:Int,onBack:()->Unit,onAdd:()->Unit
                     drawOval(Color(0xFF497C8B).copy(alpha=.18f),topLeft=Offset.Zero,size=Size(size.width,size.height))
                 }
                 StarWishJar(item.progress,Modifier.width(bottleWidth).offset(x=centerX-bottleWidth/2,
-                    y=floor-bottleHeight*.92f).clickable(onClickLabel="查看${item.title}"){onSelect(item.id)},complete=kind==2)
+                    y=floor-bottleHeight*.92f).clickable(onClickLabel="查看${item.title}",onClick=uiTap(UiCue.SELECT){onSelect(item.id)}),complete=kind==2)
                 Box(Modifier.offset(x=centerX-bottleWidth/2,y=floor+maxHeight*.010f-18.dp)
-                    .size(bottleWidth,36.dp).clickable {onSelect(item.id)},contentAlignment=Alignment.Center) {
+                    .size(bottleWidth,36.dp).clickable(onClick=uiTap(UiCue.SELECT){onSelect(item.id)}),contentAlignment=Alignment.Center) {
                     Text(item.title,style=MaterialTheme.typography.labelSmall,color=Color(0xFF3D6977),
                         maxLines=1,overflow=TextOverflow.Ellipsis)
                 }
@@ -104,8 +106,8 @@ fun WishShelfStage(items:List<ShelfWish>,kind:Int,onBack:()->Unit,onAdd:()->Unit
 
 /** Nacre tags belong to this seaside shelf; other scene materials remain independent. */
 @Composable
-private fun ShelfPearlButton(label:String,modifier:Modifier=Modifier,enabled:Boolean=true,onClick:()->Unit) {
-    Box(modifier.clickable(enabled=enabled,role=Role.Button,onClick=onClick).drawWithCache {
+private fun ShelfPearlButton(label:String,modifier:Modifier=Modifier,enabled:Boolean=true,cue:UiCue=UiCue.SELECT,onClick:()->Unit) {
+    Box(modifier.clickable(enabled=enabled,role=Role.Button,onClick=uiTap(cue,onClick)).drawWithCache {
         val u=1.dp.toPx();val corner=CornerRadius(8*u)
         val pearl=Brush.linearGradient(listOf(Color(0xFFFFFFFF),Color(0xFFF2F8F5),Color(0xFFDCEEEE)))
         onDrawBehind {

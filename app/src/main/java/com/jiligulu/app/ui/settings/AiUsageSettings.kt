@@ -65,8 +65,8 @@ fun AiUsageSettings() {
     }
     if (show) GuluDialog("用量小账本 ✨", onDismiss = { show = false }, compact = true) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilterChip(selected = !lifetime, onClick = { lifetime = false }, label = { Text("今天") })
-            FilterChip(selected = lifetime, onClick = { lifetime = true }, label = { Text("累计") })
+            FilterChip(selected = !lifetime, onClick = com.jiligulu.app.ui.components.uiTap(com.jiligulu.app.core.audio.UiCue.SELECT) { lifetime = false }, label = { Text("今天") })
+            FilterChip(selected = lifetime, onClick = com.jiligulu.app.ui.components.uiTap(com.jiligulu.app.core.audio.UiCue.SELECT) { lifetime = true }, label = { Text("累计") })
         }
         val totals = if (lifetime) snapshot?.total else today
         if (totals != null) {

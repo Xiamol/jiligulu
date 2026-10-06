@@ -63,7 +63,8 @@ fun LittleWorldScreen(
     modifier: Modifier = Modifier,
     active: Boolean = true,
     onModalChanged: (Boolean) -> Unit = {},
-    onOpenSettings: (() -> Unit)? = null
+    onOpenSettings: (() -> Unit)? = null,
+    onSecretEntrance: ((SecretEntrance) -> Unit)? = null
 ) {
     val app = LocalContext.current.applicationContext as JiliguluApp
     val repository = app.container.littleWorld
@@ -106,6 +107,10 @@ fun LittleWorldScreen(
     var secretPullAt by remember { mutableLongStateOf(0L) }
     var secretHint by remember { mutableStateOf(false) }
     var secretEntrance by remember { mutableStateOf<SecretEntrance?>(null) }
+    fun startSecret(source: SecretEntrance) {
+        secretPullAt=0L; secretHint=false
+        if (onSecretEntrance != null) onSecretEntrance(source) else secretEntrance=source
+    }
     SecretEntranceLifecycle { secretEntrance = null }
     LaunchedEffect(active) { secretPullAt=0L;secretHint=false;if(!active) secretEntrance=null }
     LaunchedEffect(secretHint) { if(secretHint) {delay(2600);secretHint=false} }
@@ -147,7 +152,7 @@ fun LittleWorldScreen(
             onTopPull={ distance->
                 val now=android.os.SystemClock.uptimeMillis()
                 if(active&&distance>=44f) {
-                    if(secretPullAt>0&&now-secretPullAt<2600) {secretPullAt=0;secretHint=false;secretEntrance=SecretEntrance.PULL}
+                    if(secretPullAt>0&&now-secretPullAt<2600) startSecret(SecretEntrance.PULL)
                     else {secretPullAt=now;secretHint=true}
                 } else secretPullAt=0
             },
@@ -161,7 +166,7 @@ fun LittleWorldScreen(
                             ?: mailbox.entries.firstOrNull())?.id.orEmpty())
                     }, onSettings = onOpenSettings, controlsActive = active,
                     mailboxLoading = mailbox.loading, unreadCount = mailbox.unreadIds.size,
-                    onSecretLogo={secretEntrance=SecretEntrance.LOGO})
+                    onSecretLogo={startSecret(SecretEntrance.LOGO)})
             }
         }
         secretEntrance?.let {entry -> SecretEntranceOverlay(entry,{

@@ -16,10 +16,12 @@ import org.json.JSONObject
 /** Network rooms intentionally have no representable local slot. */
 enum class LocalGameMode { CPU, HOTSEAT }
 data class LocalGomokuSave(val mode: LocalGameMode, val game: GomokuState,
-    val undoHistory: List<GomokuState> = emptyList(), val started: Boolean = true, val paused: Boolean = true)
+    val undoHistory: List<GomokuState> = emptyList(), val started: Boolean = true, val paused: Boolean = true,
+    val humanPlayer: Int = 1, val colorAssigned: Boolean = true)
 data class LocalXiangqiSave(val mode: LocalGameMode, val game: XiangqiState,
     val undoHistory: List<XiangqiState> = emptyList(), val clock: XiangqiThinkingClock = XiangqiThinkingClock.reset(game),
-    val thinkingSeconds: Int = (clock.durationMillis / 1_000).toInt(), val started: Boolean = true, val paused: Boolean = true)
+    val thinkingSeconds: Int = (clock.durationMillis / 1_000).toInt(), val started: Boolean = true, val paused: Boolean = true,
+    val humanSide: XiangqiSide = XiangqiSide.RED, val colorAssigned: Boolean = true)
 data class LocalSnakeSave(val game: SnakeState, val started: Boolean = false, val paused: Boolean = true)
 
 /**
@@ -133,15 +135,19 @@ internal object LocalGameCodec {
     private val boardNumbers = Regex("-?\\d{1,4}")
     private val goAxes = arrayOf(GridCell(1, 0), GridCell(0, 1), GridCell(1, 1), GridCell(1, -1))
     fun encode(save: LocalGomokuSave): String {
+        require(save.humanPlayer in 1..2)
+        require(save.colorAssigned||!save.started&&save.game.board.all{it==0})
         validateGomoku(save.game)
         validateHistory(save.undoHistory, save.game, LocalGameArchive.GOMOKU_HISTORY_LIMIT, ::validateGomoku) { before, next ->
             next.lastMove?.let { GomokuEngine.play(before, it.x, it.y) == next } == true
         }
         require(save.started || save.game.board.all { it == 0 })
         return envelope("gomoku", save.started, save.paused).put("mode", save.mode.name)
-            .put("game", gomokuJson(save.game)).put("history", JSONArray(save.undoHistory.map(::gomokuJson))).toString()
+            .put("game", gomokuJson(save.game)).put("history", JSONArray(save.undoHistory.map(::gomokuJson)))
+            .put("humanPlayer",save.humanPlayer).put("colorAssigned",save.colorAssigned).toString()
     }
     fun encode(save: LocalXiangqiSave): String {
+        require(save.colorAssigned||!save.started&&save.game.ply==0)
         validateXiangqi(save.game)
         validateHistory(save.undoHistory, save.game, LocalGameArchive.XIANGQI_HISTORY_LIMIT, ::validateXiangqi) { before, next ->
             next.lastMove?.let { XiangqiEngine.play(before, it) == next } == true
@@ -151,6 +157,7 @@ internal object LocalGameCodec {
         require(save.clock.ply == save.game.ply && save.clock.side == save.game.turnSide && save.clock.durationMillis == save.thinkingSeconds * 1_000L)
         return envelope("xiangqi", save.started, save.paused).put("mode", save.mode.name).put("game", xiangqiJson(save.game))
             .put("history", JSONArray(save.undoHistory.map(::xiangqiJson))).put("thinking", save.thinkingSeconds)
+            .put("humanSide",save.humanSide.name).put("colorAssigned",save.colorAssigned)
             .put("clock", JSONObject().put("ply", save.clock.ply).put("side", save.clock.side.name)
                 .put("remaining", save.clock.remainingMillis).put("duration", save.clock.durationMillis)).toString()
     }
@@ -168,7 +175,9 @@ internal object LocalGameCodec {
         val mode = LocalGameMode.valueOf(json.getString("mode")); require(mode == expected)
         val game = readGomoku(json.getJSONObject("game"))
         val history = history(json, LocalGameArchive.GOMOKU_HISTORY_LIMIT, ::readGomoku)
-        val save = LocalGomokuSave(mode, game, history, bool(json, "started"), true)
+        val save = LocalGomokuSave(mode, game, history, bool(json, "started"), true,
+            if(json.has("humanPlayer")) int(json,"humanPlayer",1..2) else 1,
+            if(json.has("colorAssigned"))bool(json,"colorAssigned")else true)
         encode(save) // The same engine/chain validation applies to incoming private files.
         return save
     }
@@ -180,7 +189,9 @@ internal object LocalGameCodec {
         val clockJson = json.getJSONObject("clock")
         val clock = XiangqiThinkingClock(int(clockJson, "ply", 0..1_000_000), XiangqiSide.valueOf(clockJson.getString("side")),
             number(clockJson, "remaining", 0L..600_000L), number(clockJson, "duration", 15_000L..600_000L))
-        val save = LocalXiangqiSave(mode, game, history, clock, int(json, "thinking", 15..600), bool(json, "started"), true)
+        val save = LocalXiangqiSave(mode, game, history, clock, int(json, "thinking", 15..600), bool(json, "started"), true,
+            if(json.has("humanSide")) XiangqiSide.valueOf(json.getString("humanSide")) else XiangqiSide.RED,
+            if(json.has("colorAssigned"))bool(json,"colorAssigned")else true)
         encode(save)
         return save
     }

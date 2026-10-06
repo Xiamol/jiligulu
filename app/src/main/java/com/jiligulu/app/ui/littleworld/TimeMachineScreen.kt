@@ -153,7 +153,7 @@ fun TimeMachineScreen(onBack: () -> Unit) {
                 }
         ), Modifier.fillMaxSize().navigationBarsPadding(), labelBottomClearance = 90.dp) {
         DestinationPaper(Modifier.align(Alignment.BottomCenter).padding(horizontal = 24.dp, vertical = 15.dp)
-            .widthIn(max = 300.dp).fillMaxWidth().height(70.dp).clickable(enabled = !travelling) { UiSound.tap(context); showRoutes = true }) {
+            .widthIn(max = 300.dp).fillMaxWidth().height(70.dp).clickable(enabled = !travelling) { UiSound.paper(context); showRoutes = true }) {
             Column(Modifier.padding(horizontal = 14.dp, vertical = 8.dp)) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text(if (arrivedDay == nextStop && !travelling) "已到站" else "下一站", style = MaterialTheme.typography.labelSmall,
@@ -188,7 +188,7 @@ fun TimeMachineScreen(onBack: () -> Unit) {
         subtitle = "每次抵达，都把这一天好好收着") {
         if (world.trainTickets.isEmpty()) item { Text("票夹还空着。乘一次列车，就能留下第一张车票 ♡", style = MaterialTheme.typography.bodySmall) }
         items(world.trainTickets.asReversed(), key = { it.dayEpoch }) { ticket ->
-            DestinationPaper(Modifier.fillMaxWidth().height(48.dp).clickable { UiSound.tap(context); pickStation(ticket.dayEpoch) }) {
+            DestinationPaper(Modifier.fillMaxWidth().height(48.dp).clickable { UiSound.paper(context); pickStation(ticket.dayEpoch) }) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Outlined.ConfirmationNumber, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
                     Text(LocalDate.ofEpochDay(ticket.dayEpoch).toString(), Modifier.weight(1f).padding(start = 8.dp), style = MaterialTheme.typography.bodySmall)
@@ -204,7 +204,7 @@ fun TimeMachineScreen(onBack: () -> Unit) {
             rows == null -> item { Text("阿噜正在搬这一天的行李…", style = MaterialTheme.typography.bodySmall) }
             rows.isEmpty() -> item { Text("这一天留白了。空白也是一张时光车票 ♡", style = MaterialTheme.typography.bodySmall) }
             else -> items(rows, key = { it.id }) { bill ->
-                Column(Modifier.fillMaxWidth().clickable { UiSound.tap(context); selectedBillId = bill.id }.padding(vertical = 7.dp)) {
+                Column(Modifier.fillMaxWidth().clickable { UiSound.navigate(context); selectedBillId = bill.id }.padding(vertical = 7.dp)) {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Text(bill.detail.ifBlank { "一笔小生活" }, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium,
                             maxLines = 1, overflow = TextOverflow.Ellipsis)

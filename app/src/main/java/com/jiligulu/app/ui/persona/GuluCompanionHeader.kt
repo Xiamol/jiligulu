@@ -73,7 +73,7 @@ fun GuluCompanionHeader(
             GuluMascot(
                 modifier = Modifier.size(106.dp),
                 mode = if (message.kind == BubbleMessage.Kind.WATER) MascotMode.WAITING else MascotMode.IDLE,
-                onClick = com.jiligulu.app.ui.components.uiTap(if (message.kind == BubbleMessage.Kind.WATER) onWaterClick else onRefresh)
+                onClick = com.jiligulu.app.ui.components.uiTap(com.jiligulu.app.core.audio.UiCue.PET, if (message.kind == BubbleMessage.Kind.WATER) onWaterClick else onRefresh)
             )
         }
         Column(
@@ -83,7 +83,7 @@ fun GuluCompanionHeader(
                 .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.08f), CompanionBubbleShape)
                 .clickable(
                     onClickLabel = if (message.kind == BubbleMessage.Kind.WATER) "一起喝一口" else "换一句",
-                    onClick = com.jiligulu.app.ui.components.uiTap(if (message.kind == BubbleMessage.Kind.WATER) onWaterClick else onRefresh)
+                    onClick = com.jiligulu.app.ui.components.uiTap(com.jiligulu.app.core.audio.UiCue.PET, if (message.kind == BubbleMessage.Kind.WATER) onWaterClick else onRefresh)
                 )
                 .padding(start = 24.dp, end = 18.dp, top = 14.dp, bottom = 14.dp)
         ) {

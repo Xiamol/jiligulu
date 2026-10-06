@@ -141,7 +141,7 @@ fun AddBillScreen(onBack: () -> Unit, vm: AddBillViewModel = viewModel(factory =
     val lifecycleOwner = LocalLifecycleOwner.current
     LaunchedEffect(vm, lifecycleOwner) {
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-            vm.saved.collect { currentOnSaved() }
+            vm.saved.collect { UiSound.confirm(context); currentOnSaved() }
         }
     }
     var amountText by rememberSaveable(initialSticker?.id) { mutableStateOf(initialSticker?.amountFen
@@ -210,7 +210,7 @@ fun AddBillScreen(onBack: () -> Unit, vm: AddBillViewModel = viewModel(factory =
                 title = { Text("记一笔", style = MaterialTheme.typography.titleLarge) },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
                 navigationIcon = {
-                    IconButton(onClick = uiTap(onBack), enabled = editable) {
+                    IconButton(onClick = uiTap(com.jiligulu.app.core.audio.UiCue.NAVIGATE, onBack), enabled = editable) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回")
                     }
                 }
@@ -254,7 +254,7 @@ fun AddBillScreen(onBack: () -> Unit, vm: AddBillViewModel = viewModel(factory =
                             }
                         })
                     Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.primary.copy(alpha = .08f)) {
-                        Row(Modifier.clickable(enabled = editable) { UiSound.tap(context); type = if (type == BillType.EXPENSE) BillType.INCOME else BillType.EXPENSE }
+                        Row(Modifier.clickable(enabled = editable) { UiSound.toggle(context); type = if (type == BillType.EXPENSE) BillType.INCOME else BillType.EXPENSE }
                             .height(40.dp).padding(horizontal = 10.dp).testTag("manual-type"), verticalAlignment = Alignment.CenterVertically) {
                             Text(if (type == BillType.EXPENSE) "支出" else "收入", style = MaterialTheme.typography.labelLarge,
                                 color = if (type == BillType.EXPENSE) com.jiligulu.app.ui.theme.ExpenseCoral else com.jiligulu.app.ui.theme.IncomeGreen)
@@ -271,7 +271,7 @@ fun AddBillScreen(onBack: () -> Unit, vm: AddBillViewModel = viewModel(factory =
                 Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
                     Row(Modifier.fillMaxWidth().height(34.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text("分类", Modifier.width(42.dp), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Checkbox(automaticCategory, onCheckedChange = { UiSound.tap(context); setAutomaticCategory(it) }, enabled = editable, modifier = Modifier.size(28.dp))
+                        Checkbox(automaticCategory, onCheckedChange = { UiSound.toggle(context); setAutomaticCategory(it) }, enabled = editable, modifier = Modifier.size(28.dp))
                         Text("自动分类", style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(start = 2.dp))
                         Spacer(Modifier.weight(1f))
                         if (automaticCategory) {
@@ -308,12 +308,12 @@ fun AddBillScreen(onBack: () -> Unit, vm: AddBillViewModel = viewModel(factory =
                 Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("日期", Modifier.width(44.dp), style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Row(Modifier.weight(1f).clickable(enabled = editable) { UiSound.tap(context); showDate = true }.padding(vertical = 10.dp)
+                    Row(Modifier.weight(1f).clickable(enabled = editable) { UiSound.navigate(context); showDate = true }.padding(vertical = 10.dp)
                         .testTag("manual-date"), verticalAlignment = Alignment.CenterVertically) {
                         Text(localTime?.format(DateTimeFormatter.ofPattern("M月d日")) ?: "今天", style = MaterialTheme.typography.bodyMedium)
                         Icon(Icons.Outlined.KeyboardArrowDown, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
                     }
-                    Row(Modifier.clickable(enabled = editable) { UiSound.tap(context); showTime = true }.padding(vertical = 10.dp, horizontal = 6.dp)
+                    Row(Modifier.clickable(enabled = editable) { UiSound.navigate(context); showTime = true }.padding(vertical = 10.dp, horizontal = 6.dp)
                         .testTag("manual-time"), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         Icon(Icons.Outlined.Schedule, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
                         Text(localTime?.format(DateTimeFormatter.ofPattern("HH:mm")) ?: "此刻", style = MaterialTheme.typography.bodyMedium)
@@ -343,7 +343,7 @@ fun AddBillScreen(onBack: () -> Unit, vm: AddBillViewModel = viewModel(factory =
                         }, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
                             color = if (photoState.error != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    if (photoState.path.isNotBlank() || photoState.importing) IconButton(onClick = uiTap(vm::removePhoto),
+                    if (photoState.path.isNotBlank() || photoState.importing) IconButton(onClick = uiTap(com.jiligulu.app.core.audio.UiCue.REMOVE, vm::removePhoto),
                         enabled = editable, modifier = Modifier.size(32.dp).testTag("manual-photo-remove")) {
                         Icon(Icons.Outlined.Close, "取下照片", Modifier.size(15.dp))
                     }

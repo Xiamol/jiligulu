@@ -261,7 +261,9 @@ private fun JiliguluRoot(waterRequest: Int, futureNoteId: String? = null, onNote
                         }
                     })
                 }
-                composable(Routes.MAIN) {
+                composable(Routes.MAIN, exitTransition = {
+                    if (targetState.destination.route == Routes.SECRET_BASE) androidx.compose.animation.ExitTransition.None else null
+                }) {
                     MainScreen(
                         onAddBill = { navController.navigate(Routes.ADD_BILL) },
                         onOpenChat = { navController.navigate(Routes.CHAT) },
@@ -295,7 +297,9 @@ private fun JiliguluRoot(waterRequest: Int, futureNoteId: String? = null, onNote
                         }
                     })
                 }
-                composable(Routes.LITTLE_WORLD) {
+                composable(Routes.LITTLE_WORLD, exitTransition = {
+                    if (targetState.destination.route == Routes.SECRET_BASE) androidx.compose.animation.ExitTransition.None else null
+                }) {
                     com.jiligulu.app.ui.littleworld.LittleWorldScreen(onBack = { navController.popBackStack() },
                         onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                         onOpenWishBook = { navController.navigate(Routes.WISH_BOOK) },
@@ -311,7 +315,11 @@ private fun JiliguluRoot(waterRequest: Int, futureNoteId: String? = null, onNote
                 composable(Routes.FUTURE_NOTES) { com.jiligulu.app.ui.futurenotes.FutureNotesScreen(onBack = { navController.popBackStack() }) }
                 composable(Routes.MEMORIES) { com.jiligulu.app.ui.memories.MemoriesScreen(onBack = { navController.popBackStack() }) }
                 composable(Routes.TIME_MACHINE) { com.jiligulu.app.ui.littleworld.TimeMachineScreen { navController.popBackStack() } }
-                composable(Routes.SECRET_BASE) { com.jiligulu.app.ui.littleworld.SecretBaseScreen(
+                composable(Routes.SECRET_BASE,
+                    enterTransition = { androidx.compose.animation.EnterTransition.None },
+                    exitTransition = { androidx.compose.animation.ExitTransition.None },
+                    popEnterTransition = { androidx.compose.animation.EnterTransition.None },
+                    popExitTransition = { androidx.compose.animation.ExitTransition.None }) { com.jiligulu.app.ui.littleworld.SecretBaseScreen(
                     onBack={navController.popBackStack()},onOpenNotes={navController.navigate(Routes.FUTURE_NOTES)},
                     onOpenMemories={navController.navigate(Routes.MEMORIES)}) }
                 composable(Routes.CHAT) {

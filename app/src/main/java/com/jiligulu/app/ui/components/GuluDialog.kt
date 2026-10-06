@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.jiligulu.app.ui.theme.GuluBrandFont
+import com.jiligulu.app.core.audio.UiCue
 
 /** Bounded, scrollable paper dialog shared by help and settings confirmations. */
 @Composable
@@ -34,6 +35,8 @@ fun GuluDialog(
     compactWidth: Dp? = null,
     dense: Boolean = false,
     confirmEnabled: Boolean = true,
+    confirmCue: UiCue = UiCue.TOUCH,
+    dismissCue: UiCue = UiCue.NAVIGATE,
     content: @Composable ColumnScope.() -> Unit
 ) {
     Dialog(onDismissRequest = { if (!busy) onDismiss() },
@@ -50,8 +53,8 @@ fun GuluDialog(
             SpringScrollColumn(Modifier.weight(1f, fill = false), state = bodyScroll,
                 verticalArrangement = Arrangement.spacedBy(if(dense) 6.dp else 10.dp), content = content)
             Row(Modifier.fillMaxWidth().padding(top = if(dense) 6.dp else 8.dp), horizontalArrangement = Arrangement.End) {
-                dismissLabel?.let { TextButton(onClick = uiTap(onDismiss), enabled = !busy) { Text(it) } }
-                TextButton(onClick = uiTap(onConfirm), enabled = !busy && confirmEnabled) {
+                dismissLabel?.let { TextButton(onClick = uiTap(dismissCue, onDismiss), enabled = !busy) { Text(it) } }
+                TextButton(onClick = uiTap(confirmCue, onConfirm), enabled = !busy && confirmEnabled) {
                     Text(if (busy) "正在处理…" else confirmLabel)
                 }
             }

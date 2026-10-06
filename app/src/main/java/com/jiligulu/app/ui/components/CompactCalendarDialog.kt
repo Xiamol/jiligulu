@@ -29,9 +29,9 @@ fun CompactCalendarDialog(selected: Long, onDismiss: () -> Unit, onSelect: (Long
             Column(Modifier.padding(12.dp)) {
                 Text("挑一个日子 ♡", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(onClick = uiTap { month = month.minusMonths(1) }, enabled = month.year > 1900) { Text("‹") }
+                    TextButton(onClick = uiTap(com.jiligulu.app.core.audio.UiCue.PAPER) { month = month.minusMonths(1) }, enabled = month.year > 1900) { Text("‹") }
                     Text("${month.year}年${month.monthValue}月", Modifier.weight(1f), textAlign = TextAlign.Center)
-                    TextButton(onClick = uiTap { month = month.plusMonths(1) }, enabled = month < latestMonth) { Text("›") }
+                    TextButton(onClick = uiTap(com.jiligulu.app.core.audio.UiCue.PAPER) { month = month.plusMonths(1) }, enabled = month < latestMonth) { Text("›") }
                 }
                 Row { listOf("一", "二", "三", "四", "五", "六", "日").forEach {
                     Text(it, Modifier.weight(1f).padding(vertical = 6.dp), textAlign = TextAlign.Center,
@@ -46,14 +46,14 @@ fun CompactCalendarDialog(selected: Long, onDismiss: () -> Unit, onSelect: (Long
                             val chosen = valid && month.atDay(day) == date
                             Box(Modifier.weight(1f).height(36.dp)
                                 .background(if (chosen) MaterialTheme.colorScheme.primaryContainer else androidx.compose.ui.graphics.Color.Transparent, RoundedCornerShape(12.dp))
-                                .clickable(enabled = valid, onClick = uiTap { onSelect(month.atDay(day).atStartOfDay(zone).toInstant().toEpochMilli()) }), contentAlignment = Alignment.Center) {
+                                .clickable(enabled = valid, onClick = uiTap(com.jiligulu.app.core.audio.UiCue.SELECT) { onSelect(month.atDay(day).atStartOfDay(zone).toInstant().toEpochMilli()) }), contentAlignment = Alignment.Center) {
                                 if (valid) Text(day.toString(), style = MaterialTheme.typography.bodySmall,
                                     color = if (chosen) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
                             }
                         }
                     }
                 }
-                TextButton(onClick = uiTap { onSelect(java.time.LocalDate.now(zone).atStartOfDay(zone).toInstant().toEpochMilli()) },
+                TextButton(onClick = uiTap(com.jiligulu.app.core.audio.UiCue.SELECT) { onSelect(java.time.LocalDate.now(zone).atStartOfDay(zone).toInstant().toEpochMilli()) },
                     modifier = Modifier.align(Alignment.End)) { Text("回到今天") }
             }
         }

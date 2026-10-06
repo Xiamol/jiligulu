@@ -98,7 +98,7 @@ internal fun MainTabNavigation(
                                 }
                                 if (!change.pressed) {
                                     if (dragging) end() else {
-                                        com.jiligulu.app.core.audio.UiSound.tap(soundContext)
+                                        com.jiligulu.app.core.audio.UiSound.navigate(soundContext)
                                         select(TabScrubPosition.tappedTab(change.position.x, width))
                                     }
                                     finished = true

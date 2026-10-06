@@ -203,7 +203,7 @@ fun StatsScreen(
         item(key = "filters") {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Surface(Modifier.weight(1f).height(44.dp).clickable { UiSound.tap(context); showDateFilter = true },
+                Surface(Modifier.weight(1f).height(44.dp).clickable { UiSound.navigate(context); showDateFilter = true },
                     shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surface) {
                     val date = Instant.ofEpochMilli(selectedDay).atZone(ZoneId.systemDefault()).toLocalDate()
                     val range = if (showTrend && bars.isNotEmpty()) bars.first().dayStartMillis to bars.last().dayStartMillis else visibleRange
@@ -220,7 +220,7 @@ fun StatsScreen(
                 }
                 Row(Modifier.height(44.dp).background(MaterialTheme.colorScheme.surface, RoundedCornerShape(24.dp)).padding(3.dp), verticalAlignment = Alignment.CenterVertically) {
                     listOf(BillType.EXPENSE to "支出", BillType.INCOME to "收入").forEach { (type, label) ->
-                        Surface(onClick = uiTap { vm.setFlowType(type) }, shape = RoundedCornerShape(24.dp),
+                        Surface(onClick = uiTap(com.jiligulu.app.core.audio.UiCue.SELECT) { vm.setFlowType(type) }, shape = RoundedCornerShape(24.dp),
                             color = if (flowType == type) MaterialTheme.colorScheme.primary.copy(alpha = .78f) else Color.Transparent) {
                             Text(label, Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
                                 style = MaterialTheme.typography.labelLarge,
@@ -238,7 +238,7 @@ fun StatsScreen(
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(Modifier.background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = .35f), RoundedCornerShape(20.dp)).padding(2.dp)) {
                         listOf(false to "柱图", true to "折线").forEach { (trend, label) ->
-                            Surface(onClick = uiTap { showTrend = trend }, shape = RoundedCornerShape(20.dp),
+                            Surface(onClick = uiTap(com.jiligulu.app.core.audio.UiCue.SELECT) { showTrend = trend }, shape = RoundedCornerShape(20.dp),
                                 color = if (showTrend == trend) MaterialTheme.colorScheme.surface else Color.Transparent) {
                                 Text(label, Modifier.padding(horizontal = 9.dp, vertical = 5.dp), style = MaterialTheme.typography.labelSmall,
                                     color = if (showTrend == trend) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
@@ -352,7 +352,7 @@ fun StatsScreen(
                             style = MaterialTheme.typography.headlineSmall,
                             color = if (budget.overspendPercentText.isNotBlank()) ExpenseCoral else MaterialTheme.colorScheme.primary)
                     }
-                    androidx.compose.material3.IconButton(onClick = uiTap { showBudgetDialog = true }) {
+                    androidx.compose.material3.IconButton(onClick = uiTap(com.jiligulu.app.core.audio.UiCue.NAVIGATE) { showBudgetDialog = true }) {
                         Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "设置或调整预算",
                             tint = MaterialTheme.colorScheme.primary)
                     }
@@ -393,7 +393,7 @@ fun StatsScreen(
                 Column(Modifier.padding(16.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("${dayDonut.selectedLabel}的小账单", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
-                        TextButton(onClick = uiTap { showCategoryDetails = false }) { Text("关闭") }
+                        TextButton(onClick = uiTap(com.jiligulu.app.core.audio.UiCue.NAVIGATE) { showCategoryDetails = false }) { Text("关闭") }
                     }
                     Text("${dayDonut.dayLabel} · ${dayDetails.size} 笔 · ¥${dayDonut.selectedAmountText}",
                         style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
@@ -407,7 +407,7 @@ fun StatsScreen(
                                 LedgerBillRow(icon = d.icon, colorHue = d.colorHue, categoryName = d.categoryName,
                                     title = d.detail.ifBlank { d.categoryName }, subtitle = d.timeLabel,
                                     amountText = d.amountText, isExpense = d.isExpense,
-                                    onClick = { UiSound.tap(context); selectedBillId = d.id }, showDivider = index < dayDetails.lastIndex)
+                                    onClick = { selectedBillId = d.id }, showDivider = index < dayDetails.lastIndex)
                             }
                         }
                         Box(Modifier.matchParentSize()) {
@@ -441,7 +441,7 @@ fun StatsScreen(
 @Composable
 private fun LineVisibilityChoice(label: String, checked: Boolean, color: Color, onChange: (Boolean) -> Unit) {
     val context = LocalContext.current
-    Row(Modifier.toggleable(value = checked, role = Role.Checkbox, onValueChange = { UiSound.tap(context); onChange(it) }).padding(vertical = 4.dp),
+    Row(Modifier.toggleable(value = checked, role = Role.Checkbox, onValueChange = { UiSound.toggle(context); onChange(it) }).padding(vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
         Icon(if (checked) Icons.Outlined.CheckBox else Icons.Outlined.CheckBoxOutlineBlank, contentDescription = null,
             tint = if (checked) color else MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
@@ -548,7 +548,7 @@ private fun BudgetDialog(
             listOf(BudgetPeriod.MONTHLY to "每月", BudgetPeriod.WEEKLY to "每 7 天", BudgetPeriod.DAILY to "每天").forEach { (value, label) ->
                 Surface(Modifier.weight(1f), shape = MaterialTheme.shapes.medium,
                     color = if (period == value) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .45f)) {
-                    Box(Modifier.height(34.dp).clickable { UiSound.tap(context); period = value }, contentAlignment = Alignment.Center) {
+                    Box(Modifier.height(34.dp).clickable { UiSound.select(context); period = value }, contentAlignment = Alignment.Center) {
                         Text(label, style = MaterialTheme.typography.labelMedium,
                             color = if (period == value) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
                     }
@@ -570,7 +570,7 @@ private fun BudgetDialog(
             Spacer(Modifier.weight(1f))
             Text("1–28", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        if (onDisable != null) TextButton(onClick = uiTap(onDisable), modifier = Modifier.height(30.dp)) {
+        if (onDisable != null) TextButton(onClick = uiTap(com.jiligulu.app.core.audio.UiCue.TOGGLE, onDisable), modifier = Modifier.height(30.dp)) {
             Text("停用预算", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }

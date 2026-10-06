@@ -104,9 +104,10 @@ fun CountedTab(label:String,count:Int,selected:Boolean,onClick:()->Unit) {
 
 /** A small physical wood/ivory plaque, with a top bevel, darker side and contact shadow. */
 @Composable
-fun ScenePlaqueButton(label:String,modifier:Modifier=Modifier,selected:Boolean=false,enabled:Boolean=true,onClick:()->Unit) {
+fun ScenePlaqueButton(label:String,modifier:Modifier=Modifier,selected:Boolean=false,enabled:Boolean=true,
+    soundCue:com.jiligulu.app.core.audio.UiCue=com.jiligulu.app.core.audio.UiCue.NAVIGATE,onClick:()->Unit) {
     val accent=MaterialTheme.colorScheme.primary
-    Box(modifier.clickable(enabled=enabled,role=Role.Button,onClick=com.jiligulu.app.ui.components.uiTap(onClick)).drawWithCache {
+    Box(modifier.clickable(enabled=enabled,role=Role.Button,onClick=com.jiligulu.app.ui.components.uiTap(soundCue,onClick)).drawWithCache {
         val u=1.dp.toPx();val radius=CornerRadius(2*u)
         onDrawBehind {
             drawRoundRect(Color(0xFF3D2715).copy(alpha=.18f),Offset(1*u,2*u),size,radius)

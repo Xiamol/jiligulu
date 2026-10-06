@@ -30,6 +30,7 @@ import kotlinx.coroutines.withContext
 
 @Composable
 internal fun LittleWorldSkinSettings(enabled: Boolean) {
+    val soundContext = LocalContext.current
     val prefs = (LocalContext.current.applicationContext as JiliguluApp).container.userPrefs
     val saved by prefs.littleWorldSkin.collectAsStateWithLifecycle(initialValue = null)
     val scope = rememberCoroutineScope()
@@ -46,6 +47,7 @@ internal fun LittleWorldSkinSettings(enabled: Boolean) {
                     val previewMaterial = remember(skin) { skinMaterialFor(skin) }
                     Surface(onClick = {
                         if (checked) return@Surface
+                        com.jiligulu.app.core.audio.UiSound.select(soundContext)
                         scope.launch(start = CoroutineStart.UNDISPATCHED) {
                             saving = true; error = false
                             // A quick Back immediately after a tap must not cancel the preference commit.

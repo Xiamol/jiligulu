@@ -69,6 +69,8 @@ internal object AppGlassBackdrop {
         cancelRefresh()
         source.get()?.let {old ->drawListener?.let {if(old.decorView.viewTreeObserver.isAlive) old.decorView.viewTreeObserver.removeOnDrawListener(it)}}
         drawListener=null;source=WeakReference(window);watched.get()?.clearBackdrop()
+        if(window!=null) GlobalGlassBackdrop.clearFrame()
+        ScreenCaptureService.refreshGlassEnvironment()
         if(window==null || watched.get()==null) return
         val listener=ViewTreeObserver.OnDrawListener {
             if(!queued) {queued=true;handler.post(drawTask)}

@@ -78,7 +78,7 @@ class FloatingCaptureService : Service() {
         }
         val view = GlassFloatingBubbleView(this).apply {
             contentDescription = "阿噜截图记账，长按后拖到底部关闭区"
-            elevation = 8f
+            elevation = 0f
             visibility = if (capturing) View.INVISIBLE else View.VISIBLE
         }
         var startX = 0f; var startY = 0f; var x = 0; var y = 0

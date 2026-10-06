@@ -92,17 +92,17 @@ fun MemoriesScreen(onBack: () -> Unit) {
     ImmersiveDestinationScene(ImmersiveDestination.MEMORIES, "生活纪念册", onBack,
         listOf(
             DestinationObject("生活明信片", .15f, .33f, .74f, .25f,
-                labelX = .52f, labelY = .57f) { drawer = 0 },
+                labelX = .52f, labelY = .57f, soundCue = com.jiligulu.app.core.audio.UiCue.PAPER) { drawer = 0 },
             DestinationObject("生活照片", .04f, .52f, .29f, .25f,
-                labelX = .22f, labelY = .74f, tilt = 2f) { drawer = 1 },
+                labelX = .22f, labelY = .74f, tilt = 2f, soundCue = com.jiligulu.app.core.audio.UiCue.PAPER) { drawer = 1 },
             DestinationObject("周明信片", .35f, .67f, .28f, .16f,
-                labelX = .51f, labelY = .82f, tilt = 2f) { drawer = 2 }
+                labelX = .51f, labelY = .82f, tilt = 2f, soundCue = com.jiligulu.app.core.audio.UiCue.PAPER) { drawer = 2 }
         ), Modifier.fillMaxSize().navigationBarsPadding())
     if (drawer == 0 || drawer == 1) DestinationDrawer(
         title = if(drawer == 0) "夹好的生活明信片" else "一张张生活照片",
         subtitle = if(drawer == 0) "${state.cards.size} 张，翻开就能重新遇见那一天。" else "${photos.size} 张，和记过的账一起收在这里。",
         onDismiss = { drawer = -1 },
-        actions = { TextButton(onClick = uiTap { drawer = 2 }) { Text("做周明信片") } }
+        actions = { TextButton(onClick = uiTap(com.jiligulu.app.core.audio.UiCue.PAPER) { drawer = 2 }) { Text("做周明信片") } }
     ) {
         if (drawer == 0) {
             if (state.cards.isEmpty()) item {
@@ -111,7 +111,7 @@ fun MemoriesScreen(onBack: () -> Unit) {
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             items(state.cards.sortedByDescending { it.createdAt }, key = { "card-${it.id}" }) { card ->
-                AlbumPaperPage(Modifier.clickable(onClick = uiTap { selectedCard = card })) {
+                AlbumPaperPage(Modifier.clickable(onClick = uiTap(com.jiligulu.app.core.audio.UiCue.PAPER) { selectedCard = card })) {
                     MemoryPhoto(card.imagePath, Modifier.fillMaxWidth().height(180.dp).clip(RoundedCornerShape(14.dp)),
                         androidx.compose.ui.layout.ContentScale.Fit)
                     Text(card.title, style = MaterialTheme.typography.bodyMedium, maxLines = 2)
@@ -127,7 +127,7 @@ fun MemoriesScreen(onBack: () -> Unit) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             items(photos, key = { "bill-${it.id}" }) { bill ->
-                AlbumPaperPage(Modifier.clickable(onClick = uiTap { selectedPhoto = bill })) {
+                AlbumPaperPage(Modifier.clickable(onClick = uiTap(com.jiligulu.app.core.audio.UiCue.PAPER) { selectedPhoto = bill })) {
                     MemoryPhoto(bill.photoUri.orEmpty(), Modifier.fillMaxWidth().height(160.dp).clip(RoundedCornerShape(12.dp)))
                     Text(bill.detail.ifBlank { "一张生活照片" }, style = MaterialTheme.typography.bodyMedium, maxLines = 2)
                     if (bill.note.isNotBlank()) Text(bill.note, style = MaterialTheme.typography.bodySmall, maxLines = 3)
@@ -141,9 +141,9 @@ fun MemoriesScreen(onBack: () -> Unit) {
         compactWidth = 280.dp, confirmLabel = "做张明信片", confirmEnabled = weekRows != null && categoryRows != null,
         onConfirm = { makeWeek = true; drawer = -1 }) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = uiTap { offset-- }) { Text("‹") }
+            TextButton(onClick = uiTap(com.jiligulu.app.core.audio.UiCue.PAPER) { offset-- }) { Text("‹") }
             Text(dates, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center)
-            TextButton(onClick = uiTap { offset++ }, enabled = offset < 0) { Text("›") }
+            TextButton(onClick = uiTap(com.jiligulu.app.core.audio.UiCue.PAPER) { offset++ }, enabled = offset < 0) { Text("›") }
         }
         Text(if(weekRows == null || categoryRows == null) "正在翻这一周的生活记录…" else "${summary.billsCount} 笔认真过日子的证据。",
             style = MaterialTheme.typography.bodySmall)
@@ -176,7 +176,7 @@ private fun ArchivedCardDialog(card: MemoryCard, onDismiss: () -> Unit) {
     val createDocument = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("image/png")) { uri ->
         if (uri == null) busy = false else scope.launch {
             busy = true
-            try { withContext(Dispatchers.IO) { context.contentResolver.openOutputStream(uri)?.use { out -> file.inputStream().use { it.copyTo(out) } } ?: error("无法保存") }; Toast.makeText(context, "小海报保存好啦 ♡", Toast.LENGTH_SHORT).show() }
+            try { withContext(Dispatchers.IO) { context.contentResolver.openOutputStream(uri)?.use { out -> file.inputStream().use { it.copyTo(out) } } ?: error("无法保存") }; com.jiligulu.app.core.audio.UiSound.confirm(context); Toast.makeText(context, "小海报保存好啦 ♡", Toast.LENGTH_SHORT).show() }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { error = "未能保存图片，请再试一次。" }
             finally { busy = false }
@@ -187,7 +187,7 @@ private fun ArchivedCardDialog(card: MemoryCard, onDismiss: () -> Unit) {
             busy = true
             if (Build.VERSION.SDK_INT < 29) createDocument.launch("阿噜生活小海报.png")
             else scope.launch {
-                try { MemoryPoster.saveGallery(context, file); Toast.makeText(context, "存进相册啦 ♡", Toast.LENGTH_SHORT).show() }
+                try { MemoryPoster.saveGallery(context, file); com.jiligulu.app.core.audio.UiSound.confirm(context); Toast.makeText(context, "存进相册啦 ♡", Toast.LENGTH_SHORT).show() }
                 catch (cancelled: CancellationException) { throw cancelled }
                 catch (_: Exception) { error = "未能保存图片，请再试一次。" }
                 finally { busy = false }
@@ -199,7 +199,7 @@ private fun ArchivedCardDialog(card: MemoryCard, onDismiss: () -> Unit) {
         MemoryPhoto(card.imagePath, Modifier.fillMaxWidth().height(240.dp), androidx.compose.ui.layout.ContentScale.Fit)
         if (card.caption.isNotBlank()) Text(card.caption, style = MaterialTheme.typography.bodySmall)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            TextButton(onClick = uiTap { runCatching { MemoryPoster.share(context, file) }.onFailure { error = "暂时没能打开分享。" } }, enabled = !busy) { Text("分享") }
+            TextButton(onClick = uiTap(com.jiligulu.app.core.audio.UiCue.NAVIGATE) { runCatching { MemoryPoster.share(context, file) }.onFailure { error = "暂时没能打开分享。" } }, enabled = !busy) { Text("分享") }
             TextButton(onClick = uiTap { deleting = true }, enabled = !busy) { Text("取下", color = MaterialTheme.colorScheme.error) }
         }
         error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
@@ -207,7 +207,7 @@ private fun ArchivedCardDialog(card: MemoryCard, onDismiss: () -> Unit) {
     if (deleting) GuluDialog("把这张明信片取下？", { deleting = false }, "取下", onConfirm = {
         busy = true
         scope.launch {
-            try { app.container.littleWorld.deleteCard(card.id); onDismiss() }
+            try { app.container.littleWorld.deleteCard(card.id); com.jiligulu.app.core.audio.UiSound.play(context, com.jiligulu.app.core.audio.UiCue.REMOVE); onDismiss() }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { error = "没能取下，请再试一次。" }
             finally { deleting = false; busy = false }

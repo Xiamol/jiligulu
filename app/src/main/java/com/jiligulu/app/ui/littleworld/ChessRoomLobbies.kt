@@ -1,6 +1,10 @@
 package com.jiligulu.app.ui.littleworld
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.animation.core.*
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
+import com.jiligulu.app.ui.components.CompactFormField
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.KeyboardOptions
@@ -30,22 +34,25 @@ internal fun ColumnScope.NearbyChessLobby(nearby: NearbyRoomsState?, status: Str
     val context = LocalContext.current
     Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            TwoChessStones()
-            Text("附近的棋桌", Modifier.padding(top = 16.dp), style = MaterialTheme.typography.titleMedium, color = Color(0xFF665762))
+            NearbyRadar(nearby?.searching==true && error==null && nearby?.error==null)
+            Text("附近的棋桌", Modifier.padding(top = 12.dp), style = MaterialTheme.typography.titleMedium, color = Color(0xFF665762))
             Text("两个人连接同一个 Wi-Fi，就能在这里找到彼此。", Modifier.padding(top = 6.dp),
                 style = MaterialTheme.typography.bodySmall, color = Color(0xFF9C8D98))
             Spacer(Modifier.height(20.dp))
             if (nearby?.rooms.isNullOrEmpty()) {
-                Text("暂时还没看到伙伴，邀请对方也打开“附近的人”。", style = MaterialTheme.typography.bodySmall, color = Color(0xFF887D89))
+                Text("正在找棋友，邀请对方也打开“附近的人”。", style = MaterialTheme.typography.bodySmall, color = Color(0xFF887D89))
             } else SpringScrollColumn(Modifier.fillMaxWidth().heightIn(max = 220.dp)) {
                 nearby?.rooms?.forEach { room ->
-                    Row(Modifier.fillMaxWidth().clickable {
+                    val localId = nearby?.localId.orEmpty()
+                    val mayJoin = localId.isNotBlank() && room.id < localId
+                    Row(Modifier.fillMaxWidth().clickable(enabled = mayJoin) {
                         UiSound.tap(context); onJoin(room.address)
                     }.padding(vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
                         Canvas(Modifier.size(10.dp)) { drawCircle(Color(0xFF9EBD9A)) }
                         Text(room.name, Modifier.weight(1f).padding(horizontal = 10.dp), style = MaterialTheme.typography.bodyMedium,
                             color = Color(0xFF6D5D72), maxLines = 1)
-                        Icon(Icons.AutoMirrored.Outlined.ArrowForward, "坐下来", Modifier.size(18.dp), tint = Color(0xFF98869F))
+                        if (mayJoin) Icon(Icons.AutoMirrored.Outlined.ArrowForward, "坐下来", Modifier.size(18.dp), tint = Color(0xFF98869F))
+                        else Text("等待靠近", style = MaterialTheme.typography.labelSmall, color = Color(0xFF9C8D98))
                     }
                     HorizontalDivider(color = Color(0xFFEAE1E5))
                 }
@@ -60,11 +67,20 @@ internal fun ColumnScope.NearbyChessLobby(nearby: NearbyRoomsState?, status: Str
 
 @Composable
 internal fun ColumnScope.OnlineChessLobby(active: Boolean, busy: Boolean, code: String, status: String, error: String?,
-    onHost: () -> Unit, onJoin: (String) -> Unit, onDisconnect: () -> Unit, onControlsBottom: (Float) -> Unit) {
+    onHost: (String) -> Unit, onJoin: (String) -> Unit, onDisconnect: () -> Unit, onControlsBottom: (Float) -> Unit) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     var address by rememberSaveable { mutableStateOf("") }
     var copied by remember(code) { mutableStateOf(false) }
+    var creating by rememberSaveable { mutableStateOf(false) }
+    var desiredCode by rememberSaveable { mutableStateOf("") }
+    if(creating) SecretWoodDialog("给棋桌起个房间码",{creating=false},confirmLabel="创建",dismissLabel="稍后",
+        compactWidth=280.dp,confirmEnabled=desiredCode.isBlank() || RoomRoundRules.code(desiredCode)!=null,
+        onConfirm={creating=false;onHost(desiredCode.trim())}) {
+        CompactFormField("房间码",desiredCode,{desiredCode=it.uppercase().filter {char->char in 'A'..'Z' || char in '0'..'9'}.take(12)},
+            placeholder="留空自动生成",keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Ascii))
+        Text("4–12位英文或数字，棋友输入同一个码就能找到你。",style=MaterialTheme.typography.bodySmall)
+    }
     Box(Modifier.fillMaxWidth().weight(1f).imePadding(), contentAlignment = Alignment.Center) {
         SpringScrollColumn(Modifier.fillMaxWidth().padding(horizontal = 18.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             TwoChessStones()
@@ -82,7 +98,7 @@ internal fun ColumnScope.OnlineChessLobby(active: Boolean, busy: Boolean, code: 
                 }
                 TextButton(onClick = { UiSound.tap(context); onDisconnect() }) { Text("取消等待") }
             } else {
-                Button(onClick = { UiSound.tap(context); onHost() }, enabled = !busy,
+                Button(onClick = { UiSound.tap(context); creating=true }, enabled = !busy,
                     modifier = Modifier.widthIn(max = 250.dp).fillMaxWidth(.8f).height(42.dp)) { Text("创建房间") }
                 Text("或者加入棋友", Modifier.padding(vertical = 16.dp), style = MaterialTheme.typography.labelSmall, color = Color(0xFF9C8D98))
                 Row(Modifier.fillMaxWidth().widthIn(max = 330.dp), verticalAlignment = Alignment.CenterVertically,
@@ -99,6 +115,28 @@ internal fun ColumnScope.OnlineChessLobby(active: Boolean, busy: Boolean, code: 
                 style = MaterialTheme.typography.labelSmall, color = Color(0xFF9C8D98))
             Spacer(Modifier.height(8.dp).onGloballyPositioned { onControlsBottom(it.boundsInRoot().bottom) })
         }
+    }
+}
+
+@Composable
+private fun NearbyRadar(scanning:Boolean) {
+    val sweep=if(scanning) {
+        val animation=rememberInfiniteTransition(label="nearby-radar")
+        val angle by animation.animateFloat(0f,360f,infiniteRepeatable(tween(2800,easing=LinearEasing)),label="radar-sweep")
+        angle
+    } else 0f
+    Canvas(Modifier.size(124.dp)) {
+        val ink=Color(0xFF9184A1);val radius=size.minDimension*.45f
+        drawCircle(Color(0xFFF0ECEF),radius)
+        for(scale in listOf(.35f,.68f,1f)) drawCircle(ink.copy(alpha=.18f),radius*scale,style=Stroke(1.dp.toPx()))
+        drawLine(ink.copy(alpha=.1f),Offset(center.x-radius,center.y),Offset(center.x+radius,center.y),1.dp.toPx())
+        drawLine(ink.copy(alpha=.1f),Offset(center.x,center.y-radius),Offset(center.x,center.y+radius),1.dp.toPx())
+        if(scanning) rotate(sweep) {drawArc(Color(0xFF9DAF9E).copy(alpha=.20f),-36f,36f,true,
+            topLeft=Offset(center.x-radius,center.y-radius),size=androidx.compose.ui.geometry.Size(radius*2,radius*2));
+            drawLine(Color(0xFF93AA98).copy(alpha=.7f),center,Offset(center.x+radius,center.y),1.5.dp.toPx())}
+        drawCircle(ink.copy(alpha=.6f),3.dp.toPx())
+        listOf(Offset(-.45f,-.28f),Offset(.45f,.3f),Offset(.1f,-.6f)).forEach {point->
+            drawCircle(Color(0xFFB5A1BD).copy(alpha=if(scanning) .65f else .25f),2.5.dp.toPx(),center+point*radius)}
     }
 }
 

@@ -15,6 +15,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.*
+import com.jiligulu.app.core.audio.UiCue
+import com.jiligulu.app.core.audio.UiSound
+import com.jiligulu.app.ui.components.uiTap
 
 @Composable
 fun ImageAttachment(enabled: Boolean, onText: (String) -> Unit) {
@@ -34,7 +37,7 @@ fun ImageAttachment(enabled: Boolean, onText: (String) -> Unit) {
     }
     Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
         if (file == null) {
-            TextButton(enabled = enabled && !busy, onClick = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }) {
+            TextButton(enabled = enabled && !busy, onClick = uiTap(UiCue.PAPER) { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }) {
                 Icon(Icons.Outlined.AddPhotoAlternate, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text(if (busy) "正在准备图片…" else "添加账单图片")
             }
         } else {
@@ -52,18 +55,19 @@ fun ImageAttachment(enabled: Boolean, onText: (String) -> Unit) {
                 Row {
                     TextButton(enabled = enabled && !busy, onClick = {
                         val selected = file ?: return@TextButton
+                        UiSound.tap(context)
                         busy = true; error = null
                         job = scope.launch {
                             try {
                                 val text = ImageBillImport.recognize(context, selected)
-                                if (ImageBillImport.pending.value == selected) { onText(text); ImageBillImport.clear() }
+                                if (ImageBillImport.pending.value == selected) { onText(text); ImageBillImport.clear(); UiSound.select(context) }
                             }
                             catch (e: CancellationException) { throw e }
                             catch (e: Exception) { error = e.message ?: "图片识别失败，请重试" }
                             finally { busy = false }
                         }
                     }) { Text(if (busy) "阿噜正在读…" else "识别并填入") }
-                    TextButton(onClick = { job?.cancel(); busy = false; ImageBillImport.clear(); error = null }) { Text(if (busy) "取消识别" else "移除图片") }
+                    TextButton(onClick = uiTap(UiCue.REMOVE) { job?.cancel(); busy = false; ImageBillImport.clear(); error = null }) { Text(if (busy) "取消识别" else "移除图片") }
                 }
             } }
         }

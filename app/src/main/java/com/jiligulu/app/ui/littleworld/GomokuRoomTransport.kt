@@ -43,7 +43,7 @@ internal data class GomokuWireEvents(
 )
 
 /** Reliable local byte transport; all UI/game callbacks are serialized on the main looper. */
-internal class GomokuLanWire(private val events: GomokuWireEvents) : GomokuRoomWire {
+internal class GomokuLanWire(private val events: GomokuWireEvents,private val port:Int=PORT) : GomokuRoomWire {
     private val main = Handler(Looper.getMainLooper())
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val outgoing = Channel<String>(16)
@@ -60,7 +60,7 @@ internal class GomokuLanWire(private val events: GomokuWireEvents) : GomokuRoomW
                 ?.hostAddress ?: error("请先连接 Wi-Fi 再寻找附近伙伴")
             val listener = ServerSocket()
             synchronized(lock) { if (closed) { listener.close(); return@launch }; server = listener }
-            listener.reuseAddress = true; listener.bind(InetSocketAddress(PORT)); listener.soTimeout = 1_000
+            listener.reuseAddress = true; listener.bind(InetSocketAddress(port)); listener.soTimeout = 1_000
             post { events.waiting(address) }
             var peer: Socket? = null
             while (isActive && !closed && peer == null) try { peer = listener.accept() } catch (_: SocketTimeoutException) { }
@@ -74,7 +74,7 @@ internal class GomokuLanWire(private val events: GomokuWireEvents) : GomokuRoomW
 
     fun join(address: String) { scope.launch {
         try {
-            val endpoint = privateEndpoint(address)
+            val endpoint = privateEndpoint(address,port)
             val peer = Socket()
             synchronized(lock) { if (closed) { peer.close(); return@launch }; socket = peer }
             peer.connect(endpoint, 5_000)
@@ -113,25 +113,27 @@ internal class GomokuLanWire(private val events: GomokuWireEvents) : GomokuRoomW
         const val PORT = 49762
         private fun privateAddress(address: InetAddress): Boolean = address is Inet4Address &&
             address.isSiteLocalAddress && !address.isLoopbackAddress && !address.isAnyLocalAddress
-        internal fun privateEndpoint(value: String): InetSocketAddress {
+        internal fun privateEndpoint(value: String,port:Int=PORT): InetSocketAddress {
             val parts = value.trim().split(':')
-            require(parts.size in 1..2 && (parts.size == 1 || parts[1] == PORT.toString()))
+            require(parts.size in 1..2 && (parts.size == 1 || parts[1] == port.toString()))
             val octets = parts[0].split('.')
             require(octets.size == 4)
             val bytes = octets.map { require(it.isNotEmpty() && it.length <= 3 && it.all(Char::isDigit));
                 it.toInt().also { number -> require(number in 0..255) }.toByte() }.toByteArray()
             val address = InetAddress.getByAddress(bytes)
             require(privateAddress(address))
-            return InetSocketAddress(address, PORT)
+            return InetSocketAddress(address, port)
         }
     }
 }
 
 /** Bundled PeerJS transport with a separate game namespace and no page/file navigation. */
 @SuppressLint("SetJavaScriptEnabled")
-internal class GomokuOnlineWire(context: Context, code: String, hosting: Boolean, private val events: GomokuWireEvents) : GomokuRoomWire {
+internal class GomokuOnlineWire(context: Context, code: String, hosting: Boolean, private val events: GomokuWireEvents,
+    private val prefix:String="gulu-go-") : GomokuRoomWire {
     private val main = Handler(Looper.getMainLooper())
     private var closed = false
+    private var destroyed = false
     private val view = WebView(context)
     override val transportView: WebView get() = view
     init {
@@ -146,7 +148,12 @@ internal class GomokuOnlineWire(context: Context, code: String, hosting: Boolean
                     "data" -> if (value.length <= XiangqiLanProtocol.MAX_LINE_BYTES) events.data(value)
                         else events.failure("收到无效五子棋数据")
                     "closed" -> events.failure("伙伴已离开房间")
-                    "error" -> events.failure(if (value == "peer-unavailable") "找不到房间，请确认伙伴仍在等待" else "互联网连接未成功，可找附近伙伴或同机对局")
+                    "error" -> events.failure(when(value) {
+                        "peer-unavailable" -> "找不到房间，请确认伙伴仍在等待"
+                        "unavailable-id" -> "这个房间码已经有人用了，换一个吧"
+                        "protocol" -> "双方软件版本不同，更新后再一起下棋吧"
+                        else -> "互联网连接未成功，可找附近伙伴或同机对局"
+                    })
                 }
             } }
         }, "GuluTransport")
@@ -161,14 +168,27 @@ internal class GomokuOnlineWire(context: Context, code: String, hosting: Boolean
         }
         // The audited static transport uses the same signaling infrastructure, with isolated peers/metadata.
         val html = context.assets.open("chess-online/transport.html").bufferedReader().use { it.readText() }
-            .replace("gulu-xq-", "gulu-go-")
+            .replace("gulu-xq-", prefix)
         view.loadDataWithBaseURL("https://appassets.androidplatform.net/", html, "text/html", "UTF-8", null)
     }
     override fun send(line: String) { if (!closed) view.evaluateJavascript("guluSend(${JSONObject.quote(line)})", null) }
     override fun close() {
         if (closed) return
         closed = true
-        runCatching { view.evaluateJavascript("guluStop()", null); view.stopLoading(); view.removeJavascriptInterface("GuluTransport")
-            (view.parent as? ViewGroup)?.removeView(view); view.destroy() }
+        // evaluateJavascript is asynchronous. Destroying the renderer immediately can skip
+        // Peer.destroy(), leaving the signaling ID reserved until its server timeout.
+        val cleanup = Runnable {
+            if (!destroyed) {
+                destroyed = true
+                runCatching { view.stopLoading(); view.removeJavascriptInterface("GuluTransport")
+                    (view.parent as? ViewGroup)?.removeView(view); view.destroy() }
+            }
+        }
+        main.postDelayed(cleanup, 600)
+        runCatching {
+            view.evaluateJavascript("try { guluStop(); true; } catch (e) { false; }") {
+                main.removeCallbacks(cleanup); cleanup.run()
+            }
+        }.onFailure { main.removeCallbacks(cleanup); cleanup.run() }
     }
 }

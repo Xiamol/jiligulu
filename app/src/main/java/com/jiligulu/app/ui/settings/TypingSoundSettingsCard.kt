@@ -37,7 +37,7 @@ fun TypingSoundSettingsCard(onPreview: () -> Unit) {
             horizontalArrangement = Arrangement.SpaceBetween) {
             Text("初次见面的声音", style = MaterialTheme.typography.titleMedium)
             Switch(checked = enabled, onCheckedChange = { value -> scope.launch {
-                try { app.container.userPrefs.setTypingSoundEnabled(value); error = null }
+                try { app.container.userPrefs.setTypingSoundEnabled(value); com.jiligulu.app.core.audio.UiSound.toggle(app); error = null }
                 catch (cancelled: CancellationException) { throw cancelled }
                 catch (_: Exception) { error = "还没保存成功，请再试一下。" }
             } })
@@ -47,7 +47,7 @@ fun TypingSoundSettingsCard(onPreview: () -> Unit) {
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         Row {
             TextButton(onClick = player::tap, enabled = enabled) { Text("试听键音") }
-            TextButton(onClick = onPreview) { Text("重看初次见面") }
+            TextButton(onClick = com.jiligulu.app.ui.components.uiTap(com.jiligulu.app.core.audio.UiCue.NAVIGATE, onPreview)) { Text("重看初次见面") }
         }
     }
 }

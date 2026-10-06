@@ -76,7 +76,7 @@ fun LifePhotoField(path: String, onChange: (String) -> Unit, modifier: Modifier 
                 modifier = Modifier.heightIn(min = 50.dp)) {
                 Text(if (busy) "正在夹好照片…" else if (path.isBlank()) "📎 夹一张生活照片" else "换张照片")
             }
-            if (path.isNotBlank()) TextButton(onClick = uiTap { onChange(""); MemoryFiles.releaseDraftCopies(context, ownedCopies) }, enabled = !busy && enabled) { Text("取下") }
+            if (path.isNotBlank()) TextButton(onClick = uiTap(com.jiligulu.app.core.audio.UiCue.REMOVE) { onChange(""); MemoryFiles.releaseDraftCopies(context, ownedCopies) }, enabled = !busy && enabled) { Text("取下") }
         }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
     }
@@ -97,7 +97,7 @@ private fun Context.changingConfiguration(): Boolean {
 fun MemoryPosterButton(title: String, caption: String, photoPath: String, amountFen: Long? = null,
     dateMillis: Long? = null, modifier: Modifier = Modifier) {
     var open by remember { mutableStateOf(false) }
-    TextButton(onClick = uiTap { open = true }, modifier = modifier) { Text("✦ 做张生活海报") }
+    TextButton(onClick = uiTap(com.jiligulu.app.core.audio.UiCue.PAPER) { open = true }, modifier = modifier) { Text("✦ 做张生活海报") }
     if (open) MemoryPosterDialog(PosterData(title, caption, photoPath, amountFen, dateMillis), onDismiss = { open = false })
 }
 
@@ -167,7 +167,7 @@ fun MemoryPosterDialog(data: PosterData, onDismiss: () -> Unit) {
             busy = true
             try {
                 withContext(Dispatchers.IO) { context.contentResolver.openOutputStream(uri)?.use { output -> current.inputStream().use { it.copyTo(output) } } ?: error("无法保存") }
-                Toast.makeText(context, "生活小海报保存好啦 ♡", Toast.LENGTH_SHORT).show()
+                com.jiligulu.app.core.audio.UiSound.confirm(context); Toast.makeText(context, "生活小海报保存好啦 ♡", Toast.LENGTH_SHORT).show()
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { error = "未能保存图片，请换个位置试试。" }
             finally { busy = false; documentFile.value = null }
@@ -196,7 +196,7 @@ fun MemoryPosterDialog(data: PosterData, onDismiss: () -> Unit) {
             .imePadding(), contentPadding = 12.dp) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text("这一页生活", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
-                TextButton(onClick = uiTap(onDismiss), enabled = !busy) { Text("关闭") }
+                TextButton(onClick = uiTap(com.jiligulu.app.core.audio.UiCue.PAPER, onDismiss), enabled = !busy) { Text("关闭") }
             }
             SpringScrollColumn(Modifier.weight(1f, fill = false), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 // The actual shareable artwork leads. Its measured aspect ratio accommodates
@@ -209,10 +209,10 @@ fun MemoryPosterDialog(data: PosterData, onDismiss: () -> Unit) {
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (data.amountFen != null || data.week != null) {
-                        Checkbox(checked = showAmount, onCheckedChange = { com.jiligulu.app.core.audio.UiSound.tap(context); showAmount = it }, enabled = !busy); Text("金额", style = MaterialTheme.typography.bodySmall)
+                        Checkbox(checked = showAmount, onCheckedChange = { com.jiligulu.app.core.audio.UiSound.toggle(context); showAmount = it }, enabled = !busy); Text("金额", style = MaterialTheme.typography.bodySmall)
                     }
                     Spacer(Modifier.weight(1f))
-                    TextButton(onClick = uiTap { stamp = when (stamp) { seasonalStamp -> "好好生活"; "好好生活" -> "小小快乐"; "小小快乐" -> "愿望成真"; else -> seasonalStamp } }, enabled = !busy) { Text("$stamp ▾") }
+                    TextButton(onClick = uiTap(com.jiligulu.app.core.audio.UiCue.SELECT) { stamp = when (stamp) { seasonalStamp -> "好好生活"; "好好生活" -> "小小快乐"; "小小快乐" -> "愿望成真"; else -> seasonalStamp } }, enabled = !busy) { Text("$stamp ▾") }
                 }
                 CompactFormField("名字", title, { title = it.take(32) }, placeholder = if (data.week == null) "给这一刻起个名字" else "给这一周起个名字", enabled = !busy)
                 CompactFormField("一句话", caption, { caption = it.take(120) }, singleLine = false, enabled = !busy)
@@ -220,15 +220,15 @@ fun MemoryPosterDialog(data: PosterData, onDismiss: () -> Unit) {
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = uiTap { act { MemoryPoster.share(context, it) } }, enabled = !rendering && !busy && file != null, modifier = Modifier.weight(1f)) { Text("分享") }
+                OutlinedButton(onClick = uiTap(com.jiligulu.app.core.audio.UiCue.NAVIGATE) { act { MemoryPoster.share(context, it) } }, enabled = !rendering && !busy && file != null, modifier = Modifier.weight(1f)) { Text("分享") }
                 Button(onClick = uiTap { act {
                     if (Build.VERSION.SDK_INT >= 29) {
-                        MemoryPoster.saveGallery(context, it)
+                        MemoryPoster.saveGallery(context, it); com.jiligulu.app.core.audio.UiSound.confirm(context)
                         Toast.makeText(context, "存进相册和纪念册啦 ♡", Toast.LENGTH_SHORT).show()
                     } else { documentFile.value = it; createDocument.launch("阿噜生活小海报.png") }
                 } }, enabled = !rendering && !busy && file != null, modifier = Modifier.weight(1f)) { Text(if (busy) "收好中…" else "保存图片") }
             }
-            TextButton(onClick = uiTap { act { Toast.makeText(context, "已经夹进生活纪念册啦 ♡", Toast.LENGTH_SHORT).show() } }, enabled = !rendering && !busy && file != null, modifier = Modifier.align(Alignment.CenterHorizontally)) { Text("只夹进纪念册") }
+            TextButton(onClick = uiTap { act { com.jiligulu.app.core.audio.UiSound.confirm(context); Toast.makeText(context, "已经夹进生活纪念册啦 ♡", Toast.LENGTH_SHORT).show() } }, enabled = !rendering && !busy && file != null, modifier = Modifier.align(Alignment.CenterHorizontally)) { Text("只夹进纪念册") }
         }
     }
 }

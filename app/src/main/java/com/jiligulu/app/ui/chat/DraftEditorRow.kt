@@ -17,6 +17,10 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.platform.LocalContext
+import com.jiligulu.app.core.audio.UiSound
+import com.jiligulu.app.core.audio.UiCue
+import com.jiligulu.app.ui.components.uiTap
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -44,6 +48,7 @@ internal fun DraftEditorRow(
     tag: String,
     onUpdate: ((DraftUi) -> DraftUi) -> Unit
 ) {
+    val soundContext = LocalContext.current
     var showCategories by rememberSaveable(tag) { mutableStateOf(false) }
     var showTime by rememberSaveable(tag) { mutableStateOf(false) }
     var showNote by rememberSaveable(tag) { mutableStateOf(false) }
@@ -58,7 +63,7 @@ internal fun DraftEditorRow(
     }
     Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-            Checkbox(draft.checked, onCheckedChange = { checked -> onUpdate { it.copy(checked = checked) } },
+            Checkbox(draft.checked, onCheckedChange = { checked -> UiSound.toggle(soundContext); onUpdate { it.copy(checked = checked) } },
                 enabled = enabled, modifier = Modifier.size(30.dp).testTag("draft-check-$tag"))
             BasicTextField(draft.detail, onValueChange = { value -> onUpdate { it.copy(detail = value) } },
                 modifier = Modifier.weight(1f).heightIn(min = 38.dp).testTag("draft-detail-$tag"),
@@ -95,7 +100,7 @@ internal fun DraftEditorRow(
             verticalAlignment = Alignment.CenterVertically) {
             Surface(Modifier.widthIn(max = 94.dp), color = MaterialTheme.colorScheme.primary.copy(alpha = .055f),
                 shape = RoundedCornerShape(9.dp)) {
-                Row(Modifier.clickable(enabled = enabled) { showCategories = true }
+                Row(Modifier.clickable(enabled = enabled, onClick = uiTap(UiCue.NAVIGATE) { showCategories = true })
                     .testTag("draft-category-$tag").padding(horizontal = 7.dp, vertical = 7.dp),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
                     CategoryBadge(draft.categoryName, category?.iconValue ?: draft.iconEmoji, size = 16.dp,
@@ -106,7 +111,7 @@ internal fun DraftEditorRow(
                     Icon(Icons.Outlined.ExpandMore, null, Modifier.size(12.dp), tint = MaterialTheme.colorScheme.primary)
                 }
             }
-            Row(Modifier.weight(1f).clickable(enabled = enabled) { showTime = true }.testTag("draft-time-$tag")
+            Row(Modifier.weight(1f).clickable(enabled = enabled, onClick = uiTap(UiCue.NAVIGATE) { showTime = true }).testTag("draft-time-$tag")
                 .padding(vertical = 7.dp), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(3.dp)) {
                     Icon(Icons.Outlined.Schedule, null, Modifier.size(13.dp), tint = MaterialTheme.colorScheme.primary)
@@ -116,6 +121,7 @@ internal fun DraftEditorRow(
             }
             Row(Modifier.widthIn(min = 40.dp).clickable(enabled = enabled, role = Role.Button,
                 onClickLabel = if (draft.type == BillType.EXPENSE) "切换为收入" else "切换为支出") {
+                    UiSound.toggle(soundContext)
                     onUpdate { it.copy(type = if (it.type == BillType.EXPENSE) BillType.INCOME else BillType.EXPENSE) }
                 }.padding(vertical = 7.dp, horizontal = 6.dp).testTag("draft-type-$tag"),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
@@ -123,7 +129,7 @@ internal fun DraftEditorRow(
                     style = MaterialTheme.typography.labelSmall)
             }
             Icon(Icons.Outlined.EditNote, if (draft.note.isBlank()) "添加备注" else "编辑备注",
-                Modifier.size(26.dp).clickable(enabled = enabled) { showNote = !showNote }.padding(5.dp),
+                Modifier.size(26.dp).clickable(enabled = enabled, onClick = uiTap(UiCue.TOGGLE) { showNote = !showNote }).padding(5.dp),
                 tint = MaterialTheme.colorScheme.primary.copy(alpha = .7f))
         }
         if (draft.note.isNotBlank() && !showNote) Text(draft.note, maxLines = 1,
@@ -178,7 +184,7 @@ private fun DraftCategoryPicker(
             horizontalArrangement = Arrangement.spacedBy(6.dp), contentPadding = PaddingValues(bottom = 6.dp)) {
             items(filtered, key = { it.id }) { category ->
                 val selected = draft.categoryName.equals(category.name, true)
-                Surface(Modifier.fillMaxWidth().clickable { onSelect(category) }
+                Surface(Modifier.fillMaxWidth().clickable(onClick = uiTap(UiCue.SELECT) { onSelect(category) })
                     .testTag("draft-category-option-${category.id}"), shape = RoundedCornerShape(13.dp),
                     color = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = .11f) else MaterialTheme.colorScheme.surface,
                     border = BorderStroke(.7.dp, if (selected) MaterialTheme.colorScheme.primary.copy(alpha = .3f)

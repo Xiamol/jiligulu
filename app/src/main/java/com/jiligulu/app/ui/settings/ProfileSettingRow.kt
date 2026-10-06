@@ -18,7 +18,7 @@ enum class ProfileSettingField(val title:String) { NAME("名字"), SUFFIX("称�
 @Composable
 internal fun ProfileSettingRow(title:String, summary:String, enabled:Boolean, onClick:()->Unit) {
     Column {
-        Row(Modifier.fillMaxWidth().heightIn(min=44.dp).clickable(enabled=enabled,role=Role.Button,onClick=uiTap(onClick))
+        Row(Modifier.fillMaxWidth().heightIn(min=44.dp).clickable(enabled=enabled,role=Role.Button,onClick=uiTap(com.jiligulu.app.core.audio.UiCue.NAVIGATE, onClick))
             .padding(vertical=8.dp),verticalAlignment=Alignment.CenterVertically) {
             Text(title,style=MaterialTheme.typography.bodyMedium)
             Spacer(Modifier.width(10.dp))

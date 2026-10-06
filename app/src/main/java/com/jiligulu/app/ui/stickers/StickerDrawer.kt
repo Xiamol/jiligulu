@@ -66,6 +66,8 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.jiligulu.app.JiliguluApp
 import com.jiligulu.app.core.util.Formatters
+import com.jiligulu.app.core.audio.UiCue
+import com.jiligulu.app.core.audio.UiSound
 import com.jiligulu.app.data.littleworld.LittleWorldState
 import com.jiligulu.app.data.littleworld.Sticker
 import com.jiligulu.app.data.local.entity.CategoryEntity
@@ -113,8 +115,8 @@ fun StickerDrawer(onDismiss: () -> Unit, onPick: (Sticker) -> Unit) {
                     Text(if (managing) "点贴纸编辑 · 可以挪位置、换图案" else "轻轻揭下一张，带去记一笔 ♡",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                TextButton(onClick = uiTap { managing = !managing }) { Text(if (managing) "布置好了" else "布置") }
-                IconButton(onClick = uiTap(onDismiss)) { Icon(Icons.Default.Close, "关闭贴纸墙") }
+                TextButton(onClick = uiTap(UiCue.TOGGLE) { managing = !managing }) { Text(if (managing) "布置好了" else "布置") }
+                IconButton(onClick = uiTap(UiCue.PAPER, onDismiss)) { Icon(Icons.Default.Close, "关闭贴纸墙") }
             }
             error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
             Box(Modifier.fillMaxWidth().height(maxHeight).clip(RoundedCornerShape(18.dp))) {
@@ -129,11 +131,11 @@ fun StickerDrawer(onDismiss: () -> Unit, onPick: (Sticker) -> Unit) {
                 verticalArrangement = Arrangement.spacedBy(8.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 itemsIndexed(state.stickers, key = { _, item -> item.id }) { index, sticker ->
                     StickerPaper(sticker, index, managing,
-                        onClick = uiTap { if (managing) { error = null; editing = sticker } else onPick(sticker) },
+                        onClick = { if (managing) { error = null; editing = sticker } else onPick(sticker) },
                         onEdit = { error = null; editing = sticker })
                 }
                 item(key = "new-sticker") {
-                    Surface(onClick = uiTap { editing = Sticker(); error = null },
+                    Surface(onClick = uiTap(UiCue.PAPER) { editing = Sticker(); error = null },
                         shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surface,
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = .28f)),
                         modifier = Modifier.fillMaxWidth().height(128.dp)) {
@@ -158,7 +160,7 @@ fun StickerDrawer(onDismiss: () -> Unit, onPick: (Sticker) -> Unit) {
             onSave = { next ->
                 saving = true
                 scope.launch {
-                    try { repository.saveSticker(next); editing = null; error = null }
+                    try { repository.saveSticker(next); UiSound.confirm(app); editing = null; error = null }
                     catch (cancelled: CancellationException) { throw cancelled }
                     catch (_: Exception) { error = "贴纸还没收好，再试一次吧～" }
                     finally { saving = false }
@@ -182,7 +184,7 @@ fun StickerDrawer(onDismiss: () -> Unit, onPick: (Sticker) -> Unit) {
             compact = true, dense = true, compactWidth = 260.dp, onConfirm = {
                 pendingDelete = null
                 scope.launch {
-                    try { repository.deleteSticker(sticker.id) }
+                    try { repository.deleteSticker(sticker.id); UiSound.play(app, UiCue.REMOVE) }
                     catch (cancelled: CancellationException) { throw cancelled }
                     catch (_: Exception) { error = "贴纸没揭下来，稍后再试吧" }
                 }
@@ -200,7 +202,7 @@ private fun StickerPaper(sticker: Sticker, index: Int, managing: Boolean, onClic
     val tint=listOf(Color(0xFFFFF2D0),Color(0xFFE7F3E8),Color(0xFFF0E5FA),Color(0xFFFFE8E9),Color(0xFFE4EDF9))[(seed/3)%5]
     Box(Modifier.fillMaxWidth().height(144.dp).graphicsLayer {
         rotationZ=angle;translationY=shift;scaleX=scale;scaleY=scale
-    }.combinedClickable(onClick=uiTap(onClick),onLongClick=uiTap(onEdit))) {
+    }.combinedClickable(onClick=uiTap(UiCue.PAPER, onClick),onLongClick=uiTap(UiCue.PAPER, onEdit))) {
         StickerPaperArtwork(Modifier.matchParentSize(),tint)
         Column(Modifier.fillMaxWidth().padding(horizontal=9.dp).padding(top=23.dp,bottom=10.dp),
             horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.spacedBy(3.dp)) {
@@ -242,7 +244,7 @@ private fun StickerEditor(sticker: Sticker, categories: List<CategoryEntity>, sa
                 Row(Modifier.fillMaxWidth().heightIn(min = 44.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("收支", Modifier.width(60.dp), style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    TextButton(onClick = uiTap { type = if (type == "EXPENSE") "INCOME" else "EXPENSE" }, enabled = !saving) {
+                    TextButton(onClick = uiTap(UiCue.TOGGLE) { type = if (type == "EXPENSE") "INCOME" else "EXPENSE" }, enabled = !saving) {
                         Text(if (type == "EXPENSE") "支出" else "收入", color = if (type == "EXPENSE") ExpenseCoral else IncomeGreen)
                         Icon(Icons.Default.SwapHoriz, "切换收支", Modifier.padding(start = 4.dp).size(16.dp))
                     }
@@ -252,7 +254,7 @@ private fun StickerEditor(sticker: Sticker, categories: List<CategoryEntity>, sa
                 listOf("🍳", "🍚", "🍜", "🥐", "☕", "🧋", "🥬", "🍊", "🚇", "🚕", "🚌", "🛒", "🐱", "🐶", "🎮", "📚", "💰", "⭐").chunked(6).forEach { row ->
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         row.forEach { icon ->
-                            Surface(onClick = uiTap { emoji = icon }, enabled = !saving, shape = RoundedCornerShape(12.dp),
+                            Surface(onClick = uiTap(UiCue.SELECT) { emoji = icon }, enabled = !saving, shape = RoundedCornerShape(12.dp),
                                 color = if (emoji == icon) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
                                 modifier = Modifier.weight(1f).height(44.dp)) {
                                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -265,7 +267,7 @@ private fun StickerEditor(sticker: Sticker, categories: List<CategoryEntity>, sa
                 }
                 Text("分类", style = MaterialTheme.typography.labelLarge)
                 SpringScrollColumn(Modifier.heightIn(max = 138.dp), handOffOnRepeat = true, verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                    Surface(onClick = uiTap { categoryId = -1 }, enabled = !saving, shape = RoundedCornerShape(12.dp),
+                    Surface(onClick = uiTap(UiCue.SELECT) { categoryId = -1 }, enabled = !saving, shape = RoundedCornerShape(12.dp),
                         color = if (categoryId <= 0) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
                         modifier = Modifier.fillMaxWidth()) {
                         Text("按名字推荐，记账时再确认", style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(10.dp))
@@ -273,7 +275,7 @@ private fun StickerEditor(sticker: Sticker, categories: List<CategoryEntity>, sa
                     categories.chunked(3).forEach { row ->
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                             row.forEach { category ->
-                                Surface(onClick = uiTap { categoryId = category.id }, enabled = !saving,
+                                Surface(onClick = uiTap(UiCue.SELECT) { categoryId = category.id }, enabled = !saving,
                                     color = if (categoryId == category.id) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
                                     shape = RoundedCornerShape(12.dp), modifier = Modifier.weight(1f)) {
                                     Text(CategoryLabels.displayName(category.name), style = MaterialTheme.typography.labelSmall,
@@ -286,13 +288,13 @@ private fun StickerEditor(sticker: Sticker, categories: List<CategoryEntity>, sa
                     }
                 }
                 if (onDelete != null) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    TextButton(onClick = uiTap { onMoveUp?.invoke() }, enabled = onMoveUp != null && !saving) { Text("↑ 前移") }
-                    TextButton(onClick = uiTap { onMoveDown?.invoke() }, enabled = onMoveDown != null && !saving) { Text("↓ 后移") }
+                    TextButton(onClick = uiTap(UiCue.PAPER) { onMoveUp?.invoke() }, enabled = onMoveUp != null && !saving) { Text("↑ 前移") }
+                    TextButton(onClick = uiTap(UiCue.PAPER) { onMoveDown?.invoke() }, enabled = onMoveDown != null && !saving) { Text("↓ 后移") }
                     TextButton(onClick = uiTap(onDelete), enabled = !saving) { Text("移除", color = MaterialTheme.colorScheme.error) }
                 }
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TextButton(onClick = uiTap(onDismiss), enabled = !saving, modifier = Modifier.weight(1f)) { Text("先收起") }
+                    TextButton(onClick = uiTap(UiCue.PAPER, onDismiss), enabled = !saving, modifier = Modifier.weight(1f)) { Text("先收起") }
                     Button(onClick = uiTap { fen?.let { onSave(sticker.copy(title = title.trim(), amountFen = it, emoji = emoji, type = type, categoryId = categoryId)) } },
                         enabled = title.isNotBlank() && fen != null && !saving, modifier = Modifier.weight(1.5f), shape = RoundedCornerShape(16.dp)) {
                         Text(if (saving) "收好中…" else "贴上墙")

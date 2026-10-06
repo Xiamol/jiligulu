@@ -64,14 +64,16 @@ sealed interface ActionPick {
 
 sealed interface ChatItem {
     val id: Long
-    data class UserMsg(override val id: Long, val text: String) : ChatItem
-    data class GuluMsg(override val id: Long, val text: String, val loading: Boolean = false) : ChatItem
+    val sentAt: Long
+    data class UserMsg(override val id: Long, val text: String, override val sentAt: Long = 0) : ChatItem
+    data class GuluMsg(override val id: Long, val text: String, val loading: Boolean = false, override val sentAt: Long = 0) : ChatItem
     data class DraftCard(
         override val id: Long,
         val rawInput: String,
         val drafts: List<DraftUi>,
         val status: Status = Status.EDITING,
-        val savedCount: Int = 0
+        val savedCount: Int = 0,
+        override val sentAt: Long = 0
     ) : ChatItem {
         enum class Status { EDITING, SAVING, CONFIRMED, CANCELLED, DELETED }
     }
@@ -86,13 +88,15 @@ sealed interface ChatItem {
     data class ActionCard(
         override val id: Long,
         val text: String,
-        val options: List<AiOption>
+        val options: List<AiOption>,
+        override val sentAt: Long = 0
     ) : ChatItem
 
     data class AppActionCard(
         override val id: Long,
         val payload: AppActionPayload,
-        val status: Status = Status.EDITING
+        val status: Status = Status.EDITING,
+        override val sentAt: Long = 0
     ) : ChatItem {
         enum class Status { EDITING, SAVING, DONE, CANCELLED, NEEDS_RETRY }
     }
@@ -108,7 +112,8 @@ sealed interface ChatItem {
         val kind: CommandKind,
         val params: List<CommandItem>,
         val status: Status = Status.EDITING,
-        val appliedCount: Int = 0
+        val appliedCount: Int = 0,
+        override val sentAt: Long = 0
     ) : ChatItem {
         /** 卡上还有没有没提交的条目。 */
         val pendingCount: Int get() = params.count { it.checked } - appliedCount
@@ -687,7 +692,7 @@ class ChatViewModel(
         append(message.copy(id = history.insert(message)).toUi())
     }
 
-    private fun ChatMessageEntity.toUi(): ChatItem = when (kind) {
+    private fun ChatMessageEntity.toUi(): ChatItem = (when (kind) {
         "USER" -> ChatItem.UserMsg(id, content)
 
         "DRAFT" -> try {
@@ -737,7 +742,7 @@ class ChatViewModel(
         "PENDING_DRAFT" -> ChatItem.GuluMsg(id, "", loading = false)
 
         else -> ChatItem.GuluMsg(id, content, status == "PENDING")
-    }
+    }).withSentAt(createdAt)
 
     private fun ConfirmItem.toDraftUi() = DraftUi(
         amountText = amountText, type = type, categoryName = categoryName,

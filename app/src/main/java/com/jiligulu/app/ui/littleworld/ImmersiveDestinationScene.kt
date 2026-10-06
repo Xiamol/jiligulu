@@ -56,6 +56,7 @@ data class DestinationObject(
     val labelY: Float = top + height,
     val tilt: Float = -2f,
     val enabled: Boolean = true,
+    val soundCue: com.jiligulu.app.core.audio.UiCue = com.jiligulu.app.core.audio.UiCue.NAVIGATE,
     val onClick: () -> Unit
 )
 
@@ -116,7 +117,7 @@ fun ImmersiveDestinationScene(
             val bottom = (rawY + paintedHeight * prop.height).coerceAtMost(maxHeight)
             if (right > x && bottom > y) {
                 Box(Modifier.offset(x, y).size(right - x, bottom - y)
-                    .clickable(enabled = prop.enabled, role = Role.Button, onClickLabel = prop.label, onClick = uiTap(prop.onClick))
+                    .clickable(enabled = prop.enabled, role = Role.Button, onClickLabel = prop.label, onClick = uiTap(prop.soundCue, prop.onClick))
                     .semantics { contentDescription = prop.label })
             }
         }
@@ -127,7 +128,7 @@ fun ImmersiveDestinationScene(
             val labelY = (top + paintedHeight * prop.labelY)
                 .coerceIn(58.dp, (maxHeight - 54.dp - labelBottomClearance).coerceAtLeast(58.dp))
             ScenePlaqueButton(prop.label, Modifier.offset(labelX, labelY).width(labelWidth).heightIn(min = 32.dp).rotate(prop.tilt),
-                enabled = prop.enabled, onClick = uiTap(prop.onClick))
+                enabled = prop.enabled, soundCue = prop.soundCue, onClick = prop.onClick)
         }
         val titleWidth = (paintedWidth * if(destination == ImmersiveDestination.TIME_TRAIN) .55f else .45f)
             .coerceAtMost((maxWidth - 80.dp).coerceAtLeast(100.dp))

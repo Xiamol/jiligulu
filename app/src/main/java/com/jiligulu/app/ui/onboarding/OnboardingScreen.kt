@@ -119,7 +119,10 @@ fun OnboardingScreen(onDone: () -> Unit, active: Boolean = true, preview: Boolea
     LaunchedEffect(preview, storedName) { if (preview && name.isBlank()) name = storedName }
 
     LaunchedEffect(savedName) {
-        if (savedName != null && phase != Phase.REPLY) phase = Phase.REPLY
+        if (savedName != null && phase != Phase.REPLY) {
+            if (!preview) com.jiligulu.app.core.audio.UiSound.confirm(context)
+            phase = Phase.REPLY
+        }
     }
     LaunchedEffect(active, phase, lifecycle) {
         if (!active) return@LaunchedEffect
@@ -152,7 +155,7 @@ fun OnboardingScreen(onDone: () -> Unit, active: Boolean = true, preview: Boolea
             .padding(horizontal = 20.dp, vertical = 12.dp), horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = uiTap { vm.setSound(!sound) }) {
+                IconButton(onClick = uiTap(com.jiligulu.app.core.audio.UiCue.TOGGLE) { vm.setSound(!sound) }) {
                     Icon(if (sound) Icons.AutoMirrored.Outlined.VolumeUp else Icons.AutoMirrored.Outlined.VolumeOff,
                         contentDescription = if (sound) "关闭打字音效" else "开启打字音效")
                 }

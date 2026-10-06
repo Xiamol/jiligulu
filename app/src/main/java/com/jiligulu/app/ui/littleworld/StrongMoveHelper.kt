@@ -6,12 +6,31 @@ import kotlin.math.abs
 object XiangqiStrongMoveHelper {
     fun chooseMove(
         state: XiangqiState,
+        timeBudgetMillis: Long = 1_500,
         shouldCancel: () -> Boolean = { false },
-    ): XiangqiMove? {
-        if (state.outcome != XiangqiOutcome.PLAYING || shouldCancel()) return null
-        return XiangqiSearch(shouldCancel).choose(state)
-    }
+    ): XiangqiMove? = analyze(state, timeBudgetMillis, shouldCancel = shouldCancel).move
+
+    /** Diagnostics make search depth/time measurable; scores are heuristic, not a strength rating. */
+    internal fun analyze(
+        state: XiangqiState,
+        timeBudgetMillis: Long = 1_500,
+        maxDepth: Int = 10,
+        shouldCancel: () -> Boolean = { false },
+    ): XiangqiSearchReport = XiangqiSearch(
+        shouldCancel, timeBudgetMillis.coerceIn(50, 3_000), maxDepth.coerceIn(1, 12)
+    ).choose(state)
 }
+
+internal data class XiangqiSearchReport(
+    val move: XiangqiMove?,
+    val completedDepth: Int,
+    val nodes: Int,
+    val elapsedMillis: Long,
+    val score: Int?,
+    val cancelled: Boolean,
+    val budgetExpired: Boolean,
+    val tableHits: Int,
+)
 
 object GomokuStrongMoveHelper {
     fun chooseMove(
@@ -26,9 +45,14 @@ object GomokuStrongMoveHelper {
 
 private class SearchStopped : RuntimeException(null, null, false, false)
 
-private class SearchBudget(private val shouldCancel: () -> Boolean, millis: Long = 850) {
-    private val deadline = System.nanoTime() + millis * 1_000_000L
-    private var nodes = 0
+private class SearchBudget(private val shouldCancel: () -> Boolean, millis: Long = 850, private val nodeLimit: Int = 100_000) {
+    private val started = System.nanoTime()
+    private val deadline = started + millis * 1_000_000L
+    var nodes = 0
+        private set
+    val elapsedMillis: Long get() = (System.nanoTime() - started) / 1_000_000L
+    var expired = false
+        private set
     var cancelled = false
         private set
 
@@ -39,7 +63,10 @@ private class SearchBudget(private val shouldCancel: () -> Boolean, millis: Long
                 cancelled = true
                 throw SearchStopped()
             }
-            if (nodes >= 100_000 || System.nanoTime() >= deadline) throw SearchStopped()
+            if (nodes >= nodeLimit || System.nanoTime() >= deadline) {
+                expired = true
+                throw SearchStopped()
+            }
         }
     }
 
@@ -49,31 +76,50 @@ private class SearchBudget(private val shouldCancel: () -> Boolean, millis: Long
 private enum class Bound { EXACT, LOWER, UPPER }
 private data class XiangqiEntry(val depth: Int, val score: Int, val bound: Bound, val move: XiangqiMove?)
 
-private class XiangqiSearch(shouldCancel: () -> Boolean) {
-    private val budget = SearchBudget(shouldCancel)
+/** Original implementation of standard alpha-beta techniques; no external engine code or weights. */
+private class XiangqiSearch(shouldCancel: () -> Boolean, timeBudgetMillis: Long, private val maxDepth: Int) {
+    private val budget = SearchBudget(shouldCancel, timeBudgetMillis, nodeLimit = 300_000)
     private val table = HashMap<Long, XiangqiEntry>()
-    private val history = IntArray(90 * 90)
+    private val history = Array(2) { IntArray(90 * 90) }
+    private val killers = Array(48) { arrayOfNulls<XiangqiMove>(2) }
+    private val path = LongArray(48)
+    private var tableHits = 0
     private val values = intArrayOf(0, 100_000, 210, 220, 440, 950, 470, 110)
     private val mate = 1_000_000
 
-    fun choose(state: XiangqiState): XiangqiMove? {
+    fun choose(state: XiangqiState): XiangqiSearchReport {
         var completed: XiangqiMove? = null
+        var completedDepth = 0
+        var completedScore: Int? = null
+        fun report(): XiangqiSearchReport {
+            val cancelled = budget.finishCancelled()
+            return XiangqiSearchReport(completed.takeUnless { cancelled }, completedDepth, budget.nodes,
+                budget.elapsedMillis, completedScore, cancelled, budget.expired, tableHits)
+        }
         try {
             budget.visit()
+            if (state.outcome != XiangqiOutcome.PLAYING) return report()
             val moves = XiangqiEngine.legalMoves(state)
-            if (moves.isEmpty()) return null
-            completed = order(state, moves, null).first()
-            if (moves.size == 1) return completed.takeUnless { budget.finishCancelled() }
+            if (moves.isEmpty()) return report()
+            completed = order(state, moves, null, 0).first()
+            if (moves.size == 1) return report()
+            path[0] = key(state)
+            var rootScores = emptyMap<XiangqiMove, Int>()
             // Commit only complete iterations: an expired search never favors an early partial branch.
-            for (depth in 1..6) {
+            for (depth in 1..maxDepth) {
                 budget.visit()
                 var best = completed
                 var bestScore = -mate * 2
                 var alpha = -mate * 2
-                for (move in order(state, moves, completed)) {
+                val iterationScores = HashMap<XiangqiMove, Int>()
+                val ordered = order(state, moves, completed, 0).sortedByDescending {
+                    if (it == completed) Int.MAX_VALUE else rootScores[it] ?: Int.MIN_VALUE
+                }
+                for (move in ordered) {
                     budget.visit()
-                    val next = XiangqiEngine.play(state, move)
-                    val score = -search(next, depth - 1, -mate * 2, -alpha, 1)
+                    val next = XiangqiEngine.applyGeneratedMove(state, move)
+                    val score = -search(next, depth - 1, -mate * 2, -alpha, 1, 2)
+                    iterationScores[move] = score
                     if (score > bestScore) {
                         bestScore = score
                         best = move
@@ -81,33 +127,48 @@ private class XiangqiSearch(shouldCancel: () -> Boolean) {
                     if (score > alpha) alpha = score
                     if (score >= mate - 1) {
                         completed = move
-                        return completed.takeUnless { budget.finishCancelled() }
+                        completedDepth = depth
+                        completedScore = score
+                        return report()
                     }
                 }
                 completed = best
+                completedDepth = depth
+                completedScore = bestScore
+                rootScores = iterationScores
                 if (abs(bestScore) >= mate - 100) break
             }
         } catch (_: SearchStopped) {
             // The previous complete iteration remains legal in the immutable root position.
         }
-        return completed.takeUnless { budget.finishCancelled() }
+        return report()
     }
 
-    private fun search(state: XiangqiState, depth: Int, alphaIn: Int, betaIn: Int, ply: Int): Int {
+    private fun search(state: XiangqiState, depthIn: Int, alphaIn: Int, betaIn: Int, ply: Int, extensionsLeft: Int): Int {
         budget.visit()
         terminal(state, ply)?.let { return it }
-        if (depth <= 0) return quiet(state, alphaIn, betaIn, ply, 3)
-        val key = key(state, ply)
-        val cached = table[key]
+        val positionKey = key(state)
+        // Search-only cycle avoidance, not an adjudication of official long-check/long-chase rules.
+        if ((0 until ply).any { path[it] == positionKey }) return 0
+        path[ply] = positionKey
+        val inCheck = XiangqiEngine.isInCheck(state, state.turnSide)
+        val extended = inCheck && extensionsLeft > 0
+        val depth = depthIn + if (extended) 1 else 0
+        val remainingExtensions = extensionsLeft - if (extended) 1 else 0
+        if (depth <= 0) return quiet(state, alphaIn, betaIn, ply, 6, 1)
+        val tableKey = positionKey xor (remainingExtensions.toLong() * -7046029254386353131L)
+        val cached = table[tableKey]
         var alpha = alphaIn
         var beta = betaIn
         if (cached != null && cached.depth >= depth) {
+            tableHits++
+            val cachedScore = fromTableScore(cached.score, ply)
             when (cached.bound) {
-                Bound.EXACT -> return cached.score
-                Bound.LOWER -> alpha = maxOf(alpha, cached.score)
-                Bound.UPPER -> beta = minOf(beta, cached.score)
+                Bound.EXACT -> return cachedScore
+                Bound.LOWER -> alpha = maxOf(alpha, cachedScore)
+                Bound.UPPER -> beta = minOf(beta, cachedScore)
             }
-            if (alpha >= beta) return cached.score
+            if (alpha >= beta) return cachedScore
         }
         val alphaStart = alpha
         val betaStart = beta
@@ -115,9 +176,14 @@ private class XiangqiSearch(shouldCancel: () -> Boolean) {
         if (moves.isEmpty()) return -mate + ply
         var best = -mate * 2
         var bestMove: XiangqiMove? = null
-        for (move in order(state, moves, cached?.move)) {
-            val next = XiangqiEngine.play(state, move)
-            val score = -search(next, depth - 1, -beta, -alpha, ply + 1)
+        for ((index, move) in order(state, moves, cached?.move, ply).withIndex()) {
+            val next = XiangqiEngine.applyGeneratedMove(state, move)
+            // Principal-variation search: later moves first prove that they can improve alpha.
+            var score = if (index == 0) -search(next, depth - 1, -beta, -alpha, ply + 1, remainingExtensions)
+                else -search(next, depth - 1, -alpha - 1, -alpha, ply + 1, remainingExtensions)
+            if (index > 0 && score > alpha && score < beta) {
+                score = -search(next, depth - 1, -beta, -alpha, ply + 1, remainingExtensions)
+            }
             if (score > best) {
                 best = score
                 bestMove = move
@@ -126,7 +192,12 @@ private class XiangqiSearch(shouldCancel: () -> Boolean) {
             if (alpha >= beta) {
                 if (state.pieceAt(move.to.x, move.to.y) == 0) {
                     val index = moveIndex(move)
-                    history[index] = (history[index] + depth * depth).coerceAtMost(10_000)
+                    val sideHistory = history[if (state.turnSide == XiangqiSide.RED) 0 else 1]
+                    sideHistory[index] = (sideHistory[index] + depth * depth).coerceAtMost(10_000)
+                    if (killers[ply][0] != move) {
+                        killers[ply][1] = killers[ply][0]
+                        killers[ply][0] = move
+                    }
                 }
                 break
             }
@@ -137,17 +208,24 @@ private class XiangqiSearch(shouldCancel: () -> Boolean) {
             best >= betaStart -> Bound.LOWER
             else -> Bound.EXACT
         }
-        table[key] = XiangqiEntry(depth, best, bound, bestMove)
+        if (table.size < 65_536 || cached != null) {
+            table[tableKey] = XiangqiEntry(depth, toTableScore(best, ply), bound, bestMove)
+        }
         return best
     }
 
-    private fun quiet(state: XiangqiState, alphaIn: Int, beta: Int, ply: Int, remaining: Int): Int {
+    private fun quiet(state: XiangqiState, alphaIn: Int, beta: Int, ply: Int, remaining: Int, checksLeft: Int): Int {
         budget.visit()
         terminal(state, ply)?.let { return it }
+        val positionKey = key(state)
+        if ((0 until ply).any { path[it] == positionKey }) return 0
+        path[ply] = positionKey
         val inCheck = XiangqiEngine.isInCheck(state, state.turnSide)
         val moves = XiangqiEngine.legalMoves(state)
         if (moves.isEmpty()) return -mate + ply
-        if (remaining <= 0) return evaluate(state)
+        // The hard cap prevents endless checking chains. Ordinarily a checked node must evade,
+        // even after the capture budget is exhausted; it cannot use an illegal stand-pat score.
+        if (ply >= 46 || remaining <= 0 && !inCheck) return evaluate(state)
         var alpha = alphaIn
         var best = if (inCheck) -mate * 2 else evaluate(state)
         if (!inCheck) {
@@ -155,9 +233,13 @@ private class XiangqiSearch(shouldCancel: () -> Boolean) {
             alpha = maxOf(alpha, best)
         }
         // Checked nodes must search every legal evasion; standing still is never a legal option.
-        val tactical = if (inCheck) moves else moves.filter { state.pieceAt(it.to.x, it.to.y) != 0 }
-        for (move in order(state, tactical, null)) {
-            val score = -quiet(XiangqiEngine.play(state, move), -beta, -alpha, ply + 1, remaining - 1)
+        for (move in order(state, moves, null, ply)) {
+            val capture = state.pieceAt(move.to.x, move.to.y) != 0
+            if (!inCheck && !capture && (checksLeft <= 0 || remaining < 5)) continue
+            val next = XiangqiEngine.applyGeneratedMove(state, move)
+            val quietCheck = !inCheck && !capture && XiangqiEngine.isInCheck(next, next.turnSide)
+            if (!inCheck && !capture && !quietCheck) continue
+            val score = -quiet(next, -beta, -alpha, ply + 1, remaining - 1, checksLeft - if (quietCheck) 1 else 0)
             best = maxOf(best, score)
             alpha = maxOf(alpha, score)
             if (alpha >= beta) break
@@ -188,7 +270,31 @@ private class XiangqiSearch(shouldCancel: () -> Boolean) {
                 XiangqiEngine.ADVISOR, XiangqiEngine.ELEPHANT -> if (y <= 4) 8 else 0
                 else -> 0
             }
-            redScore += (values[type] + position) * if (piece > 0) 1 else -1
+            val mobility = when (type) {
+                XiangqiEngine.HORSE -> {
+                    val rank = index / 9
+                    val freeLegs = listOf(GridCell(x - 1, rank), GridCell(x + 1, rank),
+                        GridCell(x, rank - 1), GridCell(x, rank + 1))
+                        .count { it.x in 0..8 && it.y in 0..9 && state.pieceAt(it.x, it.y) == 0 }
+                    (freeLegs - 2) * 12
+                }
+                XiangqiEngine.ROOK, XiangqiEngine.CANNON -> {
+                    var open = 0
+                    val rank = index / 9
+                    for ((dx, dy) in raySteps) {
+                        var file = x + dx
+                        var row = rank + dy
+                        while (file in 0..8 && row in 0..9 && state.pieceAt(file, row) == 0) {
+                            open++
+                            file += dx
+                            row += dy
+                        }
+                    }
+                    open * if (type == XiangqiEngine.ROOK) 3 else 1
+                }
+                else -> 0
+            }
+            redScore += (values[type] + position + mobility) * if (piece > 0) 1 else -1
         }
         var score = redScore * state.turnSide.sign
         if (XiangqiEngine.isInCheck(state, state.turnSide)) score -= 45
@@ -196,23 +302,39 @@ private class XiangqiSearch(shouldCancel: () -> Boolean) {
         return score
     }
 
-    private fun order(state: XiangqiState, moves: List<XiangqiMove>, preferred: XiangqiMove?): List<XiangqiMove> =
+    private val raySteps = listOf(0 to -1, -1 to 0, 1 to 0, 0 to 1)
+
+    private fun order(state: XiangqiState, moves: List<XiangqiMove>, preferred: XiangqiMove?, ply: Int): List<XiangqiMove> =
         moves.sortedByDescending { move ->
             if (move == preferred) 2_000_000 else {
                 val victim = abs(state.pieceAt(move.to.x, move.to.y))
                 val attacker = abs(state.pieceAt(move.from.x, move.from.y))
                 (if (victim != 0) 20_000 + values[victim] * 16 - values[attacker] else 0) +
-                    history[moveIndex(move)] + (4 - abs(4 - move.to.x)) * 2
+                    (if (move == killers[ply][0]) 15_000 else if (move == killers[ply][1]) 14_000 else 0) +
+                    history[if (state.turnSide == XiangqiSide.RED) 0 else 1][moveIndex(move)] +
+                    (4 - abs(4 - move.to.x)) * 2
             }
         }
 
     private fun moveIndex(move: XiangqiMove): Int =
         (move.from.y * 9 + move.from.x) * 90 + move.to.y * 9 + move.to.x
 
-    private fun key(state: XiangqiState, ply: Int): Long {
+    private fun key(state: XiangqiState): Long {
         var hash = -3750763034362895579L
         for (piece in state.board) hash = (hash xor (piece + 7).toLong()) * 1099511628211L
-        return ((hash xor state.turnSide.sign.toLong()) * 1099511628211L) xor ply.toLong()
+        return (hash xor state.turnSide.sign.toLong()) * 1099511628211L
+    }
+
+    // Mate distance is root-relative during search and position-relative inside the shared TT.
+    private fun toTableScore(score: Int, ply: Int): Int = when {
+        score > mate - 100 -> score + ply
+        score < -mate + 100 -> score - ply
+        else -> score
+    }
+    private fun fromTableScore(score: Int, ply: Int): Int = when {
+        score > mate - 100 -> score - ply
+        score < -mate + 100 -> score + ply
+        else -> score
     }
 }
 

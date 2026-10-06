@@ -301,7 +301,7 @@ internal fun HomeContent(
             Column {
             Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Button(
-                    onClick = onOpenChat,
+                    onClick = com.jiligulu.app.ui.components.uiTap(com.jiligulu.app.core.audio.UiCue.NAVIGATE, onOpenChat),
                     modifier = Modifier.weight(1f).heightIn(min = 48.dp),
                     shape = MaterialTheme.shapes.large,
                     contentPadding = PaddingValues(horizontal = 12.dp)
@@ -311,12 +311,12 @@ internal fun HomeContent(
                     Text("对话记账")
                 }
                 Box(Modifier.weight(1f)) {
-                    OutlinedButton(onClick = onAddBill, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                    OutlinedButton(onClick = com.jiligulu.app.ui.components.uiTap(com.jiligulu.app.core.audio.UiCue.NAVIGATE, onAddBill), modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
                         shape = MaterialTheme.shapes.large, contentPadding = PaddingValues(start = 12.dp, end = 48.dp)) {
                         Icon(Icons.Outlined.Add, null, Modifier.size(20.dp))
                         Spacer(Modifier.width(7.dp)); Text("记一笔")
                     }
-                    IconButton(onClick = { showStickers = true }, modifier = Modifier.align(Alignment.CenterEnd).size(44.dp)) {
+                    IconButton(onClick = com.jiligulu.app.ui.components.uiTap(com.jiligulu.app.core.audio.UiCue.PAPER) { showStickers = true }, modifier = Modifier.align(Alignment.CenterEnd).size(44.dp)) {
                         Icon(Icons.Outlined.StickyNote2, "打开常用贴纸", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(21.dp))
                     }
                 }

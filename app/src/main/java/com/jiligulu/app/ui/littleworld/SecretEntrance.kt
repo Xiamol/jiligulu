@@ -17,6 +17,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -25,31 +26,50 @@ import androidx.compose.ui.zIndex
 import com.jiligulu.app.ui.theme.GuluBrandFont
 import kotlin.math.cos
 import kotlin.math.sin
+import kotlinx.coroutines.async
 
 enum class SecretEntrance { PULL, LOGO }
 
 /** Keep the final curtain until the destination takes over; reset on leaving or backgrounding. */
 @Composable
 fun SecretEntranceLifecycle(onLeave: () -> Unit) {
-    val owner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    val context = LocalContext.current
+    val activity = remember(context) {
+        var current: android.content.Context = context
+        while (current is android.content.ContextWrapper && current !is android.app.Activity) {
+            current = current.baseContext
+        }
+        current as? androidx.activity.ComponentActivity
+    }
     val leave by rememberUpdatedState(onLeave)
-    DisposableEffect(owner) {
+    DisposableEffect(activity) {
         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
             if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP) leave()
         }
-        owner.lifecycle.addObserver(observer)
-        onDispose { owner.lifecycle.removeObserver(observer) }
+        // NavBackStackEntry stops while its exit transition is still drawing. Clearing
+        // at that moment exposed the original room for a frame underneath the curtain.
+        activity?.lifecycle?.addObserver(observer)
+        onDispose { activity?.lifecycle?.removeObserver(observer) }
     }
 }
 
 /** Finite transition above the current page. The caller navigates only after onFinished. */
 @Composable
 fun SecretEntranceOverlay(source: SecretEntrance, onFinished: () -> Unit, modifier: Modifier = Modifier) {
+    val resources = LocalContext.current.resources
     val progress = remember(source) { Animatable(0f) }
     val finish by rememberUpdatedState(onFinished)
     LaunchedEffect(source) {
-        progress.animateTo(1f, tween(if (source == SecretEntrance.PULL) 1250 else 1450, easing = FastOutSlowInEasing))
-        finish()
+        kotlinx.coroutines.coroutineScope {
+            val painting = async(kotlinx.coroutines.Dispatchers.IO) {
+                LittleWorldArtwork.image(resources, com.jiligulu.app.R.drawable.world_secret_room_portrait_v3)
+                LittleWorldArtwork.image(resources, com.jiligulu.app.R.drawable.world_secret_room_portrait_v4_night)
+                LittleWorldArtwork.image(resources, com.jiligulu.app.R.drawable.secret_wood_surface_v2)
+            }
+            progress.animateTo(1f, tween(if (source == SecretEntrance.PULL) 1250 else 1450, easing = FastOutSlowInEasing))
+            painting.await()
+            finish()
+        }
     }
     Box(modifier.fillMaxSize().zIndex(30f).semantics {
         contentDescription = if (source == SecretEntrance.PULL) "秘密小门正在打开" else "阿噜的魔法印记正在亮起"

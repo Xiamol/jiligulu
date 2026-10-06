@@ -106,7 +106,7 @@ fun CalculatorDialog(initial: String = "", onDismiss: () -> Unit, onUse: (String
                             val operator = key !in listOf("0", "1", "2", "3", "4", "5", "6", "7", "8", "9", ".")
                             Surface(
                                 onClick = {
-                                    com.jiligulu.app.core.audio.UiSound.tap(soundContext)
+                                    com.jiligulu.app.core.audio.UiSound.calculator(soundContext)
                                     when (key) {
                                         "C" -> { expression = ""; showError = false }
                                         "⌫" -> { expression = expression.dropLast(1); showError = false }

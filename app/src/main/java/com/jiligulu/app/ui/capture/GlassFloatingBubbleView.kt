@@ -32,14 +32,13 @@ class GlassFloatingBubbleView @JvmOverloads constructor(
     defStyleAttr: Int = 0
 ) : ImageView(context, attrs, defStyleAttr) {
     private val glassBounds = RectF()
-    private val innerBounds = RectF()
+    private val rimBounds = RectF()
     private val glassPath = Path()
     private val topGlint = Path()
     private val lowerGlint = Path()
     private val glassPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val rimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
-    private val innerRimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
     private val glintPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeCap = Paint.Cap.ROUND
@@ -61,6 +60,7 @@ class GlassFloatingBubbleView @JvmOverloads constructor(
     private val backdropPaint=Paint(Paint.ANTI_ALIAS_FLAG)
     private var lens:GlassLensShader?=null
     private var backdrop:Bitmap?=null
+    private var usingGlobalBackdrop=false
     private var backdropX=0f
     private var backdropY=0f
     private val backdropRefreshTask=Runnable {refreshBackdrop()}
@@ -85,11 +85,10 @@ class GlassFloatingBubbleView @JvmOverloads constructor(
         side = min(w, h).toFloat()
         val cx = w / 2f
         val cy = h / 2f
-        val half = side * .46f
-        radius = side * .24f
-        glassBounds.set(cx - half, cy - half, cx + half, cy + half)
-        innerBounds.set(glassBounds)
-        innerBounds.inset(side * .018f, side * .018f)
+        // Platform background blur occupies the complete decor bounds. Its rounded corners,
+        // our fill and the optional AGSL lens must share these exact bounds, not separate insets.
+        radius = GlassBubbleGeometry.cornerRadius(w, h)
+        glassBounds.set(0f, 0f, w.toFloat(), h.toFloat())
         glassPath.reset()
         glassPath.addRoundRect(glassBounds, radius, radius, Path.Direction.CW)
 
@@ -101,23 +100,23 @@ class GlassFloatingBubbleView @JvmOverloads constructor(
         glowPaint.shader = RadialGradient(cx - side * .19f, cy - side * .22f, side * .63f,
             intArrayOf(Color.argb(46, 255, 255, 255), Color.TRANSPARENT),
             floatArrayOf(0f, 1f), Shader.TileMode.CLAMP)
-        rimPaint.strokeWidth = (side * .018f).coerceAtLeast(1.2f)
+        rimPaint.strokeWidth = (side * .007f).coerceAtLeast(.8f)
+        rimBounds.set(glassBounds)
+        rimBounds.inset(rimPaint.strokeWidth / 2f, rimPaint.strokeWidth / 2f)
         rimPaint.shader = SweepGradient(cx, cy,
-            intArrayOf(Color.argb(232, 255, 255, 255), Color.argb(74, 59, 46, 93),
-                Color.argb(180, 248, 241, 255), Color.argb(250, 255, 255, 255),
-                Color.argb(112, 179, 189, 234), Color.argb(232, 255, 255, 255)),
+            intArrayOf(Color.argb(170, 255, 255, 255), Color.argb(54, 59, 46, 93),
+                Color.argb(94, 248, 241, 255), Color.argb(185, 255, 255, 255),
+                Color.argb(76, 179, 189, 234), Color.argb(170, 255, 255, 255)),
             floatArrayOf(0f, .25f, .5f, .68f, .84f, 1f))
         lightMatrix.setRotate((lightX-.5f)*110f+(lightY-.5f)*45f,cx,cy)
         rimPaint.shader?.setLocalMatrix(lightMatrix)
-        innerRimPaint.strokeWidth = (side * .006f).coerceAtLeast(.6f)
-        innerRimPaint.color = Color.argb(34, 77, 65, 110)
 
         topGlint.reset()
         topGlint.moveTo(glassBounds.left + side * .11f, glassBounds.top + side * .064f)
         topGlint.cubicTo(glassBounds.left + side * .24f, glassBounds.top + side * .014f,
             cx + side * .11f, glassBounds.top + side * .012f,
             glassBounds.right - side * .14f, glassBounds.top + side * .048f)
-        glintPaint.strokeWidth = (side * .015f).coerceAtLeast(1f)
+        glintPaint.strokeWidth = (side * .006f).coerceAtLeast(.7f)
         glintPaint.shader = LinearGradient(glassBounds.left, 0f, glassBounds.right, 0f,
             intArrayOf(Color.argb(215, 255, 255, 255), Color.argb(26, 255, 255, 255)),
             floatArrayOf(0f, 1f), Shader.TileMode.CLAMP)
@@ -125,7 +124,7 @@ class GlassFloatingBubbleView @JvmOverloads constructor(
         lowerGlint.moveTo(glassBounds.right - side * .047f, glassBounds.bottom - side * .22f)
         lowerGlint.quadTo(glassBounds.right - side * .04f, glassBounds.bottom - side * .045f,
             glassBounds.right - side * .21f, glassBounds.bottom - side * .04f)
-        lowerGlintPaint.strokeWidth = (side * .012f).coerceAtLeast(.8f)
+        lowerGlintPaint.strokeWidth = (side * .006f).coerceAtLeast(.7f)
         lowerGlintPaint.color = Color.argb(114, 248, 240, 255)
 
         // A tiny software bitmap makes a soft rounded shadow work on every supported
@@ -145,23 +144,26 @@ class GlassFloatingBubbleView @JvmOverloads constructor(
         val cx = width / 2f
         val cy = height / 2f
         val body = canvas.save()
-        canvas.scale(1f - pressure * .07f,1f + pressure * .018f,cx,cy)
-        canvas.translate(0f, pressure * side * .011f)
+        // The platform blur outline cannot deform with this View. Keep one stable shell
+        // and let the sprite flex inside it, avoiding a halo during a press or release.
         softShadow?.let { canvas.drawBitmap(it, 0f, 0f, bitmapPaint) }
-        if(!AppGlassBackdrop.available()) {backdrop=null;backdropPaint.shader=null}
-        if(backdrop!=null && backdropPaint.shader!=null) canvas.drawPath(glassPath,backdropPaint)
+        if (if(usingGlobalBackdrop) !GlobalGlassBackdrop.available() else !AppGlassBackdrop.available()) {
+            backdrop=null;backdropPaint.shader=null
+        }
+        if(backdropPaint.shader!=null) canvas.drawPath(glassPath,backdropPaint)
         canvas.drawRoundRect(glassBounds, radius, radius, glassPaint)
         canvas.drawPath(glassPath, glowPaint)
-        canvas.drawRoundRect(innerBounds, radius - side * .018f, radius - side * .018f, innerRimPaint)
 
         val artwork = canvas.save()
         canvas.clipPath(glassPath)
         // Keep the eyes, sprout and purple silhouette recognizable on light/dark surfaces.
-        canvas.scale(.86f, .86f, cx, cy)
+        canvas.scale(.88f - pressure * .018f, .88f + pressure * .014f, cx, cy)
+        canvas.translate(0f, pressure * side * .009f)
         super.onDraw(canvas)
         canvas.restoreToCount(artwork)
 
-        canvas.drawRoundRect(glassBounds, radius, radius, rimPaint)
+        val rimRadius = (radius - rimPaint.strokeWidth / 2f).coerceAtLeast(0f)
+        canvas.drawRoundRect(rimBounds, rimRadius, rimRadius, rimPaint)
         val reflections = canvas.save()
         canvas.clipPath(glassPath)
         canvas.translate(pressure * side * .012f, -pressure * side * .014f)
@@ -186,13 +188,22 @@ class GlassFloatingBubbleView @JvmOverloads constructor(
     /** Sample after WindowManager has applied the newest position, including the final UP. */
     fun refreshBackdropAfterMove() {
         if(android.os.Build.VERSION.SDK_INT<33 || !isAttachedToWindow) return
+        GlobalGlassBackdrop.refreshTarget()
         removeCallbacks(backdropRefreshTask)
         postOnAnimation(backdropRefreshTask)
     }
 
     fun refreshBackdrop() {
         if(android.os.Build.VERSION.SDK_INT<33) return
+        if (!AppGlassBackdrop.available()) {
+            backdrop=null;usingGlobalBackdrop=true
+            backdropPaint.shader=runCatching { GlobalGlassBackdrop.shaderFor(this,lightX,lightY) }.getOrNull()
+            invalidate()
+            return
+        }
+        usingGlobalBackdrop=false
         AppGlassBackdrop.copyBehind(this) {bitmap,x,y ->
+            if(!AppGlassBackdrop.available()) {refreshBackdrop();return@copyBehind}
             backdrop=bitmap
             if(bitmap==null) backdropPaint.shader=null
             else runCatching {
@@ -205,13 +216,15 @@ class GlassFloatingBubbleView @JvmOverloads constructor(
         }
     }
 
-    fun clearBackdrop() {backdrop=null;backdropPaint.shader=null;invalidate()}
-    override fun onAttachedToWindow() {super.onAttachedToWindow();AppGlassBackdrop.watch(this);postDelayed(backdropRefreshTask,100)}
+    fun clearBackdrop() {backdrop=null;backdropPaint.shader=null;usingGlobalBackdrop=false;invalidate()}
+    internal fun clearGlobalBackdrop() {if(usingGlobalBackdrop) clearBackdrop()}
+    override fun onAttachedToWindow() {super.onAttachedToWindow();GlobalGlassBackdrop.watch(this);AppGlassBackdrop.watch(this);postDelayed(backdropRefreshTask,100)}
 
     /** Call on DOWN, and release on UP/CANCEL/configuration changes in the service. */
     fun setGlassPressed(pressed: Boolean) {
         if (glassPressed == pressed) return
         glassPressed = pressed
+        GlobalGlassBackdrop.interaction(pressed)
         super.setPressed(pressed)
         pressAnimator?.cancel()
         val target = if (pressed) 1f else 0f
@@ -237,9 +250,17 @@ class GlassFloatingBubbleView @JvmOverloads constructor(
         else if(isAttachedToWindow) refreshBackdropAfterMove()
     }
 
+    override fun onWindowVisibilityChanged(visibility: Int) {
+        super.onWindowVisibilityChanged(visibility)
+        GlobalGlassBackdrop.refreshTarget()
+        ScreenCaptureService.refreshGlassEnvironment()
+        if (visibility != VISIBLE) clearGlobalBackdrop()
+    }
+
     override fun onDetachedFromWindow() {
         removeCallbacks(backdropRefreshTask)
         AppGlassBackdrop.unwatch(this)
+        GlobalGlassBackdrop.unwatch(this)
         resetPress()
         backdrop=null;backdropPaint.shader=null;lens=null
         super.onDetachedFromWindow()

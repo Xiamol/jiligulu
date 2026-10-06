@@ -112,6 +112,7 @@ fun SettingsScreen(
     var settingsTab by rememberSaveable { mutableStateOf(if (checkUpdatesOnOpen) "关于" else "日常") }
     val context = LocalContext.current
     var feedbackSound by remember(context) { mutableStateOf(UiSound.enabled(context)) }
+    var showSoundSamples by remember { mutableStateOf(false) }
     LaunchedEffect(context) { UiSound.warmup(context) }
     val notificationPermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -247,10 +248,10 @@ fun SettingsScreen(
                         LittleWorldSkinSettings(enabled = editable)
                         Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
                             Text("按键与棋子音效",Modifier.weight(1f),style=MaterialTheme.typography.bodyMedium)
-                            TextButton(onClick=uiTap {},enabled=feedbackSound) {Text("试听",style=MaterialTheme.typography.labelSmall)}
+                            TextButton(onClick={showSoundSamples=true},enabled=feedbackSound) {Text("试听",style=MaterialTheme.typography.labelSmall)}
                             Switch(checked=feedbackSound,onCheckedChange={enabled->
                                 feedbackSound=enabled;UiSound.setEnabled(context,enabled)
-                                if(enabled) UiSound.tap(context)
+                                if(enabled) UiSound.toggle(context)
                             })
                         }
                     }
@@ -273,7 +274,7 @@ fun SettingsScreen(
                                 checked = state.waterEnabled,
                                 enabled = editable,
                                 onCheckedChange = { enabled ->
-                                    UiSound.tap(context)
+                                    UiSound.toggle(context)
                                     vm.setWaterEnabled(enabled)
                                     if (enabled && Build.VERSION.SDK_INT >= 33 &&
                                         context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
@@ -393,6 +394,22 @@ fun SettingsScreen(
         }
     }
 
+    if (showSoundSamples) GuluDialog("听听小声音", { showSoundSamples=false }, compact=true,
+        dense=true, compactWidth=260.dp) {
+        val samples = listOf("开信" to com.jiligulu.app.core.audio.UiCue.PAPER,
+            "翻页" to com.jiligulu.app.core.audio.UiCue.NAVIGATE,
+            "开关" to com.jiligulu.app.core.audio.UiCue.TOGGLE,
+            "棋石" to com.jiligulu.app.core.audio.UiCue.STONE_MOVE,
+            "木棋" to com.jiligulu.app.core.audio.UiCue.WOOD_MOVE,
+            "收好" to com.jiligulu.app.core.audio.UiCue.CONFIRM)
+        samples.chunked(3).forEach { row ->
+            Row(Modifier.fillMaxWidth()) {
+                row.forEach { (label,cue) ->
+                    TextButton(onClick={UiSound.play(context,cue)},modifier=Modifier.weight(1f)) { Text(label) }
+                }
+            }
+        }
+    }
     if (showHandbook) HandbookDialog(onDismiss = { showHandbook = false })
     if (showFontLicense) {
         GuluDialog(

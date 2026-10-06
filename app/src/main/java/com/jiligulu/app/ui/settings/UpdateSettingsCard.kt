@@ -63,7 +63,7 @@ fun UpdateSettingsCard(checkOnOpen: Boolean = false) {
             Text("进入应用时自动检查", modifier = Modifier.padding(top = 14.dp))
             Switch(checked = automatic, onCheckedChange = { value ->
                 scope.launch {
-                    try { app.container.userPrefs.setAutoCheckUpdates(value) }
+                    try { app.container.userPrefs.setAutoCheckUpdates(value); com.jiligulu.app.core.audio.UiSound.toggle(app) }
                     catch (cancelled: CancellationException) { throw cancelled }
                     catch (_: Exception) { error = "设置还没保存成功，请重试。" }
                 }
@@ -86,7 +86,7 @@ fun UpdateSettingsCard(checkOnOpen: Boolean = false) {
         }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
         Row {
-            TextButton(onClick = { scope.launch { app.container.updates.check() } },
+            TextButton(onClick = com.jiligulu.app.ui.components.uiTap { scope.launch { app.container.updates.check() } },
                 enabled = !state.checking) { Text("检查更新") }
         }
         state.available?.let { release ->

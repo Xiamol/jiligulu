@@ -16,6 +16,36 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [28], manifest = Config.NONE, application = Application::class)
 class LocalGameArchiveTest {
+    @Test fun humanColorsRoundTripAndLegacyFilesKeepTheOriginalFirstPlayer() {
+        val white=go(2,LocalGameMode.CPU).copy(humanPlayer=2)
+        val black=chess(2,LocalGameMode.CPU).copy(humanSide=XiangqiSide.BLACK)
+        assertEquals(white.copy(paused=true),LocalGameCodec.gomoku(LocalGameCodec.encode(white),LocalGameMode.CPU))
+        assertEquals(black.copy(paused=true),LocalGameCodec.xiangqi(LocalGameCodec.encode(black),LocalGameMode.CPU))
+        val oldGo=JSONObject(LocalGameCodec.encode(white)).apply{remove("humanPlayer")}
+        val oldXq=JSONObject(LocalGameCodec.encode(black)).apply{remove("humanSide")}
+        assertEquals(1,LocalGameCodec.gomoku(oldGo.toString(),LocalGameMode.CPU).humanPlayer)
+        assertEquals(XiangqiSide.RED,LocalGameCodec.xiangqi(oldXq.toString(),LocalGameMode.CPU).humanSide)
+    }
+    @Test fun alreadyAssignedBlackIsPreservedBeforeTheThinkingTimeDialogHasBeenConfirmed() {
+        val assigned=LocalXiangqiSave(LocalGameMode.CPU,XiangqiEngine.newGame(),started=false,
+            humanSide=XiangqiSide.BLACK,colorAssigned=true)
+        val restored=LocalGameCodec.xiangqi(LocalGameCodec.encode(assigned),LocalGameMode.CPU)
+        assertFalse(restored.started);assertTrue(restored.colorAssigned);assertEquals(XiangqiSide.BLACK,restored.humanSide)
+        val notPicked=assigned.copy(humanSide=XiangqiSide.RED,colorAssigned=false)
+        assertFalse(LocalGameCodec.xiangqi(LocalGameCodec.encode(notPicked),LocalGameMode.CPU).colorAssigned)
+    }
+    @Test fun corruptHumanColorDoesNotDiscardAnotherMode() = runBlocking {
+        val prefs=ArchivePreferences();val worker=Executors.newSingleThreadExecutor()
+        try {
+            val archive=LocalGameArchive(prefs,worker)
+            archive.saveGomoku(go(2,LocalGameMode.CPU).copy(humanPlayer=2))
+            archive.saveGomoku(go(3,LocalGameMode.HOTSEAT));assertTrue(archive.flush())
+            val corrupt=JSONObject(prefs.getString(LocalGameArchive.gomokuKey(LocalGameMode.CPU),null)!!).put("humanPlayer",7)
+            prefs.edit().putString(LocalGameArchive.gomokuKey(LocalGameMode.CPU),corrupt.toString()).commit()
+            assertNull(archive.loadGomoku(LocalGameMode.CPU))
+            assertEquals(go(3,LocalGameMode.HOTSEAT).copy(paused=true),archive.loadGomoku(LocalGameMode.HOTSEAT))
+        } finally{worker.shutdownNow()}
+    }
     @Test fun fiveIndependentSlotsRestorePausedWithExactClockAndPositions() = runBlocking {
         val prefs = ArchivePreferences()
         val worker = Executors.newSingleThreadExecutor()

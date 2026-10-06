@@ -14,13 +14,17 @@ import kotlinx.coroutines.flow.asStateFlow
 
 enum class NearbyGameKind(val tag: String, val port: Int) { XIANGQI("xq", 49761), GOMOKU("go", 49762) }
 data class NearbyGameRoom(val id: String, val name: String, val address: String, val port: Int)
-data class NearbyRoomsState(val rooms: List<NearbyGameRoom> = emptyList(), val searching: Boolean = false, val error: String? = null)
+data class NearbyRoomsState(val rooms: List<NearbyGameRoom> = emptyList(), val searching: Boolean = false, val error: String? = null,
+    val localId:String="") {
+    val autoCandidate:NearbyGameRoom? get()=rooms.filter {it.id<localId && localId.isNotBlank()}.minByOrNull {it.id}
+}
 
 /** A short-lived foreground presence. No scans, multicast locks, or reconnect work survive stop(). */
 class NsdRoomDiscovery(context: Context, private val gameKind: NearbyGameKind, private val playerName: String) {
     private val manager = context.applicationContext.getSystemService(Context.NSD_SERVICE) as NsdManager
     private val main = Handler(Looper.getMainLooper())
-    private val selfId = UUID.randomUUID().toString().replace("-", "").take(12)
+    private var selfId = UUID.randomUUID().toString().replace("-", "").take(12)
+    val localId:String get()=mutable.value.localId
     private val mutable = MutableStateFlow(NearbyRoomsState())
     val state: StateFlow<NearbyRoomsState> = mutable.asStateFlow()
     private var generation = 0
@@ -35,12 +39,13 @@ class NsdRoomDiscovery(context: Context, private val gameKind: NearbyGameKind, p
     fun start() {
         if (discovery != null) return
         val token = ++generation
-        mutable.value = NearbyRoomsState(searching = true)
+        selfId=UUID.randomUUID().toString().replace("-", "").take(12)
+        mutable.value = NearbyRoomsState(searching = true,localId=selfId)
         val info = NsdServiceInfo().apply {
             serviceName = "Gulu-${gameKind.tag}-$selfId"
             serviceType = TYPE
             port = gameKind.port
-            setAttribute("version", "1"); setAttribute("kind", gameKind.tag); setAttribute("id", selfId)
+            setAttribute("version", "2"); setAttribute("kind", gameKind.tag); setAttribute("id", selfId)
             setAttribute("name", playerName.filter { !it.isISOControl() }.trim().take(16).ifEmpty { "阿噜的朋友" })
         }
         val registrationListener = object : NsdManager.RegistrationListener {
@@ -117,7 +122,7 @@ class NsdRoomDiscovery(context: Context, private val gameKind: NearbyGameKind, p
                     val address = addresses.firstOrNull { it is Inet4Address && it.isSiteLocalAddress &&
                         !it.isLoopbackAddress && !it.isAnyLocalAddress }
                     if (found.contains(service.serviceName) && id != null && id != selfId &&
-                        id.matches(Regex("[a-f0-9]{12}")) && attr("version") == "1" && attr("kind") == gameKind.tag &&
+                        id.matches(Regex("[a-f0-9]{12}")) && attr("version") == "2" && attr("kind") == gameKind.tag &&
                         serviceInfo.serviceName.matches(Regex("Gulu-${gameKind.tag}-$id(?: \\(\\d+\\))?")) &&
                         serviceInfo.port == gameKind.port && address is Inet4Address && address.isSiteLocalAddress &&
                         !address.isLoopbackAddress && !address.isAnyLocalAddress) {

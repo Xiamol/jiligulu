@@ -14,9 +14,10 @@ internal class GlassLensShader {
         uniform float2 size;
         uniform float2 offset;
         uniform float2 light;
+        uniform float cornerRadius;
         float box(float2 p) {
-            float radius=min(size.x,size.y)*.24;
-            float2 q=abs(p)-(size*.46-radius);
+            float radius=cornerRadius;
+            float2 q=abs(p)-(size*.5-radius);
             return length(max(q,float2(0)))+min(max(q.x,q.y),0.0)-radius;
         }
         half4 main(float2 xy) {
@@ -41,6 +42,7 @@ internal class GlassLensShader {
     fun bind(bitmap:Bitmap,x:Float,y:Float,w:Int,h:Int,lx:Float,ly:Float) {
         shader.setInputShader("backdrop",BitmapShader(bitmap,Shader.TileMode.CLAMP,Shader.TileMode.CLAMP))
         shader.setFloatUniform("size",w.toFloat(),h.toFloat())
+        shader.setFloatUniform("cornerRadius",GlassBubbleGeometry.cornerRadius(w,h))
         shader.setFloatUniform("offset",x,y)
         shader.setFloatUniform("light",-.7f+lx*.25f,-1f+ly*.25f)
     }

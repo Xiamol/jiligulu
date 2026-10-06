@@ -42,7 +42,8 @@ fun LedgerBillRow(
 ) {
     Column(modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface)) {
         Row(
-            Modifier.fillMaxWidth().clickable(onClickLabel = "查看和编辑账单", onClick = onClick).padding(14.dp),
+            Modifier.fillMaxWidth().clickable(onClickLabel = "查看和编辑账单",
+                onClick = uiTap(com.jiligulu.app.core.audio.UiCue.NAVIGATE, onClick)).padding(14.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             CategoryBadge(categoryName, icon, size = 42.dp, tint = GoldenAnglePalette.colorForHue(colorHue))

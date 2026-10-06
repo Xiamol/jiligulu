@@ -92,13 +92,13 @@ fun TimePickerDialog(
         },
         confirmButton = {
             TextButton(
-                onClick = { onConfirm(draftHour, draftMinute) },
+                onClick = uiTap(com.jiligulu.app.core.audio.UiCue.SELECT) { onConfirm(draftHour, draftMinute) },
                 enabled = ok,
                 modifier = Modifier.testTag("time-picker-confirm")
             ) { Text("确认") }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss, modifier = Modifier.testTag("time-picker-cancel")) {
+            TextButton(onClick = uiTap(com.jiligulu.app.core.audio.UiCue.NAVIGATE, onDismiss), modifier = Modifier.testTag("time-picker-cancel")) {
                 Text("取消")
             }
         }

@@ -24,7 +24,7 @@ internal fun ManualEntryDecoration(modifier: Modifier = Modifier, enabled: Boole
     val art by produceState(LittleWorldArtwork.cachedImage(R.drawable.manual_life_scrapbook_v1), resources) {
         value = withContext(Dispatchers.IO) { LittleWorldArtwork.image(resources, R.drawable.manual_life_scrapbook_v1) }
     }
-    Column(modifier.fillMaxWidth().clickable(enabled = enabled, onClickLabel = "夹一张生活照片", onClick = uiTap(onPhoto)),
+    Column(modifier.fillMaxWidth().clickable(enabled = enabled, onClickLabel = "夹一张生活照片", onClick = uiTap(com.jiligulu.app.core.audio.UiCue.PAPER, onPhoto)),
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
         Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
             art?.let { Image(it, null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit) }

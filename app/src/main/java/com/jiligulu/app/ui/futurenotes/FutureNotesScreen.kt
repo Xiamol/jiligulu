@@ -15,6 +15,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.platform.LocalConfiguration
 import com.jiligulu.app.ui.capture.DialogGlassBackdrop
 import com.jiligulu.app.core.audio.UiSound
+import com.jiligulu.app.core.audio.UiCue
 import androidx.compose.ui.draw.rotate
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -67,10 +68,10 @@ fun FutureNotesScreen(onBack: () -> Unit) {
     var error by remember { mutableStateOf<String?>(null) }
     var deleting by remember { mutableStateOf<FutureNote?>(null) }
     var busy by remember { mutableStateOf(false) }
-    fun write(block: suspend () -> Unit) {
+    fun write(successCue: UiCue? = UiCue.CONFIRM, block: suspend () -> Unit) {
         if (busy) return
         busy = true
-        scope.launch { try { block() }
+        scope.launch { try { block(); successCue?.let { UiSound.play(context, it) } }
             catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
             catch (e: Exception) { error = e.message ?: "还没保存好，请再试试" } finally { busy = false } }
     }
@@ -86,19 +87,19 @@ fun FutureNotesScreen(onBack: () -> Unit) {
     ImmersiveDestinationScene(ImmersiveDestination.FUTURE_POST, "未来邮局", onBack,
         listOf(
             DestinationObject("在路上", .14f, .25f, .40f, .30f,
-                labelX = .33f, labelY = .52f) { tab = 0; drawer = true },
+                labelX = .33f, labelY = .52f, soundCue = com.jiligulu.app.core.audio.UiCue.PAPER) { tab = 0; drawer = true },
             DestinationObject("收件箱", .70f, .21f, .28f, .23f,
-                labelX = .81f, labelY = .43f, tilt = 2f) { tab = 1; drawer = true },
+                labelX = .81f, labelY = .43f, tilt = 2f, soundCue = com.jiligulu.app.core.audio.UiCue.PAPER) { tab = 1; drawer = true },
             DestinationObject("旧信匣", .18f, .62f, .62f, .22f,
-                labelX = .43f, labelY = .78f, tilt = 2f) { tab = 2; drawer = true },
+                labelX = .43f, labelY = .78f, tilt = 2f, soundCue = com.jiligulu.app.core.audio.UiCue.PAPER) { tab = 2; drawer = true },
             DestinationObject("写一封信", .50f, .82f, .42f, .14f,
-                labelX = .72f, labelY = .92f) { editing = null; creating = true }
+                labelX = .72f, labelY = .92f, soundCue = com.jiligulu.app.core.audio.UiCue.PAPER) { editing = null; creating = true }
         ), Modifier.fillMaxSize().navigationBarsPadding(), hasMail = arrived > 0)
     if (drawer) DestinationDrawer(
         title = when(tab) { 0 -> "阿噜还在送信"; 1 -> "今天的收件箱"; else -> "收好的旧信笺" },
         subtitle = when(tab) { 0 -> "${rows.size} 封信，正走向未来的你。"; 1 -> "${rows.size} 封信，到了可以拆开的日子。"; else -> "${rows.size} 封信，藏着过去的心事。" },
         onDismiss = { drawer = false }, compact = true,
-        actions = { TextButton(onClick = uiTap { editing = null; creating = true }) { Text("写一封") } }
+        actions = { TextButton(onClick = uiTap(UiCue.PAPER) { editing = null; creating = true }) { Text("写一封") } }
     ) {
         if (rows.isEmpty()) item {
             Text(when(tab) {
@@ -110,11 +111,11 @@ fun FutureNotesScreen(onBack: () -> Unit) {
         items(rows, key = { it.id }) { n ->
             Box(Modifier.fillMaxWidth().rotate(if(n.id.hashCode() % 2 == 0) -.7f else .6f)) {
                 StickerPaperArtwork(Modifier.matchParentSize(), MaterialTheme.colorScheme.tertiaryContainer)
-                Column(Modifier.fillMaxWidth().clickable { UiSound.tap(context); opened = n }.padding(horizontal = 12.dp, vertical = 7.dp)) {
+                Column(Modifier.fillMaxWidth().clickable { UiSound.paper(context); opened = n }.padding(horizontal = 12.dp, vertical = 7.dp)) {
                     Row(Modifier.fillMaxWidth().height(32.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(n.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f))
-                        if (n.dueAt > now) IconButton(onClick = uiTap { editing = n; creating = true }, modifier = Modifier.size(28.dp)) {
+                        if (n.dueAt > now) IconButton(onClick = uiTap(UiCue.PAPER) { editing = n; creating = true }, modifier = Modifier.size(28.dp)) {
                             Icon(Icons.Outlined.EditNote, "修改信笺", Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
                         }
                         IconButton(onClick = uiTap { deleting = n }, modifier = Modifier.size(28.dp)) {
@@ -135,14 +136,14 @@ fun FutureNotesScreen(onBack: () -> Unit) {
     opened?.let { n -> PostPaperDialog(n.title, { opened = null }, height = 300.dp, busy = busy,
         confirmLabel = if (n.dueAt <= System.currentTimeMillis()) "收好信笺" else "等它到达",
         onConfirm = {
-            if (n.dueAt <= System.currentTimeMillis() && n.readAt == null) write {
+            if (n.dueAt <= System.currentTimeMillis() && n.readAt == null) write(successCue = null) {
                 repo.markNoteRead(n.id); FutureNoteReminder.cancel(context, n.id); opened = null
             } else opened = null
         }) {
         Text(n.body, style = MaterialTheme.typography.bodyMedium)
         Text(noteDate(n.dueAt), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     } }
-    deleting?.let { n -> GuluDialog("删除这张便签？",onDismiss={deleting=null},busy=busy,compact=true,compactWidth=260.dp,dense=true,dismissLabel="留着",confirmLabel="删除",onConfirm={write{
+    deleting?.let { n -> GuluDialog("删除这张便签？",onDismiss={deleting=null},busy=busy,compact=true,compactWidth=260.dp,dense=true,dismissLabel="留着",confirmLabel="删除",onConfirm={write(UiCue.REMOVE){
         repo.deleteFutureNote(n.id);FutureNoteReminder.cancel(context,n.id);deleting=null
     }}){Text("这张便签和它的提醒会一起移除。")} }
     error?.let { GuluDialog("这次还没完成",onDismiss={error=null},compact=true,compactWidth=260.dp,dense=true){Text(it)} }
@@ -185,7 +186,7 @@ private fun NoteEditor(original: FutureNote?, busy: Boolean, onDismiss: () -> Un
         }
         Row(Modifier.fillMaxWidth().height(32.dp), verticalAlignment = Alignment.CenterVertically) {
             Checkbox(notify, onCheckedChange = { enabled ->
-                UiSound.tap(context)
+                UiSound.toggle(context)
                 if (enabled && !FutureNoteReminder.hasPermission(context) && Build.VERSION.SDK_INT >= 33)
                     permission.launch(Manifest.permission.POST_NOTIFICATIONS) else notify = enabled
             }, enabled = !busy, modifier = Modifier.size(28.dp))
@@ -211,6 +212,7 @@ private fun NoteEditor(original: FutureNote?, busy: Boolean, onDismiss: () -> Un
 @Composable
 private fun PostPaperDialog(title: String, onDismiss: () -> Unit, height: androidx.compose.ui.unit.Dp,
     busy: Boolean = false, confirmLabel: String, dismissLabel: String? = null, confirmEnabled: Boolean = true,
+    confirmCue: UiCue = UiCue.PAPER,
     onConfirm: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
     Dialog(onDismissRequest = { if (!busy) onDismiss() }, properties = DialogProperties(usePlatformDefaultWidth = false,
         dismissOnBackPress = !busy, dismissOnClickOutside = !busy)) {
@@ -221,10 +223,10 @@ private fun PostPaperDialog(title: String, onDismiss: () -> Unit, height: androi
                 maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.height(30.dp))
             SpringScrollColumn(Modifier.fillMaxWidth().weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp), content = content)
             Row(Modifier.fillMaxWidth().height(42.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (dismissLabel != null) TextButton(onClick = uiTap(onDismiss), enabled = !busy, modifier = Modifier.weight(1f)) {
+                if (dismissLabel != null) TextButton(onClick = uiTap(UiCue.PAPER, onDismiss), enabled = !busy, modifier = Modifier.weight(1f)) {
                     Text(dismissLabel, style = MaterialTheme.typography.labelMedium)
                 } else Spacer(Modifier.weight(1f))
-                TextButton(onClick = uiTap(onConfirm), enabled = !busy && confirmEnabled, modifier = Modifier.weight(1f)) {
+                TextButton(onClick = uiTap(confirmCue, onConfirm), enabled = !busy && confirmEnabled, modifier = Modifier.weight(1f)) {
                     if (busy) CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 1.5.dp)
                     else Text(confirmLabel, style = MaterialTheme.typography.labelMedium, maxLines = 1)
                 }
@@ -242,6 +244,7 @@ private fun PostTimeDialog(due: Long, onDismiss: () -> Unit, onSave: (Long) -> U
     val h = hour.toIntOrNull()?.takeIf { it in 0..23 }
     val m = minute.toIntOrNull()?.takeIf { it in 0..59 }
     PostPaperDialog("几点送到？", onDismiss, 180.dp, confirmLabel = "确定", dismissLabel = "取消", confirmEnabled = h != null && m != null,
+        confirmCue = UiCue.SELECT,
         onConfirm = { if (h != null && m != null) onSave(old.toLocalDate().atTime(h, m).atZone(zone).toInstant().toEpochMilli()) }) {
         Row(Modifier.fillMaxWidth().height(46.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
             listOf(true, false).forEachIndexed { i, isHour ->

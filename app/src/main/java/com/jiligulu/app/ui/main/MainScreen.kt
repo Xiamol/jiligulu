@@ -230,6 +230,7 @@ fun MainScreen(
                         1 -> LittleWorldScreen(onBack = { navigate(0) }, onOpenWishBook = onOpenWishBook,
                             onOpenFutureNotes = onOpenFutureNotes, onOpenMemories = onOpenMemories,
                             onOpenTimeMachine=onOpenTimeMachine,onOpenSecretBase=onOpenSecretBase,
+                            onSecretEntrance={ secretEntrance=it },
                             onOpenSettings=onOpenSettings,
                             onRecordAmount = onRecordAmount, embedded = true, active = selectedTab == 1,
                             onModalChanged = { worldModalOpen = it },
@@ -277,7 +278,7 @@ private fun MainPageHeader(app: JiliguluApp, active: Boolean, onOpenSettings: ()
                 color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.weight(1f).combinedClickable(onClick = {}, onLongClick = onOpenSecretBase))
             MailboxHeaderButton(app.container.announcements,tagged=active)
-            IconButton(onClick = com.jiligulu.app.ui.components.uiTap(onOpenSettings)) {
+            IconButton(onClick = com.jiligulu.app.ui.components.uiTap(com.jiligulu.app.core.audio.UiCue.NAVIGATE, onOpenSettings)) {
                 Icon(Icons.Outlined.Settings, contentDescription = "设置",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }

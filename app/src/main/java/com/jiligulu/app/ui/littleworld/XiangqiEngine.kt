@@ -63,8 +63,6 @@ object XiangqiEngine {
         GridCell(-2, -1), GridCell(-2, 1), GridCell(2, -1), GridCell(2, 1),
         GridCell(-1, -2), GridCell(1, -2), GridCell(-1, 2), GridCell(1, 2),
     )
-    private val values = intArrayOf(0, 100_000, 200, 200, 430, 900, 450, 100)
-    private const val WIN_SCORE = 1_000_000
 
     fun newGame(): XiangqiState = XiangqiState()
 
@@ -73,6 +71,9 @@ object XiangqiEngine {
             generalCell(state.board, state.turnSide) == null || from != null && !inside(from)
         ) return emptyList()
 
+        // One scratch board per generated list, rather than copying 90 cells for every candidate.
+        // The immutable caller's position is never exposed to make/unmake operations.
+        val scratch = state.board.toMutableList()
         return buildList {
             for (index in state.board.indices) {
                 if (state.board[index] * state.turnSide.sign <= 0) continue
@@ -80,7 +81,7 @@ object XiangqiEngine {
                 if (from != null && origin != from) continue
                 for (target in pseudoTargets(state.board, origin)) {
                     val move = XiangqiMove(origin, target)
-                    if (!inCheck(movedBoard(state.board, move), state.turnSide)) add(move)
+                    if (isSafeOnScratch(scratch, move, state.turnSide)) add(move)
                 }
             }
         }
@@ -89,7 +90,7 @@ object XiangqiEngine {
     /** Illegal and terminal moves return the original state without changing any field. */
     fun play(state: XiangqiState, move: XiangqiMove): XiangqiState {
         if (move !in legalMoves(state, move.from)) return state
-        val next = applyLegalMove(state, move)
+        val next = applyGeneratedMove(state, move)
         return if (next.outcome == XiangqiOutcome.PLAYING && !hasLegalMove(next)) {
             next.copy(outcome = victory(state.turnSide))
         } else next
@@ -97,40 +98,15 @@ object XiangqiEngine {
 
     fun isInCheck(state: XiangqiState, side: XiangqiSide): Boolean = inCheck(state.board, side)
 
-    /** Deterministic two-ply opponent: take a win, then prefer the best worst-case reply. */
-    fun chooseCpuMove(state: XiangqiState): XiangqiMove? {
-        val moves = legalMoves(state)
-        if (moves.isEmpty()) return null
-        val side = state.turnSide
-        var bestMove: XiangqiMove? = null
-        var bestScore = Int.MIN_VALUE
-        for (move in moves) {
-            val next = applyLegalMove(state, move)
-            val replies = legalMoves(next)
-            // Stalemate is a loss in Xiangqi, just like a captured or checkmated general.
-            if (next.outcome == victory(side) || replies.isEmpty()) return move
+    /** Offline CPU for either side. Run on Dispatchers.Default and pass the job's cancellation check. */
+    fun chooseCpuMove(
+        state: XiangqiState,
+        timeBudgetMillis: Long = 700,
+        shouldCancel: () -> Boolean = { false },
+    ): XiangqiMove? = XiangqiStrongMoveHelper.chooseMove(state, timeBudgetMillis, shouldCancel)
 
-            var worstReply = Int.MAX_VALUE
-            for (reply in replies) {
-                val afterReply = applyLegalMove(next, reply)
-                val score = when {
-                    afterReply.outcome == victory(side.opponent) || !hasLegalMove(afterReply) -> -WIN_SCORE
-                    else -> evaluate(afterReply.board, side)
-                }
-                if (score < worstReply) worstReply = score
-            }
-            val captured = abs(state.pieceAt(move.to.x, move.to.y))
-            val score = worstReply + values[captured] / 16 +
-                if (inCheck(next.board, side.opponent)) 12 else 0
-            if (score > bestScore) {
-                bestScore = score
-                bestMove = move
-            }
-        }
-        return bestMove
-    }
-
-    private fun applyLegalMove(state: XiangqiState, move: XiangqiMove): XiangqiState {
+    /** Search-only fast path: move MUST come from legalMoves(state). Child search detects no-move losses. */
+    internal fun applyGeneratedMove(state: XiangqiState, move: XiangqiMove): XiangqiState {
         val capturedGeneral = abs(state.pieceAt(move.to.x, move.to.y)) == GENERAL
         return state.copy(
             board = movedBoard(state.board, move),
@@ -148,14 +124,37 @@ object XiangqiEngine {
 
     private fun hasLegalMove(state: XiangqiState): Boolean {
         if (state.outcome != XiangqiOutcome.PLAYING || generalCell(state.board, state.turnSide) == null) return false
+        val scratch = state.board.toMutableList()
         for (index in state.board.indices) {
             if (state.board[index] * state.turnSide.sign <= 0) continue
             val from = GridCell(index % 9, index / 9)
             for (to in pseudoTargets(state.board, from)) {
-                if (!inCheck(movedBoard(state.board, XiangqiMove(from, to)), state.turnSide)) return true
+                if (isSafeOnScratch(scratch, XiangqiMove(from, to), state.turnSide)) return true
             }
         }
         return false
+    }
+
+    private fun isSafeOnScratch(board: MutableList<Int>, move: XiangqiMove, side: XiangqiSide): Boolean {
+        val from = move.from.y * 9 + move.from.x
+        val to = move.to.y * 9 + move.to.x
+        val moving = board[from]
+        val captured = board[to]
+        board[to] = moving
+        board[from] = 0
+        val safe = !inCheck(board, side)
+        board[from] = moving
+        board[to] = captured
+        return safe
+    }
+
+    internal fun checkingPieces(state: XiangqiState, checkedSide: XiangqiSide): List<GridCell> {
+        val general = generalCell(state.board, checkedSide) ?: return emptyList()
+        return state.board.indices.mapNotNull { index ->
+            val piece = state.board[index]
+            val cell = GridCell(index % 9, index / 9)
+            cell.takeIf { piece * checkedSide.sign < 0 && attacks(state.board, cell, general, piece) }
+        }
     }
 
     private fun pseudoTargets(board: List<Int>, from: GridCell): List<GridCell> {
@@ -276,28 +275,6 @@ object XiangqiEngine {
             y += dy
         }
         return count
-    }
-
-    private fun evaluate(board: List<Int>, side: XiangqiSide): Int {
-        var score = 0
-        for (index in board.indices) {
-            val piece = board[index]
-            if (piece == 0) continue
-            val owner = if (piece > 0) XiangqiSide.RED else XiangqiSide.BLACK
-            val type = abs(piece)
-            val x = index % 9
-            val y = index / 9
-            val positionValue = when (type) {
-                PAWN -> (if (ownRiverSide(y, owner)) 0 else 60) +
-                    (if (owner == XiangqiSide.RED) 9 - y else y) * 7
-                HORSE, CANNON -> (4 - abs(x - 4)) * 5
-                else -> 0
-            }
-            score += (values[type] + positionValue) * if (owner == side) 1 else -1
-        }
-        if (inCheck(board, side)) score -= 35
-        if (inCheck(board, side.opponent)) score += 35
-        return score
     }
 
     private fun generalCell(board: List<Int>, side: XiangqiSide): GridCell? {
