@@ -3,39 +3,35 @@ package com.jiligulu.app.ui.calculator
 import android.os.SystemClock
 import android.util.Log
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.indication
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.PressInteraction
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.Button
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.SideEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.*
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.onLongClick
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
@@ -47,249 +43,282 @@ import androidx.compose.ui.window.DialogWindowProvider
 import com.jiligulu.app.core.audio.UiSound
 import com.jiligulu.app.ui.components.uiTap
 import com.jiligulu.app.ui.theme.GuluBrandFont
-import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-/**
- * 轻量时序探针：只记「输入 → 画面更新 → 播放请求」三个时刻，用于确认连按卡顿的真正瓶颈。
- *
- * 默认关闭（release 与日常使用都不写日志）；需要排查时把 [enabled] 打开即可，
- * 避免"先优化再测量"这种本末倒置的做法。
- */
+/** Optional diagnostics: input, state assignment, evaluation, sound request and actual draw. */
 internal object CalculatorTrace {
     const val TAG = "CalcTrace"
     var enabled: Boolean = false
-
     fun mark(stage: String) {
-        if (!enabled) return
-        Log.d(TAG, "$stage @ ${SystemClock.uptimeMillis()}")
+        if (enabled) Log.d(TAG, "$stage @ ${SystemClock.uptimeMillis()}")
     }
 }
 
-/** 长按删除：每 [REPEAT_STEP_MS] 删一位，持续到 [CLEAR_HOLD_MS] 就整体清空。 */
 private const val REPEAT_STEP_MS = 70L
+private const val DELETE_REPEAT_START_MS = 200L
 private const val CLEAR_HOLD_MS = 450L
-
-/** 同一个手势在极短时间内重复回调时，只认第一次。 */
-private const val DEBOUNCE_MS = 24L
-
 private val KEYS = listOf(
     listOf("C", "(", ")", "⌫"), listOf("7", "8", "9", "÷"),
     listOf("4", "5", "6", "×"), listOf("1", "2", "3", "−"),
     listOf("0", ".", "=", "+")
 )
+private const val OPERATORS = "C()⌫÷×−+="
 
-private const val OPERATORS = "()⌫÷×−+="
+/** Owned by one pointer press; canceling its caller stops every pending repeat/clear. */
+internal suspend fun repeatCalculatorDelete(
+    repeatStartMillis: Long, onRepeat: () -> Unit, onClear: () -> Unit
+) {
+    val start = repeatStartMillis.coerceIn(0, CLEAR_HOLD_MS)
+    delay(start)
+    if (start == CLEAR_HOLD_MS) { onClear(); return }
+    onRepeat()
+    var remaining = CLEAR_HOLD_MS - start
+    while (remaining > 0) {
+        val wait = minOf(REPEAT_STEP_MS, remaining)
+        delay(wait)
+        remaining -= wait
+        if (remaining == 0L) onClear() else onRepeat()
+    }
+}
 
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
 fun CalculatorDialog(initial: String = "", onDismiss: () -> Unit, onUse: (String) -> Unit) {
     val soundContext = LocalContext.current.applicationContext
-    val scope = rememberCoroutineScope()
+    val expressionFocus = remember { FocusRequester() }
+    // This belongs to this dialog, never to an old IME flag from the previous screen.
+    var keyboardMode by remember { mutableStateOf(false) }
     var expression by rememberSaveable { mutableStateOf(initial.take(160)) }
     var showError by rememberSaveable { mutableStateOf(false) }
-
     val result = remember(expression) {
         val started = SystemClock.uptimeMillis()
-        DecimalCalculator.evaluate(expression).also { CalculatorTrace.mark("evaluate ${SystemClock.uptimeMillis() - started}ms") }
+        DecimalCalculator.evaluate(expression).also {
+            CalculatorTrace.mark("evaluate ${SystemClock.uptimeMillis() - started}ms")
+        }
     }
     val amount = result.amountText
     val visibleError = result.error?.takeIf { showError ||
         (it != "继续输入，阿噜帮你算～" && it != "再补上一个右括号就好啦") }
-
-    // 同一手势的重复回调在这里收敛：既不吞掉真实的连续输入，也不让一次点击响两遍。
-    var lastPressAt by remember { mutableStateOf(0L) }
-    fun press(key: String) {
-        val now = SystemClock.uptimeMillis()
-        if (now - lastPressAt < DEBOUNCE_MS) return
-        lastPressAt = now
-        CalculatorTrace.mark("press $key")
+    fun feedback(key: String) {
+        CalculatorTrace.mark("state updated $key")
+        CalculatorTrace.mark("sound requested")
         UiSound.calculator(soundContext)
+    }
+    fun press(key: String) {
+        CalculatorTrace.mark("press $key")
         when (key) {
             "C" -> { expression = ""; showError = false }
             "=" -> {
-                if (result.value != null) {
-                    // Keep the evaluated decimal, not its shorter display: a
-                    // display rounding near half a cent must not change money.
-                    val exact = result.value.stripTrailingZeros().toPlainString()
+                // Read current state, including input accepted before the next composition.
+                val current = DecimalCalculator.evaluate(expression)
+                if (current.value != null) {
+                    val exact = current.value.stripTrailingZeros().toPlainString()
                     if (exact.length <= 160) expression = exact
                 } else showError = true
             }
             else -> if (expression.length < 160) { expression += key; showError = false }
         }
-        CalculatorTrace.mark("state updated")
+        feedback(key)
     }
-
     fun deleteOne() {
-        if (expression.isNotEmpty()) { expression = expression.dropLast(1); showError = false }
+        CalculatorTrace.mark("press backspace")
+        expression = expression.dropLast(1)
+        showError = false
+        feedback("backspace")
     }
-
+    // Stable event bridges let expression changes update callbacks without changing the keypad's props.
+    val pressState = rememberUpdatedState<(String) -> Unit>(::press)
+    val deleteState = rememberUpdatedState<() -> Unit>(::deleteOne)
+    val clearState = rememberUpdatedState<() -> Unit>({ press("C") })
+    val pressKey = remember { { key: String -> pressState.value(key) } }
+    val deleteKey = remember { { deleteState.value() } }
+    val clearKey = remember { { clearState.value() } }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        // Dialog owns a different text-input/focus service from the underlying Activity.
+        val keyboard = LocalSoftwareKeyboardController.current
+        val focusManager = LocalFocusManager.current
+        LaunchedEffect(keyboardMode) {
+            if (keyboardMode) { expressionFocus.requestFocus(); keyboard?.show() }
+            else { focusManager.clearFocus(force = true); keyboard?.hide() }
+        }
         com.jiligulu.app.ui.capture.DialogGlassBackdrop()
         val dialogWindow = (LocalView.current.parent as? DialogWindowProvider)?.window
-        SideEffect { dialogWindow?.setGravity(android.view.Gravity.CENTER) }
-        Surface(
-            Modifier.padding(horizontal = 12.dp, vertical = 16.dp).widthIn(max = 284.dp).fillMaxWidth(),
-            shape = RoundedCornerShape(24.dp),
-            color = MaterialTheme.colorScheme.surface,
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = .14f))
-        ) {
-            // 固定布局：不再用弹簧滚动容器。算盘是单手工具，滚动会让"跟着手点"变得不确定，
-            // 高度直接按屏幕可用比例定死，键盘区吃掉剩余空间（见 [CalculatorKeypad]）。
-            Column(
-                Modifier
-                    .heightIn(max = (LocalConfiguration.current.screenHeightDp * .66f).dp)
-                    .padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+        SideEffect {
+            if (dialogWindow?.attributes?.gravity != android.view.Gravity.CENTER) {
+                dialogWindow?.setGravity(android.view.Gravity.CENTER)
+            }
+        }
+        BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+            // Use the dialog's real available height, including landscape, split-screen and IME resize.
+            val available = (maxHeight - 24.dp).coerceAtLeast(0.dp)
+            val preferred = (LocalConfiguration.current.screenHeightDp * .66f).dp.coerceIn(460.dp, 492.dp)
+            val height = minOf(available, if (keyboardMode) 144.dp else preferred)
+            val compact = height < 440.dp
+            val tiny = height < 320.dp
+            val inset = if (tiny) 6.dp else if (compact) 8.dp else 10.dp
+            val gap = if (tiny) 3.dp else if (compact) 4.dp else 6.dp
+            Surface(
+                Modifier.padding(horizontal = 12.dp, vertical = 12.dp).widthIn(max = 284.dp)
+                    .fillMaxWidth().height(height).testTag("calculator-panel"),
+                shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surface,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = .14f))
             ) {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text("阿噜小算盘 ✿", fontFamily = GuluBrandFont, fontWeight = FontWeight.Normal,
-                        style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f),
-                        color = MaterialTheme.colorScheme.primary)
-                    TextButton(onClick = uiTap(onDismiss)) { Text("收起") }
-                }
-                // 表达式仍可用系统键盘直接输入：算盘键只是更快，不是唯一入口。
-                OutlinedTextField(
-                    value = expression,
-                    onValueChange = { value ->
-                        if (value.length <= 160 && value.all { it.isDigit() || it in ".+-−×÷*/()（） " }) {
-                            expression = value; showError = false
+                CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides if (compact) 0.dp else 48.dp) {
+                Column(Modifier.fillMaxSize().padding(inset), verticalArrangement = Arrangement.spacedBy(gap)) {
+                    Row(Modifier.fillMaxWidth().height(if (tiny) 24.dp else if (compact) 28.dp else 36.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Text("阿噜小算盘 ✿", fontFamily = GuluBrandFont, fontWeight = FontWeight.Normal,
+                            fontSize = if (compact) 15.sp else 18.sp, maxLines = 1,
+                            modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.primary)
+                        TextButton(onClick = uiTap {
+                            keyboardMode = !keyboardMode
+                        }, contentPadding = PaddingValues(horizontal = 6.dp),
+                            modifier = Modifier.fillMaxHeight().testTag("calculator-keyboard-switch")) {
+                            Text(if (keyboardMode) "算盘键" else "键盘", fontSize = 12.sp)
                         }
-                    },
-                    Modifier.fillMaxWidth(),
-                    placeholder = { Text("比如 (12 + 9) × 2", style = MaterialTheme.typography.bodyMedium) },
-                    textStyle = MaterialTheme.typography.bodyLarge,
-                    shape = RoundedCornerShape(14.dp), singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii)
-                )
-                Surface(color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = .45f),
-                    shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(horizontal = 12.dp, vertical = 7.dp)) {
-                        Text("= ${result.display ?: "0"}", style = MaterialTheme.typography.titleLarge.copy(fontSize = 22.sp),
-                            color = MaterialTheme.colorScheme.primary, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        Text(
-                            if (visibleError != null) visibleError
-                            else if (amount != null) "带入金额 ¥$amount · 保留到分"
-                            else if (result.value != null) "记账金额需要大于 0，并且在有效范围内"
-                            else "加减乘除都可以，算完直接记一笔 ♡",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = if (visibleError != null) MaterialTheme.colorScheme.error
-                            else MaterialTheme.colorScheme.onSurfaceVariant
+                        TextButton(onClick = uiTap(onDismiss), contentPadding = PaddingValues(horizontal = 6.dp),
+                            modifier = Modifier.fillMaxHeight()) { Text("收起", fontSize = 12.sp) }
+                    }
+                    Surface(Modifier.fillMaxWidth().height(if (tiny) 28.dp else if (compact) 32.dp else 44.dp),
+                        shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surface,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
+                        Box(Modifier.fillMaxSize()) {
+                        BasicTextField(
+                            value = expression, onValueChange = { value ->
+                                if (value.length <= 160 && value.all { it.isDigit() || it in ".+-−×÷*/()（） " }) {
+                                    expression = value; showError = false
+                                }
+                            },
+                            modifier = Modifier.fillMaxSize().focusRequester(expressionFocus)
+                                .focusProperties { canFocus = keyboardMode }
+                                .testTag("calculator-expression").padding(horizontal = 10.dp)
+                                .drawWithContent { drawContent(); CalculatorTrace.mark("expression drawn") },
+                            singleLine = true,
+                            readOnly = !keyboardMode,
+                            textStyle = MaterialTheme.typography.bodyLarge.copy(
+                                fontSize = if (tiny) 14.sp else if (compact) 16.sp else 18.sp,
+                                color = MaterialTheme.colorScheme.onSurface),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
+                            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                            decorationBox = { inner ->
+                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.CenterStart) {
+                                    if (expression.isEmpty()) Text("比如 (12 + 9) × 2",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .7f))
+                                    inner()
+                                }
+                            }
                         )
+                        if (!keyboardMode) Box(Modifier.matchParentSize()
+                            .testTag("calculator-edit-expression")
+                            .clickable(role = Role.Button, onClickLabel = "用键盘编辑算式") { keyboardMode = true })
+                        }
+                    }
+                    Surface(Modifier.fillMaxWidth().height(if (tiny) 28.dp else if (compact) 44.dp else 54.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = .45f),
+                        shape = RoundedCornerShape(14.dp)) {
+                        Column(Modifier.fillMaxSize().padding(horizontal = 10.dp, vertical = if (tiny) 2.dp else 4.dp),
+                            verticalArrangement = Arrangement.Center) {
+                            Text(if (tiny && visibleError != null) visibleError else "= ${result.display ?: "0"}",
+                                fontSize = if (tiny) 16.sp else if (compact) 18.sp else 20.sp,
+                                lineHeight = if (tiny) 20.sp else if (compact) 22.sp else 24.sp,
+                                color = if (tiny && visibleError != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            if (!tiny) Text(visibleError ?: if (amount != null) "带入金额 ¥$amount · 保留到分" else "算完直接记一笔 ♡",
+                                style = MaterialTheme.typography.labelSmall.copy(lineHeight = 14.sp),
+                                color = if (visibleError != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                    if (!keyboardMode) CalculatorKeypad(pressKey, deleteKey, clearKey, compact, tiny,
+                        Modifier.fillMaxWidth().weight(1f).testTag("calculator-keypad"))
+                    Button(onClick = uiTap { DecimalCalculator.evaluate(expression).amountText?.let(onUse) },
+                        enabled = amount != null, contentPadding = PaddingValues(horizontal = 8.dp),
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier.fillMaxWidth().height(if (tiny) 32.dp else if (compact) 36.dp else 44.dp)
+                            .testTag("calculator-use")) {
+                        Text("¥${amount ?: "0"} · 带入记账", fontSize = if (compact) 14.sp else 16.sp,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
-                CalculatorKeypad(
-                    onPress = ::press,
-                    onDeleteOne = ::deleteOne,
-                    onClear = { press("C") },
-                    modifier = Modifier.weight(1f)
-                )
-                Button(onClick = uiTap { amount?.let(onUse) }, enabled = amount != null,
-                    shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
-                    Text("¥${amount ?: "0"} · 带入记账")
                 }
             }
         }
     }
 }
 
-/**
- * 算盘键盘，独立组件。
- *
- * 拆出来的唯一目的：**按一次键时，二十个按键不跟着一起重组**。
- * 按键只吃 `Modifier.weight` 与自身配色，回调通过 [rememberUpdatedState] 保持最新引用，
- * 因此父层重组时按键本身是"跳过"的，只有真正变化的显示区与表达式在动。
- *
- * 高度用 [modifier] 分配（父列的 weight），键有 44dp 的最小触控高度保证单手可点。
- */
+/** Five fixed rows share the actual remaining height; labels reduce before controls become cramped. */
 @Composable
-private fun CalculatorKeypad(
-    onPress: (String) -> Unit,
-    onDeleteOne: () -> Unit,
-    onClear: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+private fun CalculatorKeypad(onPress: (String) -> Unit, onDeleteOne: () -> Unit, onClear: () -> Unit,
+    compact: Boolean, tiny: Boolean, modifier: Modifier = Modifier) {
+    val gap = if (tiny) 3.dp else if (compact) 4.dp else 6.dp
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(gap)) {
         KEYS.forEach { row ->
-            Row(Modifier.fillMaxWidth().weight(1f), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(Modifier.fillMaxWidth().weight(1f), horizontalArrangement = Arrangement.spacedBy(gap)) {
                 row.forEach { key ->
-                    CalculatorKey(
-                        key = key,
-                        onPress = { onPress(key) },
-                        onDelete = onDeleteOne,
-                        onClear = onClear,
-                        modifier = Modifier.weight(1f).fillMaxWidth().heightIn(min = 44.dp)
-                    )
+                    val press = remember(key, onPress) { { onPress(key) } }
+                    CalculatorKey(key, press, onDeleteOne, onClear, compact, tiny,
+                        Modifier.weight(1f).fillMaxHeight().testTag("calculator-key-$key"))
                 }
             }
         }
     }
 }
 
-/**
- * 单个按键。
- *
- * 删除键是特例：点按删一位，**持续按住**每 [REPEAT_STEP_MS] 连删，到 [CLEAR_HOLD_MS] 整体清空，
- * 松手不再多删一次（长按之后的那次 onClick 只负责收尾，不重复删字符）。
- */
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun CalculatorKey(
-    key: String,
-    onPress: () -> Unit,
-    onDelete: () -> Unit,
-    onClear: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val scope = rememberCoroutineScope()
-    val latestPress by rememberUpdatedState(onPress)
+private fun CalculatorKey(key: String, onPress: () -> Unit, onDelete: () -> Unit, onClear: () -> Unit,
+    compact: Boolean, tiny: Boolean, modifier: Modifier = Modifier) {
     val latestDelete by rememberUpdatedState(onDelete)
     val latestClear by rememberUpdatedState(onClear)
-    var holdJob by remember { mutableStateOf<Job?>(null) }
-    var held by remember { mutableStateOf(false) }
-    val isBackspace = key == "⌫"
-    val operator = key in OPERATORS
-
-    fun stopHold() {
-        holdJob?.cancel()
-        holdJob = null
+    val interaction = remember { MutableInteractionSource() }
+    val shape = RoundedCornerShape(if (compact) 9.dp else 12.dp)
+    val color = if (key == "=") MaterialTheme.colorScheme.primary
+        else if (key in OPERATORS) MaterialTheme.colorScheme.primaryContainer.copy(alpha = .65f)
+        else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .6f)
+    val ink = if (key == "=") MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
+    val label: @Composable () -> Unit = {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text(key, fontSize = if (tiny) 14.sp else if (compact) 16.sp else 18.sp, lineHeight = if (tiny) 18.sp else 22.sp)
+        }
     }
-
-    Surface(
-        modifier = modifier.combinedClickable(
-            onClick = {
-                if (isBackspace) {
-                    stopHold()
-                    // 长按已经处理过了，松手这次点击只收尾，不再删字符。
-                    if (held) held = false else latestDelete()
-                } else latestPress()
-            },
-            onLongClick = {
-                if (isBackspace) {
-                    held = true
-                    stopHold()
-                    holdJob = scope.launch {
-                        var elapsed = 0L
-                        while (elapsed < CLEAR_HOLD_MS) {
-                            delay(REPEAT_STEP_MS)
-                            elapsed += REPEAT_STEP_MS
-                            if (elapsed >= CLEAR_HOLD_MS) { latestClear(); return@launch }
-                            latestDelete()
+    if (key != "⌫") {
+        // A normal click, including a stationary long press released on the same key, commits once.
+        Surface(onClick = onPress, modifier = modifier, shape = shape, color = color, contentColor = ink,
+            content = label)
+    } else {
+        Surface(modifier = modifier.clip(shape).indication(interaction, LocalIndication.current)
+            .semantics {
+                role = Role.Button
+                contentDescription = "删除一位，按住连删"
+                onClick("删除一位") { latestDelete(); true }
+                onLongClick("清空算式") { latestClear(); true }
+            }
+            .pointerInput(interaction) {
+                detectTapGestures(onPress = { position ->
+                    val press = PressInteraction.Press(position)
+                    interaction.tryEmit(press)
+                    coroutineScope {
+                        var repeated = false
+                        var released = false
+                        val repeat = launch {
+                            repeatCalculatorDelete(DELETE_REPEAT_START_MS,
+                                onRepeat = { repeated = true; latestDelete() },
+                                onClear = { repeated = true; latestClear() })
+                        }
+                        try {
+                            released = tryAwaitRelease()
+                            // Stop before dispatching any short tap; no timer survives UP or CANCEL.
+                            repeat.cancelAndJoin()
+                            if (released && !repeated) latestDelete()
+                        } finally {
+                            repeat.cancel()
+                            interaction.tryEmit(if (released) PressInteraction.Release(press) else PressInteraction.Cancel(press))
                         }
                     }
-                }
-            }
-        ),
-        shape = RoundedCornerShape(12.dp),
-        color = if (key == "=") MaterialTheme.colorScheme.primary
-            else if (operator) MaterialTheme.colorScheme.primaryContainer.copy(alpha = .65f)
-            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .6f),
-        contentColor = if (key == "=") MaterialTheme.colorScheme.onPrimary
-            else MaterialTheme.colorScheme.onSurface
-    ) {
-        Box(contentAlignment = Alignment.Center) {
-            Text(key, style = MaterialTheme.typography.titleMedium.copy(fontSize = 18.sp),
-                modifier = Modifier.padding(vertical = 8.dp))
-        }
+                })
+            }, shape = shape, color = color, contentColor = ink, content = label)
     }
 }

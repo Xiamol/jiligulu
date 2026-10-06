@@ -39,6 +39,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.jiligulu.app.core.audio.UiSound
 import kotlin.math.abs
 import kotlin.math.cos
@@ -52,6 +54,23 @@ internal fun ColumnScope.SecretSnakeGame(state: SnakeState, running: Boolean, st
     onDirection: (SnakeDirection) -> Unit, onToggle: () -> Unit, onRestart: () -> Unit) {
     val latestDirection by rememberUpdatedState(onDirection)
     val context = LocalContext.current
+    val finished = state.gameOver || state.won
+    val finish = if (!finished) null else if (state.won)
+        GameFinishPresentation("星星全收好啦", "小蛇走满了这片天地", FinishMood.WIN)
+    else GameFinishPresentation("这一圈结束啦", "已经收好 ${state.score} 颗星星", FinishMood.LOSE)
+    val finishIdentity = listOf("snake", state.width, state.height)
+    var lastFinished by remember(finishIdentity) { mutableStateOf(finished) }
+    var wasRunning by remember(finishIdentity) { mutableStateOf(running) }
+    var finishEvent by remember(finishIdentity) { mutableIntStateOf(0) }
+    var promptRequest by remember(finishIdentity) { mutableIntStateOf(0) }
+    LaunchedEffect(finished, running, finishIdentity) {
+        // An archive can arrive after the initial composition. Only an actually running
+        // snake reaching its end is a fresh result, never that asynchronous restore.
+        if (finished && !lastFinished && wasRunning) finishEvent++
+        lastFinished = finished
+        wasRunning = running
+    }
+    GameFinishOverlay(finish, finishIdentity, state.takeIf { finished }, finishEvent, promptRequest, onRestart)
     val status = when {
         state.won -> "小蛇把星星全收好啦！"
         state.gameOver -> "碰到啦，再陪小蛇走一圈吧"
@@ -113,14 +132,18 @@ internal fun ColumnScope.SecretSnakeGame(state: SnakeState, running: Boolean, st
             drawCircle(Color(0xFF334039), cellW * .049f, eye + forward * .2f)
         }
     }
-    Text(status, modifier = Modifier.padding(vertical = 12.dp), style = MaterialTheme.typography.bodySmall,
-        color = Color(0xFF887F86))
-    Spacer(Modifier.height(12.dp))
-    SnakeJoystick(enabled = !state.gameOver, onDirection)
-    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        FilledTonalButton(onClick = { UiSound.tap(context); onToggle() }, enabled = !state.gameOver,
-            shape = RoundedCornerShape(14.dp), modifier = Modifier.width(120.dp)) { Text(if (running) "暂停" else if (started) "继续" else "开始") }
-        TextButton(onClick = { UiSound.tap(context); onRestart() }) { Text("重新开始") }
+    if (finish != null) {
+        GameFinishActions(finish, { promptRequest++ }, null, modifier = Modifier.width(boardSize).padding(top = 12.dp))
+    } else {
+        Text(status, modifier = Modifier.padding(vertical = 12.dp), style = MaterialTheme.typography.bodySmall,
+            color = Color(0xFF887F86))
+        Spacer(Modifier.height(12.dp))
+        SnakeJoystick(enabled = !state.gameOver, onDirection)
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            FilledTonalButton(onClick = { UiSound.tap(context); onToggle() }, enabled = !state.gameOver,
+                shape = RoundedCornerShape(14.dp), modifier = Modifier.width(120.dp)) { Text(if (running) "暂停" else if (started) "继续" else "开始") }
+            TextButton(onClick = { UiSound.tap(context); onRestart() }) { Text("重新开始") }
+        }
     }
     Spacer(Modifier.height(8.dp))
 }
@@ -176,13 +199,22 @@ internal fun ColumnScope.SecretGomokuGame(state: GomokuState, paused: Boolean, b
     val finish = remember(state,mode,localPlayer) { GameFinishPresenter.gomoku(state,
         if(mode==GomokuPlayMode.HOTSEAT) null else localPlayer, if(mode==GomokuPlayMode.CPU) "阿噜" else "棋友") }
     val winningLine = remember(state) { GameFinishPresenter.gomokuWinningLine(state) }
-    val finishGlow = remember { Animatable(0f) }
-    var lastOutcome by remember(mode,restorationToken) { mutableStateOf(state.outcome) }
-    LaunchedEffect(state.outcome,state.lastMove,restorationToken) {
+    val finishIdentity = listOf(mode, restorationToken, localPlayer,
+        if (network) room?.round else 0, if (network) room?.hostAddress else "",
+        network && room?.connected == true)
+    val finishGlow = remember(finishIdentity) { Animatable(0f) }
+    var lastOutcome by remember(finishIdentity) { mutableStateOf(state.outcome) }
+    var finishEvent by remember(finishIdentity) { mutableIntStateOf(0) }
+    var promptRequest by remember(finishIdentity) { mutableIntStateOf(0) }
+    LaunchedEffect(state, finishIdentity) {
         finishGlow.snapTo(0f)
         val celebrate = lastOutcome==GomokuOutcome.PLAYING && finished
         lastOutcome=state.outcome
-        if(celebrate) { finishGlow.snapTo(1f); finishGlow.animateTo(0f,tween(3200)) }
+        if(celebrate) {
+            finishEvent++
+            finishGlow.snapTo(1f)
+            finishGlow.animateTo(0f,tween(GAME_FINISH_BOARD_EFFECT_MS))
+        }
     }
     val modeNames = remember { mapOf(GomokuPlayMode.CPU to "和阿噜下", GomokuPlayMode.NEARBY to "附近的人",
         GomokuPlayMode.ONLINE to "创建房间", GomokuPlayMode.HOTSEAT to "同屏双人") }
@@ -202,8 +234,16 @@ internal fun ColumnScope.SecretGomokuGame(state: GomokuState, paused: Boolean, b
         }
     }
     var matchResponseSent by remember(mode,room?.pendingMatchName) { mutableStateOf(false) }
-    // 有棋友来敲门：匹配成功的声音（与象棋共用同一条语义）
-    LaunchedEffect(room?.pendingMatchName) { if (room?.pendingMatchName != null) UiSound.match(context) }
+    // 到场后才响匹配音；邀请可能被拒绝，恢复已连接的棋局也不重播。
+    val matchLifecycle = LocalLifecycleOwner.current.lifecycle
+    var wasConnected by remember(mode) { mutableStateOf(network && room?.connected == true) }
+    LaunchedEffect(mode, room?.connected) {
+        val connected = network && room?.connected == true
+        if (connected && !wasConnected && matchLifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+            UiSound.match(context)
+        }
+        wasConnected = connected
+    }
     if(network && room?.pendingMatchName!=null) {
         SecretWoodDialog("棋友来敲门啦", { if(!matchResponseSent) { matchResponseSent=true;onMatchResponse(false) } },
             confirmLabel="一起下",onConfirm={if(!matchResponseSent){matchResponseSent=true;onMatchResponse(true)}},
@@ -221,6 +261,10 @@ internal fun ColumnScope.SecretGomokuGame(state: GomokuState, paused: Boolean, b
             onHost, onJoin, onDisconnect, onControlsBottom)
         return
     }
+    GameFinishOverlay(finish, finishIdentity, state.takeIf { finished }, finishEvent, promptRequest,
+        onRestart, onExit, myRematchRequested = room?.myRematchRequested == true,
+        suppressPrompt = network && room?.rematchRequestedBy != null &&
+            room.rematchRequestedBy != room.localPlayer && !room.myRematchRequested)
     var undoResponseSent by remember(mode, room?.revision, room?.pendingUndoRequest) { mutableStateOf(false) }
     if (network && room?.pendingUndoRequest != null && room.pendingUndoRequest != room.localPlayer) {
         fun respond(accept: Boolean) { if (!undoResponseSent) { undoResponseSent = true; onUndoResponse(accept) } }
@@ -331,7 +375,7 @@ internal fun ColumnScope.SecretGomokuGame(state: GomokuState, paused: Boolean, b
         }
     }
     if(finish!=null) {
-        GameFinishPlate(finish,onRestart,onExit,network,room?.roomEnded==true,room?.resultSecondsLeft?:0,
+        GameFinishActions(finish,{ promptRequest++ },onExit,network,room?.roomEnded==true,room?.resultSecondsLeft?:0,
             room?.myRematchRequested==true,Modifier.width(boardSize).padding(top=10.dp)
                 .onGloballyPositioned{onControlsBottom(it.boundsInRoot().bottom)})
     } else {
@@ -344,7 +388,7 @@ internal fun ColumnScope.SecretGomokuGame(state: GomokuState, paused: Boolean, b
         if(!network) GameIconTool(Icons.Outlined.Refresh, "重开", onRestart, Modifier.weight(1f))
         GameIconTool(Icons.AutoMirrored.Outlined.Undo, "悔棋", onUndo, Modifier.weight(1f),
             enabled = canUndo && !helpBusy && (!network || room?.pendingUndoRequest == null),
-            cue = com.jiligulu.app.core.audio.UiCue.UNDO)
+            cue = com.jiligulu.app.core.audio.UiCue.TOUCH)
     }
     Text("黑棋先行 · 连成五子获胜", Modifier.padding(top = 4.dp, bottom = 10.dp)
         .onGloballyPositioned { onControlsBottom(it.boundsInRoot().bottom) },

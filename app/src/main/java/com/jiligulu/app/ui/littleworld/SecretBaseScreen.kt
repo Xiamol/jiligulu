@@ -58,6 +58,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.jiligulu.app.JiliguluApp
 import com.jiligulu.app.R
+import com.jiligulu.app.core.audio.UiCue
 import com.jiligulu.app.core.audio.UiSound
 import com.jiligulu.app.ui.theme.GuluBrandFont
 import kotlinx.coroutines.Dispatchers
@@ -119,21 +120,7 @@ private val xiangqiClockSaver = listSaver<XiangqiThinkingClock, Long>(
     restore = { XiangqiThinkingClock(it[0].toInt(), XiangqiSide.entries[it[1].toInt()], it[2], it.getOrNull(3) ?: XiangqiThinkingClock.TURN_MILLIS) }
 )
 
-/**
- * 待播的落子声。
- *
- * 用类型而不是裸 Boolean 是为了让"这一次"可辨认：兜底计时器要能判断
- * 自己等的那一声是否已经被落稳回调提前播掉了，避免同一手响两遍。
- */
-private data class PendingMoveSound(val captured: Boolean)
-
-/**
- * 落稳回调的兜底时限。
- *
- * 超过这么久还没收到回调，说明这一步没有动画（读档、界面不可见、联机首帧），
- * 就自己补一声——宁可稍晚，不能没有。
- */
-private const val MOVE_SOUND_FALLBACK_MS = 700L
+private const val MOVE_SOUND_FOLLOWUP_MS = 150L
 
 /** One room, with toys on the furniture. Opening a toy never starts a background game. */
 @Composable
@@ -217,6 +204,85 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
     var helpXiangqiPosition by remember { mutableStateOf<XiangqiState?>(null) }
     var helpGomokuPosition by remember { mutableStateOf<GomokuState?>(null) }
     var gameControlsBottom by remember { mutableFloatStateOf(0f) }
+    val xiangqiSounds = remember { XiangqiSoundQueue() }
+    var xiangqiSoundRevision by remember { mutableIntStateOf(0) }
+    var xiangqiSoundFollowup by remember { mutableStateOf<Job?>(null) }
+
+    fun currentXiangqiPosition(): XiangqiState = when (xiangqiMode) {
+        XiangqiPlayMode.ONLINE -> onlineSession.state.value.game
+        XiangqiPlayMode.LAN -> lanSession.state.value.game
+        else -> xiangqi
+    }
+    fun currentGomokuPosition(): GomokuState = when (gomokuMode) {
+        GomokuPlayMode.NEARBY -> gomokuLanSession.state.value.game
+        GomokuPlayMode.ONLINE -> gomokuOnlineSession.state.value.game
+        else -> gomoku
+    }
+    fun cancelXiangqiSounds() {
+        xiangqiSounds.invalidate()
+        xiangqiSoundRevision++
+        xiangqiSoundFollowup?.cancel(); xiangqiSoundFollowup = null
+    }
+    fun canPlayXiangqiSounds(): Boolean {
+        if (!foreground || sleeping || activity != SecretActivity.XIANGQI || choosingOpponent ||
+            !archiveReady || gameLoading || clockSetupVisible || undoConfirmVisible) return false
+        return when (xiangqiMode) {
+            XiangqiPlayMode.CPU, XiangqiPlayMode.HOTSEAT -> !xiangqiPaused
+            XiangqiPlayMode.ONLINE -> onlineSession.state.value.let {
+                it.connected && !it.roomEnded && it.pendingUndoRequest == null && it.rematchRequestedBy == null
+            }
+            XiangqiPlayMode.LAN -> lanSession.state.value.let {
+                it.connected && !it.roomEnded && it.pendingUndoRequest == null && it.rematchRequestedBy == null
+            }
+        }
+    }
+    fun registerXiangqiSound(previous: XiangqiState, next: XiangqiState) {
+        if (!canPlayXiangqiSounds()) return
+        xiangqiSoundFollowup?.cancel(); xiangqiSoundFollowup = null
+        xiangqiSounds.register(previous, next, SystemClock.uptimeMillis())
+        xiangqiSoundRevision++
+    }
+    fun settleXiangqiSound(epoch: Int, position: XiangqiState) {
+        if (!canPlayXiangqiSounds()) return
+        val event = xiangqiSounds.consume(epoch, position, currentXiangqiPosition()) ?: return
+        xiangqiSoundRevision++
+        if (event.captured) UiSound.capture(context) else UiSound.woodMove(context)
+        xiangqiSoundFollowup?.cancel(); xiangqiSoundFollowup = null
+        val cue = if (position.outcome != XiangqiOutcome.PLAYING) {
+            val human = when (xiangqiMode) {
+                XiangqiPlayMode.CPU -> xiangqiHumanSide
+                XiangqiPlayMode.HOTSEAT -> null
+                XiangqiPlayMode.ONLINE -> onlineSession.state.value.localSide
+                XiangqiPlayMode.LAN -> lanSession.state.value.localSide
+            }
+            if (GameFinishPresenter.xiangqi(position, human)?.mood == FinishMood.LOSE) UiCue.LOSE else UiCue.WIN
+        } else if (XiangqiEngine.isInCheck(position, position.turnSide)) UiCue.CHECK else null
+        if (cue != null) xiangqiSoundFollowup = scope.launch {
+            // Leave room for the finite impact before the check/result cue; every delay revalidates.
+            delay(MOVE_SOUND_FOLLOWUP_MS)
+            if (event.epoch == xiangqiSounds.epoch && canPlayXiangqiSounds() && currentXiangqiPosition() == position)
+                UiSound.play(context, cue)
+        }
+    }
+    fun skipXiangqiPresentation(epoch: Int, position: XiangqiState) {
+        if (epoch != xiangqiSounds.epoch || currentXiangqiPosition() != position) return
+        xiangqiSoundFollowup?.cancel(); xiangqiSoundFollowup = null
+        if (!canPlayXiangqiSounds()) cancelXiangqiSounds()
+        else {
+            xiangqiSounds.restartLatest(epoch, position, currentXiangqiPosition(), SystemClock.uptimeMillis())
+            xiangqiSoundRevision++
+        }
+    }
+    LaunchedEffect(xiangqiSoundRevision, activity, foreground, sleeping, choosingOpponent, archiveReady,
+        gameLoading, xiangqiPaused, xiangqiMode, clockSetupVisible, undoConfirmVisible, canPlayXiangqiSounds()) {
+        if (!canPlayXiangqiSounds()) {
+            if (xiangqiSounds.firstPending != null || xiangqiSoundFollowup?.isActive == true) cancelXiangqiSounds()
+            return@LaunchedEffect
+        }
+        val event = xiangqiSounds.firstPending ?: return@LaunchedEffect
+        delay((event.fallbackAtMillis - SystemClock.uptimeMillis()).coerceAtLeast(0))
+        settleXiangqiSound(event.epoch, event.position)
+    }
 
     fun gomokuLocalMode(): LocalGameMode? = when (gomokuMode) {
         GomokuPlayMode.CPU -> LocalGameMode.CPU
@@ -264,6 +330,7 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
         gomokuPaused = true
     }
     fun restoreXiangqi(save: LocalXiangqiSave?) {
+        cancelXiangqiSounds()
         xiangqiRestoreToken++
         xiangqi = save?.game ?: XiangqiEngine.newGame()
         xiangqiHistory = save?.undoHistory ?: emptyList()
@@ -295,44 +362,14 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
         checkpointGomoku()
         if (foreground && activity == SecretActivity.GOMOKU) UiSound.stoneMove(context)
     }
-    /**
-     * 待播的落子声。
-     *
-     * 落子声要落在**棋子落稳**那一刻，而不是状态提交那一刻——否则声音已经响了、
-     * 棋子还在半路上。这里只登记"该出一声"，由棋盘的落稳回调真正播放；
-     * 不走动画的路径（读档、界面不可见、联机首帧）由超时兜底补上，
-     * 既不会漏声，也不会和回调重复响。
-     */
-    var pendingMoveSound by remember { mutableStateOf<PendingMoveSound?>(null) }
-    LaunchedEffect(pendingMoveSound) {
-        val pending = pendingMoveSound ?: return@LaunchedEffect
-        delay(MOVE_SOUND_FALLBACK_MS)
-        if (pendingMoveSound === pending) {
-            if (pending.captured) UiSound.capture(context) else UiSound.woodMove(context)
-            pendingMoveSound = null
-        }
-    }
-
     fun commitXiangqi(next: XiangqiState) {
         if (next == xiangqi) return
-        val capture = next.lastMove?.let { xiangqi.pieceAt(it.to.x,it.to.y)!=0 }==true
+        val previous = xiangqi
         xiangqiHistory = (xiangqiHistory + xiangqi).takeLast(512)
         xiangqi = next
         clockTickAt = 0L; clockEpoch++; xiangqiClock = xiangqiClock.forPosition(next)
         checkpointXiangqi()
-        // 先只登记，不在这里出声：等棋盘的移动动画落稳再响（落子声要落在棋子上）
-        if (foreground && activity == SecretActivity.XIANGQI) pendingMoveSound = PendingMoveSound(capture)
-    }
-
-    fun currentXiangqiPosition(): XiangqiState = when (xiangqiMode) {
-        XiangqiPlayMode.ONLINE -> onlineSession.state.value.game
-        XiangqiPlayMode.LAN -> lanSession.state.value.game
-        else -> xiangqi
-    }
-    fun currentGomokuPosition(): GomokuState = when (gomokuMode) {
-        GomokuPlayMode.NEARBY -> gomokuLanSession.state.value.game
-        GomokuPlayMode.ONLINE -> gomokuOnlineSession.state.value.game
-        else -> gomoku
+        registerXiangqiSound(previous, next)
     }
     fun eligibleGomokuTurn(): Boolean {
         if (!archiveReady || gameLoading || choosingOpponent || !foreground || sleeping || activity != SecretActivity.GOMOKU || gomokuUndoConsent) return false
@@ -433,6 +470,7 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
     }
 
     fun pauseLocalToys() {
+        cancelXiangqiSounds()
         cancelHelp()
         freezeThinkingClock()
         snakeRunning = false
@@ -443,6 +481,7 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
         checkpointGomoku(); checkpointXiangqi(); checkpointSnake()
     }
     fun closeNetworkRooms() {
+        cancelXiangqiSounds()
         networkGraceJob?.cancel()
         networkGraceJob = null
         lanSession.close()
@@ -540,15 +579,20 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
         cancelHelp()
         val target = LocalChessUndo.xiangqiTarget(xiangqiHistory, xiangqiMode == XiangqiPlayMode.CPU,xiangqiHumanSide)
         if (target < 0) return
+        cancelXiangqiSounds()
         xiangqi = xiangqiHistory[target]
         xiangqiHistory = xiangqiHistory.take(target)
         xiangqiClock = XiangqiThinkingClock.reset(xiangqi, thinkingSeconds)
         clockTickAt = 0L; clockEpoch++; checkpointXiangqi()
+        if (foreground && activity == SecretActivity.XIANGQI) UiSound.undo(context)
     }
     fun undoGomoku() {
         cancelHelp()
         val target = if (gomokuMode == GomokuPlayMode.HOTSEAT) gomokuHistory.lastIndex else LocalChessUndo.gomokuTarget(gomokuHistory,gomokuHumanPlayer)
-        if (target >= 0) { gomoku = gomokuHistory[target]; gomokuHistory = gomokuHistory.take(target); checkpointGomoku() }
+        if (target >= 0) {
+            gomoku = gomokuHistory[target]; gomokuHistory = gomokuHistory.take(target); checkpointGomoku()
+            if (foreground && activity == SecretActivity.GOMOKU) UiSound.undo(context)
+        }
     }
 
     DisposableEffect(xiangqiDiscovery, gomokuDiscovery) {
@@ -621,25 +665,37 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
     }
     LaunchedEffect(sleeping) { if (sleeping) closeToy() }
     val visibleNetwork = if (xiangqiMode == XiangqiPlayMode.ONLINE) online else lan
-    var lastNetworkGame by remember(activity, xiangqiMode, foreground) { mutableStateOf(visibleNetwork.game) }
-    LaunchedEffect(visibleNetwork.revision, activity, xiangqiMode, foreground) {
+    var lastNetworkGame by remember(activity, xiangqiMode, foreground, xiangqiSounds.epoch) { mutableStateOf(visibleNetwork.game) }
+    var lastNetworkRound by remember(activity, xiangqiMode, foreground) { mutableIntStateOf(visibleNetwork.round) }
+    LaunchedEffect(visibleNetwork.revision, visibleNetwork.round, activity, xiangqiMode, foreground) {
         val next = visibleNetwork.game
-        if (foreground && activity == SecretActivity.XIANGQI &&
+        val sameRound = visibleNetwork.round == lastNetworkRound
+        if (!sameRound) cancelXiangqiSounds()
+        if (foreground && !sleeping && activity == SecretActivity.XIANGQI && sameRound &&
             (xiangqiMode == XiangqiPlayMode.ONLINE || xiangqiMode == XiangqiPlayMode.LAN) &&
-            next.ply == lastNetworkGame.ply + 1 && next.board != lastNetworkGame.board) {
-            val capture=next.lastMove?.let{lastNetworkGame.pieceAt(it.to.x,it.to.y)!=0}==true
-            // 联机对手走子同样等落稳再响，和本地走子走同一条时间线
-            pendingMoveSound = PendingMoveSound(capture)
+            visibleNetwork.connected && !visibleNetwork.roomEnded && currentXiangqiPosition() == next) {
+            if (next.ply == lastNetworkGame.ply + 1 && next.board != lastNetworkGame.board) {
+                registerXiangqiSound(lastNetworkGame, next)
+            } else if (next.ply < lastNetworkGame.ply) {
+                cancelXiangqiSounds()
+                UiSound.undo(context)
+            } else if (next != lastNetworkGame) cancelXiangqiSounds()
         }
         lastNetworkGame = next
+        lastNetworkRound = visibleNetwork.round
     }
     val visibleGomokuRoom = if (gomokuMode == GomokuPlayMode.ONLINE) gomokuOnline else gomokuLan
-    var lastNetworkGomoku by remember(activity, gomokuMode, foreground) { mutableStateOf(visibleGomokuRoom.game) }
-    LaunchedEffect(visibleGomokuRoom.revision, activity, gomokuMode, foreground) {
+    var lastNetworkGomoku by remember(activity, gomokuMode, foreground, visibleGomokuRoom.round) { mutableStateOf(visibleGomokuRoom.game) }
+    LaunchedEffect(visibleGomokuRoom.revision, visibleGomokuRoom.round, activity, gomokuMode, foreground) {
         val next = visibleGomokuRoom.game
-        if (foreground && activity == SecretActivity.GOMOKU &&
+        if (foreground && !sleeping && activity == SecretActivity.GOMOKU &&
             (gomokuMode == GomokuPlayMode.ONLINE || gomokuMode == GomokuPlayMode.NEARBY) &&
-            next.board.count { it != 0 } == lastNetworkGomoku.board.count { it != 0 } + 1 && next.board != lastNetworkGomoku.board) UiSound.stoneMove(context)
+            visibleGomokuRoom.connected && !visibleGomokuRoom.roomEnded && currentGomokuPosition() == next) {
+            val count = next.board.count { it != 0 }
+            val previousCount = lastNetworkGomoku.board.count { it != 0 }
+            if (count == previousCount + 1 && next.board != lastNetworkGomoku.board) UiSound.stoneMove(context)
+            else if (count < previousCount) UiSound.undo(context)
+        }
         lastNetworkGomoku = next
     }
     val liveGo=currentGomokuPosition()
@@ -654,22 +710,6 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
             delay(260)
             if(foreground&&currentGomokuPosition()==snapshot) when(mood){FinishMood.LOSE->UiSound.lose(context)
                 FinishMood.DRAW->UiSound.draw(context);FinishMood.WIN,FinishMood.SHARED->UiSound.win(context);null->Unit}
-        }
-    }
-    val liveXq=currentXiangqiPosition()
-    var seenXq by remember(activity,xiangqiMode,xiangqiRestoreToken){mutableStateOf(liveXq)}
-    LaunchedEffect(liveXq.ply,liveXq.outcome,activity,xiangqiMode,xiangqiRestoreToken,foreground) {
-        val previous=seenXq;seenXq=liveXq
-        if(foreground&&activity==SecretActivity.XIANGQI&&!choosingOpponent&&archiveReady&&!gameLoading&&liveXq.ply==previous.ply+1) {
-            val snapshot=liveXq
-            if(previous.outcome==XiangqiOutcome.PLAYING&&snapshot.outcome!=XiangqiOutcome.PLAYING) {
-                val human=when(xiangqiMode){XiangqiPlayMode.CPU->xiangqiHumanSide;XiangqiPlayMode.HOTSEAT->null;else->visibleNetwork.localSide}
-                val mood=GameFinishPresenter.xiangqi(snapshot,human)?.mood
-                delay(260)
-                if(foreground&&currentXiangqiPosition()==snapshot) {if(mood==FinishMood.LOSE)UiSound.lose(context)else UiSound.win(context)}
-            } else if(snapshot.outcome==XiangqiOutcome.PLAYING&&XiangqiEngine.isInCheck(snapshot,snapshot.turnSide)) {
-                delay(130);if(foreground&&currentXiangqiPosition()==snapshot)UiSound.check(context)
-            }
         }
     }
     LaunchedEffect(bubbleToken) { if (secretBubble != null) { delay(3000); secretBubble = null } }
@@ -861,10 +901,10 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
                     },
                     onMode = { value -> leaveNetworkSafely { changeXiangqiMode(value) } },
                     onMove = { move -> if (!helpBusy) playXiangqiMove(move) },
-                    onToggle = { cancelHelp(); freezeThinkingClock(); if (!xiangqiStarted) { xiangqiPaused = true; resumeAfterClockSetup = false; clockSetupVisible = true }
+                    onToggle = { cancelXiangqiSounds(); cancelHelp(); freezeThinkingClock(); if (!xiangqiStarted) { xiangqiPaused = true; resumeAfterClockSetup = false; clockSetupVisible = true }
                         else xiangqiPaused = !xiangqiPaused
                         checkpointXiangqi() },
-                    onRestart = { cancelHelp(); if (xiangqiMode == XiangqiPlayMode.LAN) {if(lan.roomEnded){choosingOpponent=true;closeNetworkRooms()}else lanSession.requestRematch()}
+                    onRestart = { cancelXiangqiSounds(); cancelHelp(); if (xiangqiMode == XiangqiPlayMode.LAN) {if(lan.roomEnded){choosingOpponent=true;closeNetworkRooms()}else lanSession.requestRematch()}
                         else if (xiangqiMode == XiangqiPlayMode.ONLINE) {if(online.roomEnded){choosingOpponent=true;closeNetworkRooms()}else onlineSession.requestRematch()}
                         else { xiangqiHumanSide=xiangqiHumanSide.opponent;xiangqiColorAssigned=true;xiangqiRestoreToken++;xiangqiHistory = emptyList(); xiangqi = XiangqiEngine.newGame(); xiangqiClock = XiangqiThinkingClock.reset(xiangqi, thinkingSeconds)
                             clockTickAt = 0L; clockEpoch++; xiangqiStarted = false; xiangqiPaused = true; resumeAfterClockSetup = false; clockSetupVisible = true; checkpointXiangqi() } },
@@ -881,16 +921,17 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
                     onMatchResponse={accept->if(xiangqiMode==XiangqiPlayMode.ONLINE)onlineSession.respondToMatch(accept)else lanSession.respondToMatch(accept)},
                     onRematchResponse={accept->if(xiangqiMode==XiangqiPlayMode.ONLINE)onlineSession.respondToRematch(accept)else lanSession.respondToRematch(accept)},
                     onDisconnect = { if (activeRoomConnected()) leaveNetworkSafely(::closeToy) else { cancelHelp(); closeNetworkRooms() } },
-                    onPuzzle = { position -> cancelHelp();xiangqiHumanSide=position.turnSide;xiangqiColorAssigned=true;xiangqiRestoreToken++; xiangqiHistory = emptyList(); xiangqi=position; xiangqiClock=XiangqiThinkingClock.reset(position, thinkingSeconds)
+                    onPuzzle = { position -> cancelXiangqiSounds();cancelHelp();xiangqiHumanSide=position.turnSide;xiangqiColorAssigned=true;xiangqiRestoreToken++; xiangqiHistory = emptyList(); xiangqi=position; xiangqiClock=XiangqiThinkingClock.reset(position, thinkingSeconds)
                         clockTickAt = 0L; clockEpoch++; xiangqiStarted=true; xiangqiPaused=false; checkpointXiangqi() },
                     helpBusy = helpBusy || gameLoading || !archiveReady, assistedSelection = assistedSelection,
                     restorationToken = xiangqiRestoreToken,
+                    presentationEpoch = xiangqiSounds.epoch,
                     canUndo = when (xiangqiMode) {
                         XiangqiPlayMode.ONLINE -> online.canUndo
                         XiangqiPlayMode.LAN -> lan.canUndo
                         else -> LocalChessUndo.xiangqiTarget(xiangqiHistory, xiangqiMode == XiangqiPlayMode.CPU,xiangqiHumanSide) >= 0
                     },
-                    onUndo = { cancelHelp(); when (xiangqiMode) {
+                    onUndo = { cancelXiangqiSounds(); cancelHelp(); when (xiangqiMode) {
                         XiangqiPlayMode.ONLINE -> onlineSession.requestUndo()
                         XiangqiPlayMode.LAN -> lanSession.requestUndo()
                         XiangqiPlayMode.CPU -> undoXiangqi()
@@ -899,13 +940,8 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
                     onUndoResponse = { accept -> if (xiangqiMode == XiangqiPlayMode.ONLINE) onlineSession.respondToUndo(accept)
                         else if (xiangqiMode == XiangqiPlayMode.LAN) lanSession.respondToUndo(accept) },
                     onModalOpened = ::cancelHelp, onControlsBottom = { gameControlsBottom = it },
-                    onMoveSettled = { captured ->
-                        // 棋子落稳：这才是有声音的那一刻（回调只在真有动画时才会到）
-                        pendingMoveSound?.let {
-                            if (captured) UiSound.capture(context) else UiSound.woodMove(context)
-                            pendingMoveSound = null
-                        }
-                    })
+                    onMoveSettled = { epoch, position, _ -> settleXiangqiSound(epoch, position) },
+                    onPresentationSkipped = ::skipXiangqiPresentation)
                 SecretActivity.PAPER -> Unit // A fixed-size paper desk owns its own dialog below.
                 SecretActivity.WHEEL -> {
                     SecretPrizeWheel(rotation.value, minOf(boardSize, 270.dp))

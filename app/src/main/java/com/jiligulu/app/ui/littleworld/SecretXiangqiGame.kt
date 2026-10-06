@@ -58,9 +58,12 @@ import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.roundToInt
 import kotlin.math.sin
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 
 enum class XiangqiPlayMode { CPU, ONLINE, LAN, HOTSEAT }
 
@@ -78,24 +81,26 @@ internal fun ColumnScope.SecretXiangqiGame(state: XiangqiState, mode: XiangqiPla
     nearby: NearbyRoomsState? = null, onNearbyRetry: () -> Unit = {},
     onMatchResponse: (Boolean) -> Unit = {}, onRematchResponse: (Boolean) -> Unit = {}, onExit: () -> Unit = onDisconnect,
     onModalOpened: () -> Unit = {}, onControlsBottom: (Float) -> Unit = {},
-    onMoveSettled: (captured: Boolean) -> Unit = {}) {
+    presentationEpoch: Int = 0,
+    onPresentationSkipped: (epoch: Int, position: XiangqiState) -> Unit = { _, _ -> },
+    onMoveSettled: (epoch: Int, settledState: XiangqiState, captured: Boolean) -> Unit = { _, _, _ -> }) {
     val soundContext = LocalContext.current
     val finished = state.outcome!=XiangqiOutcome.PLAYING
     val networkMode = mode == XiangqiPlayMode.LAN || mode == XiangqiPlayMode.ONLINE
     val finish = remember(state,mode,lan.localSide,humanSide) { GameFinishPresenter.xiangqi(state,
         when(mode){XiangqiPlayMode.CPU->humanSide;XiangqiPlayMode.HOTSEAT->null;else->lan.localSide}) }
-    // 结果牌出现时机：等最后一手走完 → 停顿 → 杀法演出 → 字印停留之后才亮牌。
-    // 读档恢复的终局直接亮牌，不重播旧演出（需求：恢复终局时只显示结果）。
-    // outcomeSeen 记「进入本局时它就已经是终局了」——那种情况就是读档。
-    var outcomeSeen by remember(restorationToken) { mutableStateOf(state.outcome != XiangqiOutcome.PLAYING) }
-    var finishRevealed by remember(restorationToken) { mutableStateOf(state.outcome != XiangqiOutcome.PLAYING) }
-    LaunchedEffect(state.outcome, restorationToken) {
-        if (state.outcome == XiangqiOutcome.PLAYING) { finishRevealed = false; return@LaunchedEffect }
-        if (outcomeSeen) { finishRevealed = true; return@LaunchedEffect }
-        outcomeSeen = true
-        delay(XiangqiMoveAnimator.FINISH_REVEAL_MS.toLong())
-        finishRevealed = true
+    val presentationKey = XiangqiPresentationKey(presentationEpoch, restorationToken, mode.ordinal,
+        if (networkMode) lan.round else 0, if (networkMode) lan.hostAddress else "",
+        networkMode && lan.connected, if (networkMode) lan.localSide else humanSide)
+    // Restored terminal positions show their result immediately. Fresh wins are released only by
+    // the board's completion event, tied to this exact round and immutable terminal position.
+    var revealedFinish by remember(presentationKey) {
+        mutableStateOf(state.takeIf { it.outcome != XiangqiOutcome.PLAYING })
     }
+    var finishEvent by remember(presentationKey) { mutableIntStateOf(0) }
+    var promptRequest by remember(presentationKey) { mutableIntStateOf(0) }
+    LaunchedEffect(state, presentationKey) { if (state.outcome == XiangqiOutcome.PLAYING) revealedFinish = null }
+    val finishRevealed = revealedFinish == state
     var modeMenu by remember { mutableStateOf(false) }
     val modeNames = remember { mapOf(XiangqiPlayMode.CPU to "和阿噜下", XiangqiPlayMode.ONLINE to "创建房间",
         XiangqiPlayMode.LAN to "附近的人", XiangqiPlayMode.HOTSEAT to "同屏双人") }
@@ -120,8 +125,13 @@ internal fun ColumnScope.SecretXiangqiGame(state: XiangqiState, mode: XiangqiPla
             color = if (state.turnSide == XiangqiSide.RED) Color(0xFFAF766A) else Color(0xFF766A7F))
     }
     var matchResponseSent by remember(mode,lan.pendingMatchName) {mutableStateOf(false)}
-    // 有棋友来敲门：匹配成功的声音（上行三音，比「收好」更亮）
-    LaunchedEffect(lan.pendingMatchName) { if (lan.pendingMatchName != null) UiSound.match(soundContext) }
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    var wasConnected by remember(mode) { mutableStateOf(lan.connected) }
+    LaunchedEffect(mode, lan.connected) {
+        val newlyConnected = !wasConnected && lan.connected
+        wasConnected = lan.connected
+        if (networkMode && newlyConnected && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) UiSound.match(soundContext)
+    }
     if(networkMode && lan.pendingMatchName!=null) {
         SecretWoodDialog("棋友来敲门啦",{if(!matchResponseSent){matchResponseSent=true;onMatchResponse(false)}},
             confirmLabel="一起下",onConfirm={if(!matchResponseSent){matchResponseSent=true;onMatchResponse(true)}},
@@ -161,6 +171,14 @@ internal fun ColumnScope.SecretXiangqiGame(state: XiangqiState, mode: XiangqiPla
         Text("联机棋桌不限时。双方可以看见对方正在选中的棋子，落子后提示自动收好。",
             style = MaterialTheme.typography.bodySmall)
     }
+    GameFinishOverlay(
+        result = finish.takeIf { finishRevealed }, roundIdentity = presentationKey,
+        terminalIdentity = state.takeIf { finishRevealed && finished }, freshEvent = finishEvent,
+        promptRequest = promptRequest, onAgain = onRestart, onExit = onExit,
+        myRematchRequested = lan.myRematchRequested,
+        suppressPrompt = networkMode && lan.rematchRequestedBy != null &&
+            lan.rematchRequestedBy != lan.localSide && !lan.myRematchRequested,
+    )
     val playerName = if (state.turnSide == XiangqiSide.RED) "红方" else "黑方"
     val inCheck = remember(state) { state.outcome == XiangqiOutcome.PLAYING && XiangqiEngine.isInCheck(state, state.turnSide) }
     val status = when (state.outcome) {
@@ -178,7 +196,7 @@ internal fun ColumnScope.SecretXiangqiGame(state: XiangqiState, mode: XiangqiPla
     }
     // 需求③：棋子还在路上时，本地再点棋盘不算一步——拦住重复落子。
     // 状态更新在动画的 LaunchedEffect 里（drawscope 拿不到回调，所以提到上一层）。
-    var boardAnimating by remember { mutableStateOf(false) }
+    var boardAnimating by remember(presentationKey) { mutableStateOf(false) }
     val canMove = !helpBusy && !boardAnimating && state.outcome == XiangqiOutcome.PLAYING && when (mode) {
         XiangqiPlayMode.CPU -> !paused && state.turnSide == humanSide
         XiangqiPlayMode.HOTSEAT -> !paused
@@ -188,23 +206,32 @@ internal fun ColumnScope.SecretXiangqiGame(state: XiangqiState, mode: XiangqiPla
     XiangqiBoard(state, boardWidth, canMove,
         flipped = mode==XiangqiPlayMode.CPU && humanSide==XiangqiSide.BLACK || networkMode && lan.localSide == XiangqiSide.BLACK, onMove = onMove,
         remoteSelection = remoteSelection, onSelectionChanged = onSelectionChanged, assistedSelection = assistedSelection,
-        restorationToken = restorationToken,
-        onAnimatingChange = { boardAnimating = it },
-        // 落稳那一刻才把"该出声了"传上去：声音要落在棋子上，而不是落在点击上
-        onStepSettled = { _, captured -> onMoveSettled(captured) })
+        presentationKey = presentationKey,
+        onAnimatingChange = { key, busy -> if (key == presentationKey) boardAnimating = busy },
+        onStepSettled = { key, position, captured ->
+            if (key == presentationKey) onMoveSettled(key.epoch, position, captured)
+        },
+        onFinishReady = { key, position, fresh ->
+            if (key == presentationKey && position == state) {
+                if (fresh && revealedFinish != position) finishEvent++
+                revealedFinish = position
+            }
+        },
+        onPresentationSkipped = { key, position ->
+            if (key == presentationKey) onPresentationSkipped(key.epoch, position)
+        })
     if(finish!=null && finishRevealed) {
-        GameFinishPlate(finish,onRestart,onExit,networkMode,lan.roomEnded,lan.resultSecondsLeft,lan.myRematchRequested,
+        GameFinishActions(finish,{ promptRequest++ },onExit,networkMode,lan.roomEnded,lan.resultSecondsLeft,lan.myRematchRequested,
             Modifier.width(boardWidth).padding(top=10.dp).onGloballyPositioned{onControlsBottom(it.boundsInRoot().bottom)})
     } else {
     Text(
-        // 演出期间不剧透胜负：结果牌还没亮，这里就先别说谁赢了
-        if (finish != null && !finishRevealed) "这一局结束啦，看棋盘上的印记…" else status,
+        if (finish != null && !finishRevealed) "等这一手落稳…" else status,
         modifier = Modifier.padding(vertical = 10.dp).width(boardWidth), color = Color(0xFF766A7F),
         style = MaterialTheme.typography.bodySmall, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
         Row(Modifier.width(boardWidth).padding(horizontal = 6.dp, vertical = 4.dp)) {
             GameIconTool(Icons.AutoMirrored.Outlined.Undo, "悔棋", onUndo, Modifier.weight(1f),
                 enabled = canUndo && !helpBusy && (!networkMode || !lan.awaitingAck && lan.pendingUndoRequest == null),
-                cue = UiCue.UNDO)
+                cue = UiCue.TOUCH)
             if (networkMode) {
                 GameIconTool(Icons.Outlined.Logout, "离开棋桌", onDisconnect, Modifier.weight(1f))
             } else {
@@ -291,8 +318,11 @@ internal fun GameIconTool(icon: ImageVector, label: String, onClick: () -> Unit,
 @Composable
 private fun XiangqiBoard(state: XiangqiState, width: Dp, canMove: Boolean, flipped: Boolean,
     onMove: (XiangqiMove) -> Unit, remoteSelection: GridCell?, onSelectionChanged: (GridCell?) -> Unit,
-    assistedSelection: GridCell?, restorationToken: Int,
-    onAnimatingChange: (Boolean) -> Unit = {}, onStepSettled: (mover: Int, captured: Boolean) -> Unit = { _, _ -> }) {
+    assistedSelection: GridCell?, presentationKey: XiangqiPresentationKey,
+    onAnimatingChange: (XiangqiPresentationKey, Boolean) -> Unit,
+    onStepSettled: (XiangqiPresentationKey, XiangqiState, Boolean) -> Unit,
+    onFinishReady: (XiangqiPresentationKey, XiangqiState, Boolean) -> Unit,
+    onPresentationSkipped: (XiangqiPresentationKey, XiangqiState) -> Unit) {
     val context = LocalContext.current
     val typeface = remember(context) { context.resources.getFont(R.font.zcool_kuaile) }
     val wood = remember { Brush.linearGradient(listOf(Color(0xFFF2DFB9), Color(0xFFE5C79A))) }
@@ -319,70 +349,133 @@ private fun XiangqiBoard(state: XiangqiState, width: Dp, canMove: Boolean, flipp
     val latestState by rememberUpdatedState(state)
     val latestLegal by rememberUpdatedState(legal)
     val latestMove by rememberUpdatedState(onMove)
-    val checkPulse = remember { Animatable(0f) }
-    val winPulse = remember { Animatable(0f) }
-    val finishProof = remember(state) { XiangqiMateClassifier.classify(state) }
-    var animationInitialized by remember(restorationToken) { mutableStateOf(false) }
-    // 展示层自己留上一帧：被吃棋子只能从这里取，引擎的 state 里已经没有它了。
-    var snapshot by remember(restorationToken) { mutableStateOf(XiangqiViewSnapshot(state.board, state.lastMove)) }
-    var playing by remember { mutableStateOf<XiangqiStepAnim?>(null) }
-    var trailAlpha by remember { mutableStateOf(1f) }
-    val travelProgress = remember { Animatable(1f) }
-    val landingFlash = remember { Animatable(0f) }
-    val sealPulse = remember { Animatable(0f) }
+    val queue = remember(presentationKey) {
+        XiangqiMoveQueue(XiangqiViewSnapshot.of(state, presentationKey))
+    }
+    val wake = remember(queue) { Channel<Unit>(Channel.CONFLATED) }
+    var displayed by remember(queue) { mutableStateOf(state) }
+    var playing by remember(queue) { mutableStateOf<XiangqiStepAnim?>(null) }
+    var landingCell by remember(queue) { mutableStateOf<GridCell?>(null) }
+    var checkPosition by remember(queue) { mutableStateOf<XiangqiState?>(null) }
+    var finishingPosition by remember(queue) { mutableStateOf<XiangqiState?>(null) }
+    var trailAlpha by remember(queue) { mutableStateOf(1f) }
+    var motionJob by remember(queue) { mutableStateOf<Job?>(null) }
+    var flashJob by remember(queue) { mutableStateOf<Job?>(null) }
+    var checkJob by remember(queue) { mutableStateOf<Job?>(null) }
+    val travelProgress = remember(queue) { Animatable(1f) }
+    val captureProgress = remember(queue) { Animatable(1f) }
+    val landingFlash = remember(queue) { Animatable(0f) }
+    val checkPulse = remember(queue) { Animatable(0f) }
+    val winPulse = remember(queue) { Animatable(0f) }
+    val finishProof = remember(displayed) { XiangqiMateClassifier.classify(displayed) }
+    val latestIdentity by rememberUpdatedState(presentationKey)
     val latestBusy by rememberUpdatedState(onAnimatingChange)
     val latestSettled by rememberUpdatedState(onStepSettled)
-    LaunchedEffect(state.ply, state.outcome, restorationToken) {
-        val animate = animationInitialized
-        animationInitialized = true
-        checkPulse.snapTo(0f)
-        winPulse.snapTo(0f)
-        sealPulse.snapTo(0f)
+    val latestFinishReady by rememberUpdatedState(onFinishReady)
+    val latestSkipped by rememberUpdatedState(onPresentationSkipped)
 
-        // 走子演出：首帧、读档、棋盘没变（悔棋/纠正）→ 不演，避免重播旧棋
-        val next = XiangqiViewSnapshot(state.board, state.lastMove)
-        val step = if (animate) XiangqiMoveAnimator.stepFrom(snapshot, next) else null
-        snapshot = next
-        if (step != null) {
-            playing = step
-            latestBusy(true)
-            travelProgress.snapTo(0f)
-            travelProgress.animateTo(1f, tween(step.durationMillis, easing = FastOutSlowInEasing))
-            // 被吃子留在原地缩没，不要跟着移动中的棋子一起走
-            if (step.captured != 0) delay(XiangqiMoveAnimator.CAPTURE_FADE_MS.toLong())
-            playing = null
-            landingFlash.snapTo(1f)
-            landingFlash.animateTo(0f, tween(XiangqiMoveAnimator.LANDING_FLASH_MS))
-            latestSettled(step.mover, step.captured != 0)
-            latestBusy(false)
+    DisposableEffect(queue) {
+        onDispose {
+            queue.invalidate()
+            motionJob?.cancel(); flashJob?.cancel(); checkJob?.cancel()
+            wake.close()
+            latestBusy(presentationKey, false)
         }
-
-        // 落稳之后才是结局演出——最后一手必须先走完，
-        // 否则棋子会凭空出现在终点，或者演出盖在还在路上的棋子上。
-        if (animate && state.outcome != XiangqiOutcome.PLAYING) {
-            delay(XiangqiMoveAnimator.FINISH_PAUSE_MS.toLong())
-            coroutineScope {
-                // 杀法演出与字印并行：演出走到 SEAL_AT_MS 时盖印，
-                // 字印随后一直留到结果牌出现（≥1 秒，满足需求的停留要求）
-                launch {
-                    winPulse.snapTo(1f)
-                    winPulse.animateTo(0f, tween(XiangqiMoveAnimator.FINISH_SHOW_MS))
-                }
-                launch {
-                    delay(XiangqiMoveAnimator.SEAL_AT_MS.toLong())
-                    sealPulse.animateTo(1f, tween(XiangqiMoveAnimator.SEAL_FADE_MS))
-                }
+    }
+    // A new authoritative snapshot only appends to the queue. It does not cancel a legal
+    // preceding move in flight; undo/correction/overflow instead resets the whole presentation.
+    LaunchedEffect(state, queue) {
+        when (queue.offer(XiangqiViewSnapshot.of(state, presentationKey))) {
+            XiangqiQueueUpdate.UNCHANGED -> Unit
+            XiangqiQueueUpdate.ENQUEUED -> {
+                latestBusy(presentationKey, true)
+                wake.trySend(Unit)
             }
-        } else if (animate && XiangqiEngine.isInCheck(state, state.turnSide)) {
-            checkPulse.snapTo(1f); checkPulse.animateTo(0f, tween(900))
+            XiangqiQueueUpdate.RESET -> {
+                motionJob?.cancel(); flashJob?.cancel(); checkJob?.cancel()
+                playing = null; landingCell = null; checkPosition = null; finishingPosition = null
+                displayed = state
+                latestBusy(presentationKey, false)
+                if (state.outcome != XiangqiOutcome.PLAYING) latestFinishReady(presentationKey, state, false)
+                latestSkipped(presentationKey, state)
+            }
         }
     }
-    // 轨迹不是永久高亮：清晰留一会儿，之后留一道很淡的记号
-    LaunchedEffect(state.ply) {
-        trailAlpha = 1f
-        delay(XiangqiMoveAnimator.TRAIL_HOLD_MS.toLong())
-        trailAlpha = 0.28f
+    LaunchedEffect(queue) {
+        val presentationScope = this
+        for (signal in wake) {
+            while (true) {
+                val entry = queue.take() ?: break
+                val step = entry.step
+                fun owns() = queue.owns(entry) && latestIdentity == entry.identity
+                val job = launch {
+                    try {
+                        if (!owns()) return@launch
+                        flashJob?.cancel(); checkJob?.cancel()
+                        landingCell = null; checkPosition = null; finishingPosition = null
+                        landingFlash.snapTo(0f); checkPulse.snapTo(0f)
+                        winPulse.snapTo(0f)
+                        travelProgress.snapTo(0f); captureProgress.snapTo(0f)
+                        if (!owns()) return@launch
+                        displayed = step.after
+                        playing = step
+                        latestBusy(entry.identity, true)
+                        travelProgress.animateTo(1f, tween(step.durationMillis, easing = FastOutSlowInEasing))
+                        if (!owns()) return@launch
+                        // Arrival is the sound event. Capture fading and landing light happen later.
+                        latestSettled(entry.identity, step.after, step.captured != 0)
+                        landingCell = step.to
+                        landingFlash.snapTo(1f)
+                        val flash = presentationScope.launch {
+                            landingFlash.animateTo(0f, tween(XiangqiMoveAnimator.LANDING_FLASH_MS))
+                            if (owns() && landingCell == step.to) landingCell = null
+                        }
+                        flashJob = flash
+                        if (step.captured != 0) {
+                            captureProgress.animateTo(1f, tween(XiangqiMoveAnimator.CAPTURE_FADE_MS))
+                        }
+                        if (!owns()) return@launch
+                        playing = null
+                        latestBusy(entry.identity, queue.hasPending)
+                        if (step.after.outcome != XiangqiOutcome.PLAYING) {
+                            finishingPosition = step.after
+                            // The centered watermark and brief board proof begin together once
+                            // the piece has arrived and the victim's 100 ms fade has completed.
+                            latestFinishReady(entry.identity, step.after, true)
+                            winPulse.snapTo(1f)
+                            winPulse.animateTo(0f, tween(GAME_FINISH_BOARD_EFFECT_MS))
+                            if (!owns()) return@launch
+                            finishingPosition = null
+                        } else if (XiangqiEngine.isInCheck(step.after, step.after.turnSide)) {
+                            checkPosition = step.after
+                            checkJob = presentationScope.launch {
+                                checkPulse.snapTo(1f)
+                                checkPulse.animateTo(0f, tween(900))
+                                if (owns()) checkPosition = null
+                            }
+                        }
+                    } finally {
+                        // An invalidated job cannot clear the next generation's busy state or art.
+                        if (owns()) {
+                            playing = null
+                            latestBusy(entry.identity, queue.hasPending)
+                        }
+                    }
+                }
+                motionJob = job
+                job.join()
+                if (motionJob === job) motionJob = null
+            }
+        }
     }
+    LaunchedEffect(displayed, playing, queue) {
+        trailAlpha = 1f
+        if (playing == null) {
+            delay(XiangqiMoveAnimator.TRAIL_HOLD_MS.toLong())
+            trailAlpha = 0.28f
+        }
+    }
+    val shown = displayed
     Canvas(Modifier.size(width, width * 1.13f).shadow(3.dp, RoundedCornerShape(13.dp), clip = false)
         .clip(RoundedCornerShape(13.dp)).background(wood).drawWithCache {
             val grains = List(24) { band ->
@@ -398,7 +491,8 @@ private fun XiangqiBoard(state: XiangqiState, width: Dp, canMove: Boolean, flipp
                     style = Stroke(1.dp.toPx()))
             }
         }
-        .semantics { contentDescription = "中国象棋棋盘，${if (state.turnSide == XiangqiSide.RED) "红方" else "黑方"}回合，点棋子再点落点。" }
+        .testTag("xiangqi-board")
+        .semantics { contentDescription = "中国象棋棋盘，${if (shown.turnSide == XiangqiSide.RED) "红方" else "黑方"}回合，点棋子再点落点。" }
         .pointerInput(canMove, flipped) {
             if (canMove) detectTapGestures { tap ->
                 val padding = size.width * .06f
@@ -448,7 +542,7 @@ private fun XiangqiBoard(state: XiangqiState, width: Dp, canMove: Boolean, flipp
         drawContext.canvas.nativeCanvas.drawText("汉 界", padding + 6 * stepX, padding + 4.5f * stepY + textPaint.textSize * .35f, textPaint)
         // 需求③：轨迹清晰留 TRAIL_HOLD_MS，之后只留一道很淡的记号——
         // 既不永久高亮抢注意力，也不突然消失让人找不到刚才那一步。
-        state.lastMove?.let { move ->
+        shown.lastMove?.let { move ->
             if (playing == null) {
                 val a = trailAlpha
                 drawLine(Color(0xFFC1A57E).copy(alpha = .4f * a), position(move.from), position(move.to), 2.dp.toPx())
@@ -457,13 +551,14 @@ private fun XiangqiBoard(state: XiangqiState, width: Dp, canMove: Boolean, flipp
             }
         }
         // 落稳那一刻在落点闪一下，提示"刚才那一步落在这儿"
-        if (landingFlash.value > 0f && state.lastMove != null) {
+        val landing = landingCell
+        if (landingFlash.value > 0f && landing != null) {
             val f = landingFlash.value
             drawCircle(Color(0xFFC8A968).copy(alpha = f * .85f),
-                stepX * (.47f + (1f - f) * .22f), position(state.lastMove.to), style = Stroke(2.dp.toPx()))
+                stepX * (.47f + (1f - f) * .22f), position(landing), style = Stroke(2.dp.toPx()))
         }
         legal.forEach { move ->
-            val capture = state.pieceAt(move.to.x, move.to.y) != 0
+            val capture = shown.pieceAt(move.to.x, move.to.y) != 0
             if (capture) drawCircle(Color(0xFFAC765F).copy(alpha = .85f), stepX * .475f,
                 position(move.to), style = Stroke(2.5.dp.toPx()))
             else {
@@ -510,7 +605,7 @@ private fun XiangqiBoard(state: XiangqiState, width: Dp, canMove: Boolean, flipp
         }
 
         val anim = playing
-        state.board.forEachIndexed { index, piece ->
+        shown.board.forEachIndexed { index, piece ->
             if (piece != 0) {
                 val cell = GridCell(index % 9, index / 9)
                 // 动画期间，落点上的静态棋子先让位——否则会和新落下的那枚重影
@@ -528,11 +623,11 @@ private fun XiangqiBoard(state: XiangqiState, width: Dp, canMove: Boolean, flipp
                     }
                 }
             }
+        }
 
         // 演出中的那一步：移动中的棋子、被吃子的缩没、起点空心标记与克制的行进箭头
         if (anim != null) {
-            val raw = travelProgress.value
-            val t = XiangqiMoveAnimator.travel(raw)
+            val t = travelProgress.value
             val from = position(anim.from)
             val to = position(anim.to)
             val moving = Offset(from.x + (to.x - from.x) * t, from.y + (to.y - from.y) * t)
@@ -556,35 +651,34 @@ private fun XiangqiBoard(state: XiangqiState, width: Dp, canMove: Boolean, flipp
             drawPiece(anim.to, anim.mover, at = moving, highlight = true)
             // 被吃子一直停在落点上，直到移动的棋子撞上它才缩没
             if (anim.captured != 0) {
-                val f = XiangqiMoveAnimator.captureFade(raw)
-                if (f > 0f) drawPiece(anim.to, anim.captured, at = to, scale = 1f - f * .45f, alpha = 1f - f)
+                val f = captureProgress.value
+                if (f < 1f) drawPiece(anim.to, anim.captured, at = to, scale = 1f - f * .45f, alpha = 1f - f)
             }
-        }
         }
         remoteSelection?.takeIf { it.x in 0..8 && it.y in 0..9 }?.let { cell ->
             drawCircle(Color(0xFF688F88), stepX * .48f, position(cell),
                 style = Stroke(2.5.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(5.dp.toPx(), 3.dp.toPx()))))
         }
-        if (checkPulse.value > 0f) {
-            val general = state.board.indexOf(state.turnSide.sign * XiangqiEngine.GENERAL)
+        if (checkPosition == shown && checkPulse.value > 0f) {
+            val general = shown.board.indexOf(shown.turnSide.sign * XiangqiEngine.GENERAL)
             if (general >= 0) drawCircle(Color(0xFFC06056).copy(alpha = checkPulse.value * .7f),
                 stepX * (.47f + (1f - checkPulse.value) * .28f), position(GridCell(general % 9, general / 9)),
                 style = Stroke(2.5.dp.toPx()))
         }
-        if (winPulse.value > 0f && state.lastMove != null) {
-            val finalMove = state.lastMove
+        if (finishingPosition == shown && winPulse.value > 0f && shown.lastMove != null) {
+            val finalMove = shown.lastMove
             val center = position(finalMove.to)
-            val piece = abs(state.pieceAt(finalMove.to.x, finalMove.to.y))
+            val piece = abs(shown.pieceAt(finalMove.to.x, finalMove.to.y))
             val phase = 1f - winPulse.value
             val gold = Color(0xFFD5A455).copy(alpha = winPulse.value * .8f)
             val proof=finishProof
             if(proof?.family==XiangqiFinishFamily.DOUBLE_CANNON) {
-                val cannons=state.board.indices.filter{state.board[it]==proof.winner.sign*XiangqiEngine.CANNON}
+                val cannons=shown.board.indices.filter{shown.board[it]==proof.winner.sign*XiangqiEngine.CANNON}
                     .map{GridCell(it%9,it/9)}
                 cannons.forEach { cell->repeat(2){ring->drawCircle(gold,stepX*(.5f+phase*(ring+1)*.7f),position(cell),style=Stroke(2.dp.toPx()))} }
                 if(cannons.size==2)drawLine(gold,position(cannons[0]),position(cannons[1]),3.dp.toPx(),pathEffect=PathEffect.dashPathEffect(floatArrayOf(5.dp.toPx(),3.dp.toPx())))
             } else if(proof?.family==XiangqiFinishFamily.SMOTHERED_CANNON||proof?.family==XiangqiFinishFamily.STALEMATE) {
-                val king=state.board.indexOf(proof.winner.opponent.sign*XiangqiEngine.GENERAL)
+                val king=shown.board.indexOf(proof.winner.opponent.sign*XiangqiEngine.GENERAL)
                 if(king>=0) {val p=position(GridCell(king%9,king/9));drawRoundRect(gold,p-Offset(stepX*.55f,stepY*.55f),
                     androidx.compose.ui.geometry.Size(stepX*1.1f,stepY*1.1f),CornerRadius(5.dp.toPx()),style=Stroke(2.dp.toPx()))}
                 proof.checkingCells.forEach{cell->drawCircle(gold,stepX*(.45f+phase),position(cell),style=Stroke(2.dp.toPx()))}
@@ -614,24 +708,5 @@ private fun XiangqiBoard(state: XiangqiState, width: Dp, canMove: Boolean, flipp
             }
         }
 
-        // 结算字印：演出中段盖下，一直到结果牌出现都留在棋盘上。
-        // 需求要求「字印清楚停留至少 1 秒、棋盘保持可见」，所以用半透明印章压在中央：
-        // 字认得出，局面也没有被盖死。
-        val seal = sealPulse.value
-        if (seal > 0f) {
-            val text = xiangqiSealText(finishProof, state.outcome)
-            val sealCenter = Offset(size.width / 2, size.height * .43f)
-            val scale = 1f + (1f - seal) * .75f
-            val radius = stepX * 1.5f * scale
-            drawCircle(Color(0xFF9E3B32).copy(alpha = seal * .90f), radius, sealCenter)
-            drawCircle(Color(0xFFFFF3E2).copy(alpha = seal), radius, sealCenter, style = Stroke(3.dp.toPx()))
-            drawCircle(Color(0xFFFFF3E2).copy(alpha = seal * .65f), radius * .87f, sealCenter, style = Stroke(1.5.dp.toPx()))
-            textPaint.color = android.graphics.Color.rgb(255, 243, 226)
-            textPaint.alpha = (255 * seal).toInt().coerceIn(0, 255)
-            textPaint.textSize = stepX * (if (text.length > 2) .55f else .78f) * scale
-            drawContext.canvas.nativeCanvas.drawText(text, sealCenter.x,
-                sealCenter.y - (textPaint.ascent() + textPaint.descent()) / 2, textPaint)
-            textPaint.alpha = 255
-        }
     }
 }

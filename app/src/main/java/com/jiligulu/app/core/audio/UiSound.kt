@@ -22,7 +22,8 @@ enum class UiCue(val raw: Int, val volume: Float, val minimumGap: Long = 65, val
     PAPER(R.raw.ui_paper, .28f, 130, intArrayOf(R.raw.ui_paper_2, R.raw.ui_paper_3)),
     CONFIRM(R.raw.ui_confirm, .25f, 180),
     REMOVE(R.raw.ui_remove, .18f, 120),
-    CALCULATOR(R.raw.ui_calculator, .20f, 28, intArrayOf(R.raw.ui_calculator_2, R.raw.ui_calculator_3)),
+    // The keypad owns gesture deduplication. Every accepted press gets feedback.
+    CALCULATOR(R.raw.ui_calculator, .20f, 0, intArrayOf(R.raw.ui_calculator_2, R.raw.ui_calculator_3)),
     PIECE_SELECT(R.raw.ui_piece_select, .28f),
     WOOD_MOVE(R.raw.ui_wood_move, .38f, 85),
     STONE_MOVE(R.raw.ui_stone_move, .32f, 85),
@@ -129,14 +130,7 @@ object UiSound {
         private var touchStream = 0
         private var touchAt = 0L
         private var semanticAt = 0L
-        /**
-         * 微扰用的随机源。
-         *
-         * 需求⑤：常用音效准备多个样本、并做音高 ±3% / 音量 ±4% 的微调，
-         * 让连续触发听起来像"同一件乐器在手上有细微差别"，而不是一串复制的采样。
-         * 当前每一类只有一个音频资源（程序合成），所以**先靠微扰制造自然变化**；
-         * 同类的多样本素材补上之后，这里再加"避免连续用同一个样本"的轮换。
-         */
+        /** Small pitch/volume variation supplements the rotating samples. */
         private val jitter = kotlin.random.Random(System.nanoTime())
         private val pool = SoundPool.Builder().setMaxStreams(3).setAudioAttributes(
             // Custom application feedback follows media volume, like the chess sounds.
@@ -159,27 +153,28 @@ object UiSound {
             // 只挑 ready 的，是因为 SoundPool 加载是异步的——拿没加载完的 id 播会静默失败。
             val usable = ids.getValue(cue).filter { ready[it] == true }
             if (usable.isEmpty()) return
-            val slot = variantCursor[cue.ordinal].coerceIn(0, usable.size - 1)
-            variantCursor[cue.ordinal] = (slot + 1) % usable.size
-            val id = usable[slot]
             val now = SystemClock.elapsedRealtime()
             if (now - last[cue.ordinal] < cue.minimumGap) return
             // Defensive only: callers choose one semantic cue. An outer generic wrapper
             // must not add a knock to the paper/stone sound.
             if (cue == UiCue.TOUCH) {
                 if (now - semanticAt < 80) return
-                touchAt=now
             } else {
-                semanticAt=now
                 if (now - touchAt < 80) pool.stop(touchStream)
             }
             if (cue == UiCue.WIN || cue == UiCue.LOSE || cue == UiCue.DRAW) silence()
-            last[cue.ordinal] = now
+            val slot = variantCursor[cue.ordinal].coerceIn(0, usable.size - 1)
+            val id = usable[slot]
             // ±3% 音高 / ±4% 音量：范围刻意做得很小，小到听不出"跑调"，
             // 但足以让连按、连响的同一声音不显得是同一份采样在重播。
             val rate = 1f + (jitter.nextFloat() - .5f) * PITCH_VARIATION
             val volume = (cue.volume * (1f + (jitter.nextFloat() - .5f) * VOLUME_VARIATION)).coerceIn(0f, 1f)
             val stream = pool.play(id, volume, volume, 1, 0, rate)
+            if (stream == 0) return
+            // Suppressed or failed requests must not consume a variant or throttle the next press.
+            variantCursor[cue.ordinal] = (slot + 1) % usable.size
+            last[cue.ordinal] = now
+            if (cue == UiCue.TOUCH) touchAt=now else semanticAt=now
             streams[nextStream] = stream; nextStream = (nextStream+1)%streams.size
             if (cue == UiCue.TOUCH) touchStream=stream
         }
