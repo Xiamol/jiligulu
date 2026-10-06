@@ -70,7 +70,7 @@ class GlassFloatingBubbleView @JvmOverloads constructor(
         // The default launcher asset contains a cream square; this sprite has true alpha.
         setImageResource(R.drawable.gulu_idle)
         scaleType = ScaleType.FIT_CENTER
-        imageAlpha = 110
+        imageAlpha = 170
         // Shadow is cached below, so an elevation assigned by an existing service cannot
         // introduce a second rectangular platform shadow around the transparent corners.
         outlineProvider = null
@@ -85,8 +85,8 @@ class GlassFloatingBubbleView @JvmOverloads constructor(
         side = min(w, h).toFloat()
         val cx = w / 2f
         val cy = h / 2f
-        val half = side * .42f
-        radius = side * .28f
+        val half = side * .46f
+        radius = side * .24f
         glassBounds.set(cx - half, cy - half, cx + half, cy + half)
         innerBounds.set(glassBounds)
         innerBounds.inset(side * .018f, side * .018f)
@@ -101,7 +101,7 @@ class GlassFloatingBubbleView @JvmOverloads constructor(
         glowPaint.shader = RadialGradient(cx - side * .19f, cy - side * .22f, side * .63f,
             intArrayOf(Color.argb(46, 255, 255, 255), Color.TRANSPARENT),
             floatArrayOf(0f, 1f), Shader.TileMode.CLAMP)
-        rimPaint.strokeWidth = (side * .044f).coerceAtLeast(1.8f)
+        rimPaint.strokeWidth = (side * .018f).coerceAtLeast(1.2f)
         rimPaint.shader = SweepGradient(cx, cy,
             intArrayOf(Color.argb(232, 255, 255, 255), Color.argb(74, 59, 46, 93),
                 Color.argb(180, 248, 241, 255), Color.argb(250, 255, 255, 255),
@@ -109,8 +109,8 @@ class GlassFloatingBubbleView @JvmOverloads constructor(
             floatArrayOf(0f, .25f, .5f, .68f, .84f, 1f))
         lightMatrix.setRotate((lightX-.5f)*110f+(lightY-.5f)*45f,cx,cy)
         rimPaint.shader?.setLocalMatrix(lightMatrix)
-        innerRimPaint.strokeWidth = (side * .012f).coerceAtLeast(.8f)
-        innerRimPaint.color = Color.argb(70, 77, 65, 110)
+        innerRimPaint.strokeWidth = (side * .006f).coerceAtLeast(.6f)
+        innerRimPaint.color = Color.argb(34, 77, 65, 110)
 
         topGlint.reset()
         topGlint.moveTo(glassBounds.left + side * .11f, glassBounds.top + side * .064f)
@@ -134,7 +134,7 @@ class GlassFloatingBubbleView @JvmOverloads constructor(
         val shadowCanvas = Canvas(shadow)
         val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.argb(12, 121, 94, 176)
-            setShadowLayer(side * .045f, 0f, side * .021f, Color.argb(47, 54, 33, 89))
+            setShadowLayer(side * .027f, 0f, side * .015f, Color.argb(24, 54, 33, 89))
         }
         shadowCanvas.drawRoundRect(glassBounds, radius, radius, shadowPaint)
         softShadow = shadow
@@ -157,7 +157,7 @@ class GlassFloatingBubbleView @JvmOverloads constructor(
         val artwork = canvas.save()
         canvas.clipPath(glassPath)
         // Keep the eyes, sprout and purple silhouette recognizable on light/dark surfaces.
-        canvas.scale(.75f, .75f, cx, cy)
+        canvas.scale(.86f, .86f, cx, cy)
         super.onDraw(canvas)
         canvas.restoreToCount(artwork)
 

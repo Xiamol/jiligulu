@@ -1,5 +1,13 @@
 package com.jiligulu.app.ui.add
 
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material.icons.outlined.AddPhotoAlternate
+import com.jiligulu.app.core.audio.UiSound
+import com.jiligulu.app.ui.components.uiTap
+import com.jiligulu.app.ui.memories.MemoryPhoto
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -29,6 +37,29 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Notes
+import androidx.compose.material.icons.outlined.EditNote
+import androidx.compose.material.icons.outlined.Schedule
+import androidx.compose.material.icons.outlined.KeyboardArrowDown
+import androidx.compose.material.icons.outlined.SwapVert
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.font.FontWeight
+import com.jiligulu.app.ui.components.GuluDialog
+import com.jiligulu.app.ui.components.CompactCalendarDialog
+import java.time.Instant
+import java.time.ZoneId
+import java.time.YearMonth
+import java.time.format.DateTimeFormatter
+import kotlinx.coroutines.awaitCancellation
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Calculate
@@ -93,6 +124,19 @@ fun AddBillScreen(onBack: () -> Unit, vm: AddBillViewModel = viewModel(factory =
     initialSticker: Sticker? = null, onSaved: () -> Unit = onBack) {
     val categories by vm.categories.collectAsStateWithLifecycle()
     val saveState by vm.saveState.collectAsStateWithLifecycle()
+    val categoryPreview by vm.categoryPreview.collectAsStateWithLifecycle()
+    val photoState by vm.photo.collectAsStateWithLifecycle()
+    val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) vm.importPhoto(uri)
+    }
+    BackHandler(enabled = saveState.isSaving) {}
+    val context = LocalContext.current
+    val entryPrefs = remember(context) { context.getSharedPreferences("manual_bill_entry", android.content.Context.MODE_PRIVATE) }
+    var automaticCategory by rememberSaveable(initialSticker?.id) { mutableStateOf(initialSticker == null && entryPrefs.getBoolean("automatic_category", true)) }
+    val setAutomaticCategory: (Boolean) -> Unit = { enabled ->
+        automaticCategory = enabled
+        entryPrefs.edit().putBoolean("automatic_category", enabled).apply()
+    }
     val currentOnSaved by rememberUpdatedState(onSaved)
     val lifecycleOwner = LocalLifecycleOwner.current
     LaunchedEffect(vm, lifecycleOwner) {
@@ -118,11 +162,24 @@ fun AddBillScreen(onBack: () -> Unit, vm: AddBillViewModel = viewModel(factory =
             userPickedCategory = true
         }
     }
-    val suggested = CategoryEngine.suggest(detail, categories)
-    val effectiveCategoryId = if (userPickedCategory) selectedCategoryId else suggested?.id ?: selectedCategoryId
+    val previewCurrent = categoryPreview.inputKey == manualCategoryInputKey(detail, note, type)
+    val effectiveCategoryId = if (automaticCategory) categoryPreview.categoryId ?: -1L else selectedCategoryId
+    val proposedCategory = categoryPreview.proposal.takeIf { automaticCategory && previewCurrent }
+    val categoryReady = if (automaticCategory) previewCurrent && categoryPreview.name.isNotBlank() && !categoryPreview.resolving &&
+        (proposedCategory != null || categories.any { it.id == effectiveCategoryId }) else categories.any { it.id == effectiveCategoryId }
     val amountFen = Formatters.yuanTextToFen(amountText)
     val amountInvalid = amountText.isNotBlank() && amountFen == null
     val editable = !saveState.isSaving
+    var showDate by rememberSaveable { mutableStateOf(false) }
+    var showTime by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(detail, note, type, automaticCategory, amountFen != null, categories, lifecycleOwner) {
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            try {
+                vm.prepareCategory(detail, note, type, automaticCategory && amountFen != null && categories.isNotEmpty())
+                awaitCancellation()
+            } finally { vm.cancelCategoryPreview() }
+        }
+    }
     // 长按分类要删它——先把「删谁、会挪走几笔」查清楚再问，不让用户自己数。
     var pendingDelete by remember { mutableStateOf<PendingCategoryDelete?>(null) }
     // 轻提示（"收纳箱删不得"、删除结果）：不用 Material 的 Snackbar 灰条，
@@ -153,136 +210,159 @@ fun AddBillScreen(onBack: () -> Unit, vm: AddBillViewModel = viewModel(factory =
                 title = { Text("记一笔", style = MaterialTheme.typography.titleLarge) },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
                 navigationIcon = {
-                    IconButton(onClick = onBack, enabled = editable) {
+                    IconButton(onClick = uiTap(onBack), enabled = editable) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回")
                     }
-                },
-                actions = { PaperNote("记下生活的小事 ♡", Modifier.padding(end = 20.dp)) }
+                }
             )
         },
         bottomBar = {
             Surface(color = MaterialTheme.colorScheme.background) {
-                Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 20.dp, vertical = 12.dp),
+                Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 20.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     saveState.error?.let { Text(it, style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error) }
                     Button(
-                        onClick = { amountFen?.let { vm.save(it, type, effectiveCategoryId, detail, note, timestamp) } },
-                        enabled = amountFen != null && effectiveCategoryId > 0 && editable,
+                        onClick = uiTap { amountFen?.let { vm.save(it, type, effectiveCategoryId, detail, note, timestamp, proposedCategory, autoCategorized = automaticCategory) } },
+                        enabled = amountFen != null && categoryReady && editable && !photoState.importing,
                         shape = MaterialTheme.shapes.extraLarge,
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)
-                    ) { Text(if (saveState.isSaving) "正在保存…" else "保存这一笔", style = MaterialTheme.typography.titleMedium) }
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 46.dp)
+                    ) { Text(if (saveState.isSaving) "正在保存…" else "确认记账", style = MaterialTheme.typography.titleMedium) }
                 }
             }
         }
     ) { padding ->
-        SpringScrollColumn(Modifier.fillMaxSize().padding(padding)
-            .padding(horizontal = 20.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
-            Row(Modifier.fillMaxWidth().selectableGroup().clip(MaterialTheme.shapes.extraLarge)
-                .background(MaterialTheme.colorScheme.surfaceVariant).padding(4.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                BillType.entries.forEach { value ->
-                    val selected = type == value
-                    Box(Modifier.weight(1f).clip(MaterialTheme.shapes.extraLarge)
-                        .background(if (selected) MaterialTheme.colorScheme.primary else Color.Transparent)
-                        .selectable(selected, enabled = editable, role = Role.Tab) { type = value }
-                        .heightIn(min = 44.dp).padding(vertical = 10.dp), contentAlignment = Alignment.Center) {
-                        Text(if (value == BillType.EXPENSE) "支出" else "收入",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant)
+        BoxWithConstraints(Modifier.fillMaxSize().padding(padding)) {
+            val categoryHeight = when { maxHeight < 410.dp -> 48.dp; maxHeight < 470.dp -> 96.dp; else -> 144.dp }
+            val decorationHeight = (maxHeight - categoryHeight - 330.dp).coerceIn(0.dp, 225.dp)
+            SpringScrollColumn(Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(Modifier.fillMaxWidth().height(56.dp), verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("¥", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+                    BasicTextField(amountText,
+                        onValueChange = { if (it.matches(Regex("\\d{0,12}(\\.\\d{0,2})?"))) amountText = it },
+                        modifier = Modifier.weight(1f).testTag("manual-amount"), singleLine = true, enabled = editable,
+                        textStyle = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.primary), cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Next),
+                        decorationBox = { field ->
+                            Box {
+                                if (amountText.isBlank()) Text("0.00", style = MaterialTheme.typography.headlineSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .35f))
+                                field()
+                            }
+                        })
+                    Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.primary.copy(alpha = .08f)) {
+                        Row(Modifier.clickable(enabled = editable) { UiSound.tap(context); type = if (type == BillType.EXPENSE) BillType.INCOME else BillType.EXPENSE }
+                            .height(40.dp).padding(horizontal = 10.dp).testTag("manual-type"), verticalAlignment = Alignment.CenterVertically) {
+                            Text(if (type == BillType.EXPENSE) "支出" else "收入", style = MaterialTheme.typography.labelLarge,
+                                color = if (type == BillType.EXPENSE) com.jiligulu.app.ui.theme.ExpenseCoral else com.jiligulu.app.ui.theme.IncomeGreen)
+                            Icon(Icons.Outlined.SwapVert, null, Modifier.size(14.dp).padding(start = 2.dp), tint = MaterialTheme.colorScheme.primary)
+                        }
+                    }
+                    IconButton(onClick = uiTap { calculatorOpen = true }, enabled = editable, modifier = Modifier.size(44.dp)) {
+                        Icon(Icons.Default.Calculate, "打开阿噜小算盘", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
                     }
                 }
-            }
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("金额", style = MaterialTheme.typography.titleSmall)
-                LedgerCard {
-                    OutlinedTextField(
-                        value = amountText,
-                        onValueChange = { if (it.matches(Regex("\\d{0,12}(\\.\\d{0,2})?"))) amountText = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        prefix = { Text("¥", style = MaterialTheme.typography.headlineMedium) },
-                        trailingIcon = {
-                            IconButton(onClick = { calculatorOpen = true }, enabled = editable) {
-                                Icon(Icons.Default.Calculate, "打开阿噜小算盘", tint = MaterialTheme.colorScheme.primary)
+                if (amountInvalid) Text("请输入大于 0 的金额", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
+                ManualEntryField("细则", detail, { detail = it }, "例如：午餐、奶茶", editable, "manual-detail")
+                ManualEntryField("备注", note, { note = it }, "可选，留一句话", editable, "manual-note")
+                Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Row(Modifier.fillMaxWidth().height(34.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("分类", Modifier.width(42.dp), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Checkbox(automaticCategory, onCheckedChange = { UiSound.tap(context); setAutomaticCategory(it) }, enabled = editable, modifier = Modifier.size(28.dp))
+                        Text("自动分类", style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(start = 2.dp))
+                        Spacer(Modifier.weight(1f))
+                        if (automaticCategory) {
+                            if (categoryPreview.resolving) CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 1.5.dp)
+                            Text(when {
+                                categoryPreview.resolving -> "分类中…"
+                                categoryPreview.name.isNotBlank() -> CategoryLabels.displayName(categoryPreview.name) + if (proposedCategory != null) " · 新" else ""
+                                categoryPreview.error != null -> "可手动选分类"
+                                else -> "等待输入"
+                            }, modifier = Modifier.padding(start = 5.dp).widthIn(max = 130.dp).testTag("manual-auto-status"),
+                                style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                color = MaterialTheme.colorScheme.primary)
+                        }
+                    }
+                    SpringScrollColumn(Modifier.fillMaxWidth().height(categoryHeight).testTag("manual-category-grid"),
+                        verticalArrangement = Arrangement.spacedBy(5.dp), handOffOnRepeat = true) {
+                        categories.chunked(3).forEach { row ->
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                row.forEach { category ->
+                                    CategoryChip(category, effectiveCategoryId == category.id, editable, Modifier.weight(1f),
+                                        onClick = { UiSound.select(context); selectedCategoryId = category.id; userPickedCategory = true; setAutomaticCategory(false) },
+                                        onLongClick = {
+                                            val displayName = CategoryLabels.displayName(category.name)
+                                            if (!category.deletable) tip = "「$displayName」是收纳箱，删不得哦～"
+                                            else scope.launch { pendingDelete = PendingCategoryDelete(category.id, displayName, vm.liveBillCount(category.id)) }
+                                        })
+                                }
+                                repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
                             }
-                        },
-                        placeholder = { Text("0.00", style = MaterialTheme.typography.displaySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)) },
-                        textStyle = MaterialTheme.typography.displaySmall,
-                        colors = OutlinedTextFieldDefaults.colors(unfocusedBorderColor = Color.Transparent,
-                            focusedBorderColor = Color.Transparent),
-                        singleLine = true, enabled = editable, isError = amountInvalid,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Next)
-                    )
-                    if (amountInvalid) Text("请输入大于 0 的金额", color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.labelMedium)
-                }
-            }
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text("分类", Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
-                    Text(categories.firstOrNull { it.id == effectiveCategoryId }?.let { "已选 · ${CategoryLabels.displayName(it.name)}" }
-                        ?: "${categories.size} 个小分类", modifier = Modifier.widthIn(max = 200.dp),
-                        style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.primary)
-                }
-                // Keep a large category collection within three rows; it has its own spring
-                // and thumb, and a repeated edge gesture can continue the surrounding form.
-                SpringScrollColumn(Modifier.fillMaxWidth().heightIn(max = 158.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp), handOffOnRepeat = true) {
-                    categories.chunked(3).forEach { row ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            row.forEach { category ->
-                                // 自绘 chip 而不是 FilterChip：FilterChip 自带 onClick，外层再套
-                                // combinedClickable 会抢手势（长按不触发 / 单击被吞），两个手势必须落在同一层。
-                                CategoryChip(
-                                    category = category,
-                                    selected = effectiveCategoryId == category.id,
-                                    enabled = editable,
-                                    modifier = Modifier.weight(1f),
-                                    onClick = { selectedCategoryId = category.id; userPickedCategory = true },
-                                    onLongClick = {
-                                        val displayName = CategoryLabels.displayName(category.name)
-                                        if (!category.deletable) {
-                                            tip = "「$displayName」是收纳箱，删不得哦～"
-                                        } else {
-                                            scope.launch {
-                                                pendingDelete = PendingCategoryDelete(
-                                                    id = category.id,
-                                                    name = displayName,
-                                                    liveCount = vm.liveBillCount(category.id)
-                                                )
-                                            }
-                                        }
-                                    }
-                                )
-                            }
-                            // 补足空位：最后一行不足 3 个时，前面的格子宽度保持不变
-                            repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
                         }
                     }
                 }
-                if (categories.size > 9) Text("上下滑动找分类 · 长按可以整理", style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-                if (suggested != null && !userPickedCategory) Text(
-                    "已推荐「${CategoryLabels.displayName(suggested.name)}」",
-                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                val localTime = timestamp?.let { Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()) }
+                Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("日期", Modifier.width(44.dp), style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(Modifier.weight(1f).clickable(enabled = editable) { UiSound.tap(context); showDate = true }.padding(vertical = 10.dp)
+                        .testTag("manual-date"), verticalAlignment = Alignment.CenterVertically) {
+                        Text(localTime?.format(DateTimeFormatter.ofPattern("M月d日")) ?: "今天", style = MaterialTheme.typography.bodyMedium)
+                        Icon(Icons.Outlined.KeyboardArrowDown, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+                    }
+                    Row(Modifier.clickable(enabled = editable) { UiSound.tap(context); showTime = true }.padding(vertical = 10.dp, horizontal = 6.dp)
+                        .testTag("manual-time"), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Icon(Icons.Outlined.Schedule, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+                        Text(localTime?.format(DateTimeFormatter.ofPattern("HH:mm")) ?: "此刻", style = MaterialTheme.typography.bodyMedium)
+                    }
+                    if (timestamp != null) IconButton(onClick = uiTap { timestamp = null }, enabled = editable, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Outlined.Close, "恢复此刻", modifier = Modifier.size(15.dp))
+                    }
+                }
+                Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("照片", Modifier.width(44.dp), style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(Modifier.weight(1f).clickable(enabled = editable && !photoState.importing) {
+                        UiSound.tap(context)
+                        photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                    }.testTag("manual-photo-picker"), verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                        when {
+                            photoState.importing -> CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 1.5.dp)
+                            photoState.path.isNotBlank() -> MemoryPhoto(photoState.path, Modifier.size(32.dp).clip(RoundedCornerShape(7.dp)), maxSide = 96)
+                            else -> Icon(Icons.Outlined.AddPhotoAlternate, null, Modifier.size(19.dp), tint = MaterialTheme.colorScheme.primary)
+                        }
+                        Text(when {
+                            photoState.importing -> "正在夹好…"
+                            photoState.error != null -> photoState.error.orEmpty()
+                            photoState.path.isNotBlank() -> "夹好啦 · 点此换一张"
+                            else -> "夹一张生活照片"
+                        }, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            color = if (photoState.error != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    if (photoState.path.isNotBlank() || photoState.importing) IconButton(onClick = uiTap(vm::removePhoto),
+                        enabled = editable, modifier = Modifier.size(32.dp).testTag("manual-photo-remove")) {
+                        Icon(Icons.Outlined.Close, "取下照片", Modifier.size(15.dp))
+                    }
+                }
+                // Use only the space left by the compact form; keyboard/short screens stay lean.
+                if (decorationHeight >= 80.dp) ManualEntryDecoration(Modifier.height(decorationHeight),
+                    enabled = editable && !photoState.importing) {
+                    photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                }
             }
-            OutlinedTextField(value = detail, onValueChange = { detail = it }, modifier = Modifier.fillMaxWidth(),
-                label = { Text("细则") }, placeholder = { Text("例如：牛肉面、矿泉水") },
-                shape = MaterialTheme.shapes.large, singleLine = true, enabled = editable,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next))
-            OutlinedTextField(value = note, onValueChange = { note = it }, modifier = Modifier.fillMaxWidth(),
-                label = { Text("备注（可选）") }, placeholder = { Text("想补充点什么？") },
-                shape = MaterialTheme.shapes.large, minLines = 2, maxLines = 3, enabled = editable)
-            LedgerCard {
-                BillDateTimeField(timestamp, { timestamp = it }, enabled = editable)
-            }
-            Spacer(Modifier.height(4.dp))
         }
     }
+    if (showDate) CompactCalendarDialog(timestamp ?: System.currentTimeMillis(), onDismiss = { showDate = false },
+        onSelect = { day ->
+            val date = Instant.ofEpochMilli(day).atZone(ZoneId.systemDefault()).toLocalDate()
+            timestamp = com.jiligulu.app.ui.components.withBillDate(timestamp ?: System.currentTimeMillis(), date, ZoneId.systemDefault())
+            showDate = false
+        }, latestMonth = YearMonth.of(2100, 12))
+    if (showTime) ManualTimeDialog(timestamp, { showTime = false }) { time -> timestamp = time; showTime = false }
 
     if (calculatorOpen) CalculatorDialog(amountText, onDismiss = { calculatorOpen = false },
         onUse = { amountText = it; calculatorOpen = false })
@@ -315,6 +395,66 @@ fun AddBillScreen(onBack: () -> Unit, vm: AddBillViewModel = viewModel(factory =
                 }
             }
         )
+    }
+}
+
+/** Flat, compact input rows keep a whole manual bill on one ordinary portrait screen. */
+@Composable
+private fun ManualEntryField(
+    label: String, value: String, onChange: (String) -> Unit, hint: String, enabled: Boolean, tag: String
+) {
+    Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, Modifier.width(44.dp), style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Column(Modifier.weight(1f)) {
+            Row(Modifier.height(36.dp), verticalAlignment = Alignment.CenterVertically) {
+                BasicTextField(value, onChange, modifier = Modifier.weight(1f).testTag(tag), singleLine = true,
+                    enabled = enabled, textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurface),
+                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next), decorationBox = { field ->
+                        Box {
+                            if (value.isBlank()) Text(hint, style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .55f))
+                            field()
+                        }
+                    })
+                if (value.isNotBlank()) IconButton(onClick = uiTap { onChange("") }, enabled = enabled, modifier = Modifier.size(30.dp)) {
+                    Icon(Icons.Outlined.Close, "清空$label", Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .7f))
+        }
+    }
+}
+
+@Composable
+private fun ManualTimeDialog(timestamp: Long?, onDismiss: () -> Unit, onSave: (Long) -> Unit) {
+    val local = Instant.ofEpochMilli(timestamp ?: System.currentTimeMillis()).atZone(ZoneId.systemDefault())
+    var hour by rememberSaveable { mutableStateOf("%02d".format(local.hour)) }
+    var minute by rememberSaveable { mutableStateOf("%02d".format(local.minute)) }
+    val h = hour.toIntOrNull()?.takeIf { it in 0..23 }
+    val m = minute.toIntOrNull()?.takeIf { it in 0..59 }
+    GuluDialog("几点记下？", onDismiss, confirmLabel = "确定", dismissLabel = "取消", compact = true,
+        compactWidth = 260.dp, confirmEnabled = h != null && m != null, onConfirm = {
+            if (h != null && m != null) onSave(com.jiligulu.app.ui.components.withBillTime(
+                timestamp ?: System.currentTimeMillis(), h, m, ZoneId.systemDefault()))
+        }) {
+        Row(Modifier.fillMaxWidth().height(52.dp), horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically) {
+            listOf(true, false).forEachIndexed { index, isHour ->
+                if (index == 1) Text(" : ", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary)
+                Column(Modifier.width(62.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    BasicTextField(if (isHour) hour else minute, onValueChange = { value ->
+                        if (value.length <= 2 && value.all(Char::isDigit)) { if (isHour) hour = value else minute = value }
+                    }, singleLine = true, textStyle = MaterialTheme.typography.titleLarge.copy(
+                        textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurface),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
+                    HorizontalDivider(Modifier.padding(top = 4.dp), color = MaterialTheme.colorScheme.primary.copy(alpha = .5f))
+                }
+            }
+        }
+        if (h == null || m == null) Text("小时 0–23，分钟 0–59", style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.error)
     }
 }
 
@@ -396,7 +536,7 @@ private fun TipButton(
     onClick: () -> Unit
 ) {
     Surface(
-        modifier = modifier.clip(RoundedCornerShape(50)).clickable(onClick = onClick),
+        modifier = modifier.clip(RoundedCornerShape(50)).clickable(onClick = uiTap(onClick)),
         shape = RoundedCornerShape(50),
         color = container
     ) {
@@ -438,13 +578,13 @@ private fun CategoryChip(
                 shape = MaterialTheme.shapes.extraLarge
             )
             .combinedClickable(enabled = enabled, onClick = onClick, onLongClick = onLongClick)
-            .padding(horizontal = 10.dp, vertical = 11.dp),
+            .height(44.dp).padding(horizontal = 7.dp, vertical = 4.dp),
         contentAlignment = Alignment.Center
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-            CategoryBadge(category.name, category.iconValue, size = 24.dp,
+            CategoryBadge(category.name, category.iconValue, size = 23.dp,
                 tint = GoldenAnglePalette.colorForHue(category.colorHue))
-            Text(CategoryLabels.displayName(category.name), style = MaterialTheme.typography.labelLarge,
+            Text(CategoryLabels.displayName(category.name), style = MaterialTheme.typography.labelMedium,
                 color = content, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
         }
     }

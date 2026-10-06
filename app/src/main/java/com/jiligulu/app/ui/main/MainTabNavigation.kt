@@ -35,6 +35,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
@@ -55,6 +56,7 @@ internal fun MainTabNavigation(
     val progress = (pager.currentPage + pager.currentPageOffsetFraction).coerceIn(0f, (MainPageCount - 1).toFloat())
     val haptics = LocalHapticFeedback.current
     val density = LocalDensity.current
+    val soundContext = LocalContext.current.applicationContext
     val start by rememberUpdatedState(onScrubStart)
     val drag by rememberUpdatedState(onScrub)
     val end by rememberUpdatedState(onScrubEnd)
@@ -95,7 +97,10 @@ internal fun MainTabNavigation(
                                     drag(TabScrubPosition.fromTrack(change.position.x, width, grab))
                                 }
                                 if (!change.pressed) {
-                                    if (dragging) end() else select(TabScrubPosition.tappedTab(change.position.x, width))
+                                    if (dragging) end() else {
+                                        com.jiligulu.app.core.audio.UiSound.tap(soundContext)
+                                        select(TabScrubPosition.tappedTab(change.position.x, width))
+                                    }
                                     finished = true
                                     break
                                 }
@@ -116,7 +121,7 @@ internal fun MainTabNavigation(
                     val tint = androidx.compose.ui.graphics.lerp(MaterialTheme.colorScheme.onSurfaceVariant,
                         MaterialTheme.colorScheme.primary, proximity)
                     Column(Modifier.weight(1f).height(58.dp)
-                        .selectable(selected = selectedTab == index, onClick = { onSelect(index) }, role = Role.Tab)
+                        .selectable(selected = selectedTab == index, onClick = com.jiligulu.app.ui.components.uiTap { onSelect(index) }, role = Role.Tab)
                         .testTag(when (index) { 0 -> "main-tab-home"; 1 -> "main-tab-world"; else -> "main-tab-stats" })
                         .padding(top = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         Icon(when (index) {

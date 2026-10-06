@@ -15,15 +15,15 @@ internal class GlassLensShader {
         uniform float2 offset;
         uniform float2 light;
         float box(float2 p) {
-            float radius=min(size.x,size.y)*.28;
-            float2 q=abs(p)-(size*.42-radius);
+            float radius=min(size.x,size.y)*.24;
+            float2 q=abs(p)-(size*.46-radius);
             return length(max(q,float2(0)))+min(max(q.x,q.y),0.0)-radius;
         }
         half4 main(float2 xy) {
             float2 p=xy-size*.5;
             float d=box(p);
             if(d>0.0) return half4(0);
-            float rim=min(size.x,size.y)*.13;
+            float rim=min(size.x,size.y)*.085;
             float e=1.0-smoothstep(0.0,rim,-d);
             float2 gradient=float2(box(p+float2(.6,0))-box(p-float2(.6,0)),box(p+float2(0,.6))-box(p-float2(0,.6)));
             float2 n=gradient/max(length(gradient),.001);

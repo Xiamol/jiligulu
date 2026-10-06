@@ -129,7 +129,8 @@ class BillRepository(
         categoryId: Long,
         detail: String,
         note: String,
-        timestamp: Long = System.currentTimeMillis()
+        timestamp: Long = System.currentTimeMillis(),
+        photoUri: String? = null
     ): Long = billDao.insert(
         BillEntity(
             amountFen = amountFen,
@@ -138,7 +139,8 @@ class BillRepository(
             detail = detail.trim(),
             note = note.trim(),
             timestamp = timestamp,
-            source = BillSource.MANUAL
+            source = BillSource.MANUAL,
+            photoUri = photoUri?.takeIf(String::isNotBlank)
         )
     )
 

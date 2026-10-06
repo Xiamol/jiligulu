@@ -98,11 +98,33 @@ class DatabaseUpgradeTest {
         names += "fresh.db"
         val db = AppDatabase.build(context, "fresh.db")
         opened += db
-        assertEquals(listOf("吃饭", "饮品", "待定"), db.categoryDao().observeAll().first().map { it.name })
+        assertEquals(com.jiligulu.app.domain.category.CategoryDefaults.presets.map { it.name },
+            db.categoryDao().observeAll().first().map { it.name })
         db.close()
         val reopened = AppDatabase.build(context, "fresh.db")
         opened += reopened
-        assertEquals(3, reopened.categoryDao().count())
+        assertEquals(com.jiligulu.app.domain.category.CategoryDefaults.presets.size, reopened.categoryDao().count())
+        // A removed preset stays removed; opening the database does not recreate it.
+        val removed = reopened.categoryDao().findByName("零食")!!
+        reopened.categoryDao().deleteById(removed.id)
+        reopened.close()
+        val afterDeletion = AppDatabase.build(context, "fresh.db")
+        opened += afterDeletion
+        assertEquals(null, afterDeletion.categoryDao().findByName("零食"))
+    }
+
+    @Test
+    fun manualPhotoIsStoredWithItsBillAndAppearsInTheMemoryCollection() = runBlocking {
+        names += "manual-photo.db"
+        val db = AppDatabase.build(context, "manual-photo.db").also { opened += it }
+        val photos = "/data/user/0/com.jiligulu.app/files/life-memories/photos/test.jpg"
+        val repository = BillRepository(db.billDao())
+        val id = repository.addManual(1800, BillType.EXPENSE, 1, "生日饭", "", photoUri = photos)
+        assertEquals(photos, db.billDao().getById(id)?.photoUri)
+        assertEquals(listOf(id), db.billDao().observePhotoMemories().first().map { it.id })
+        repository.moveToTrash(id)
+        assertTrue(db.billDao().observePhotoMemories().first().isEmpty())
+        assertEquals(photos, db.billDao().getTrash().single().photoUri)
     }
 
     /**
@@ -286,8 +308,8 @@ class DatabaseUpgradeTest {
         assertEquals(setOf(BillSource.AI_CHAT), bills.map { it.source }.toSet())
         val category = db.categoryDao().findByName("深夜食堂")!!
         assertEquals(setOf(category.id), bills.map { it.categoryId }.toSet())
-        // 默认种子「吃饭 / 饮品 / 待定」+ AI 新建的「深夜食堂」。种子由真实生产构建器种下。
-        assertEquals(4, db.categoryDao().count())
+        // 默认常用分类种子 + AI 新建的「深夜食堂」。种子由真实生产构建器种下。
+        assertEquals(com.jiligulu.app.domain.category.CategoryDefaults.presets.size + 1, db.categoryDao().count())
         assertEquals("CONFIRMED", history.getById(id)?.status)
     }
 

@@ -26,6 +26,7 @@ import com.jiligulu.app.data.local.entity.BillType
 import com.jiligulu.app.data.local.entity.CategoryEntity
 import com.jiligulu.app.ui.billdetail.BillDetailSheet
 import com.jiligulu.app.ui.components.GuluDialog
+import com.jiligulu.app.ui.components.uiTap
 import com.jiligulu.app.ui.components.rememberPageData
 import com.jiligulu.app.ui.theme.IncomeGreen
 import com.jiligulu.app.ui.theme.ExpenseCoral
@@ -101,7 +102,7 @@ fun MemoriesScreen(onBack: () -> Unit) {
         title = if(drawer == 0) "夹好的生活明信片" else "一张张生活照片",
         subtitle = if(drawer == 0) "${state.cards.size} 张，翻开就能重新遇见那一天。" else "${photos.size} 张，和记过的账一起收在这里。",
         onDismiss = { drawer = -1 },
-        actions = { TextButton(onClick = { drawer = 2 }) { Text("做周明信片") } }
+        actions = { TextButton(onClick = uiTap { drawer = 2 }) { Text("做周明信片") } }
     ) {
         if (drawer == 0) {
             if (state.cards.isEmpty()) item {
@@ -110,10 +111,10 @@ fun MemoriesScreen(onBack: () -> Unit) {
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             items(state.cards.sortedByDescending { it.createdAt }, key = { "card-${it.id}" }) { card ->
-                AlbumPaperPage(Modifier.clickable { selectedCard = card }) {
+                AlbumPaperPage(Modifier.clickable(onClick = uiTap { selectedCard = card })) {
                     MemoryPhoto(card.imagePath, Modifier.fillMaxWidth().height(180.dp).clip(RoundedCornerShape(14.dp)),
                         androidx.compose.ui.layout.ContentScale.Fit)
-                    Text(card.title, style = MaterialTheme.typography.titleMedium)
+                    Text(card.title, style = MaterialTheme.typography.bodyMedium, maxLines = 2)
                     if (card.caption.isNotBlank()) Text(card.caption, style = MaterialTheme.typography.bodySmall, maxLines = 2)
                     Text("收好于 ${Formatters.dayLabel(card.createdAt)}", style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -126,9 +127,9 @@ fun MemoriesScreen(onBack: () -> Unit) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             items(photos, key = { "bill-${it.id}" }) { bill ->
-                AlbumPaperPage(Modifier.clickable { selectedPhoto = bill }) {
-                    MemoryPhoto(bill.photoUri.orEmpty(), Modifier.fillMaxWidth().height(165.dp).clip(RoundedCornerShape(14.dp)))
-                    Text(bill.detail.ifBlank { "一张生活照片" }, style = MaterialTheme.typography.titleMedium)
+                AlbumPaperPage(Modifier.clickable(onClick = uiTap { selectedPhoto = bill })) {
+                    MemoryPhoto(bill.photoUri.orEmpty(), Modifier.fillMaxWidth().height(160.dp).clip(RoundedCornerShape(12.dp)))
+                    Text(bill.detail.ifBlank { "一张生活照片" }, style = MaterialTheme.typography.bodyMedium, maxLines = 2)
                     if (bill.note.isNotBlank()) Text(bill.note, style = MaterialTheme.typography.bodySmall, maxLines = 3)
                     Text(Formatters.dayLabel(bill.timestamp), style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -136,31 +137,30 @@ fun MemoriesScreen(onBack: () -> Unit) {
             }
         }
     }
-    if (drawer == 2) GuluDialog("给这一周起个名字", onDismiss = { drawer = -1 }, compact = true,
-        confirmLabel = "收好工具") {
+    if (drawer == 2) GuluDialog("这一周的生活", onDismiss = { drawer = -1 }, compact = true, dense = true,
+        compactWidth = 280.dp, confirmLabel = "做张明信片", confirmEnabled = weekRows != null && categoryRows != null,
+        onConfirm = { makeWeek = true; drawer = -1 }) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = { offset-- }) { Text("‹") }
+            TextButton(onClick = uiTap { offset-- }) { Text("‹") }
             Text(dates, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center)
-            TextButton(onClick = { offset++ }, enabled = offset < 0) { Text("›") }
+            TextButton(onClick = uiTap { offset++ }, enabled = offset < 0) { Text("›") }
         }
         Text(if(weekRows == null || categoryRows == null) "正在翻这一周的生活记录…" else "${summary.billsCount} 笔认真过日子的证据。",
             style = MaterialTheme.typography.bodySmall)
-        Text("支出 ¥${Formatters.fenToYuanText(summary.expenseFen)}", color = ExpenseCoral)
-        Text("收入 ¥${Formatters.fenToYuanText(summary.incomeFen)}", color = IncomeGreen)
-        Button(onClick = { makeWeek = true }, enabled = weekRows != null && categoryRows != null,
-            modifier = Modifier.fillMaxWidth()) { Text("做一张周明信片") }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("支出 ¥${Formatters.fenToYuanText(summary.expenseFen)}", color = ExpenseCoral, style = MaterialTheme.typography.bodySmall)
+            Text("收入 ¥${Formatters.fenToYuanText(summary.incomeFen)}", color = IncomeGreen, style = MaterialTheme.typography.bodySmall)
+        }
     }
     if (makeWeek) MemoryPosterDialog(PosterData("${if (offset == -1) "上周" else if (offset == 0) "这周" else "那一周"}的生活小记", "认真过日子的证据，阿噜替你夹好啦。", dateMillis = range.first, week = summary), { makeWeek = false })
     selectedBill?.let { BillDetailSheet(it, { selectedBill = null }) }
     selectedCard?.let { ArchivedCardDialog(it, { selectedCard = null }) }
-    selectedPhoto?.let { photo -> GuluDialog(photo.detail.ifBlank { "这一页生活" },{selectedPhoto=null},compact=true) {
-        MemoryPhoto(photo.photoUri.orEmpty(),Modifier.fillMaxWidth().height(260.dp),androidx.compose.ui.layout.ContentScale.Fit)
+    selectedPhoto?.let { photo -> GuluDialog(photo.detail.ifBlank { "这一页生活" },{selectedPhoto=null},compact=true,dense=true,
+        compactWidth=300.dp,confirmLabel="查看账单",onConfirm={selectedPhoto=null;selectedBill=photo.id}) {
+        MemoryPhoto(photo.photoUri.orEmpty(),Modifier.fillMaxWidth().height(240.dp),androidx.compose.ui.layout.ContentScale.Fit)
         if(photo.note.isNotBlank()) Text(photo.note,style=MaterialTheme.typography.bodySmall)
         Text(Formatters.dayLabel(photo.timestamp),style=MaterialTheme.typography.labelSmall)
-        Row(verticalAlignment=Alignment.CenterVertically) {
-            TextButton(onClick={selectedPhoto=null;selectedBill=photo.id}) { Text("查看这笔账") }
-            MemoryPosterButton(photo.detail,photo.note,photo.photoUri.orEmpty(),photo.amountFen,photo.timestamp)
-        }
+        MemoryPosterButton(photo.detail,photo.note,photo.photoUri.orEmpty(),photo.amountFen,photo.timestamp)
     } }
 }
 
@@ -174,37 +174,43 @@ private fun ArchivedCardDialog(card: MemoryCard, onDismiss: () -> Unit) {
     var error by remember { mutableStateOf<String?>(null) }
     val file = File(card.imagePath)
     val createDocument = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("image/png")) { uri ->
-        if (uri != null) scope.launch {
+        if (uri == null) busy = false else scope.launch {
+            busy = true
             try { withContext(Dispatchers.IO) { context.contentResolver.openOutputStream(uri)?.use { out -> file.inputStream().use { it.copyTo(out) } } ?: error("无法保存") }; Toast.makeText(context, "小海报保存好啦 ♡", Toast.LENGTH_SHORT).show() }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { error = "未能保存图片，请再试一次。" }
+            finally { busy = false }
         }
     }
-    GuluDialog(card.title, onDismiss, compact = true) {
-        MemoryPhoto(card.imagePath, Modifier.fillMaxWidth().height(310.dp), androidx.compose.ui.layout.ContentScale.Fit)
+    val save: () -> Unit = {
+        if (!busy) {
+            busy = true
+            if (Build.VERSION.SDK_INT < 29) createDocument.launch("阿噜生活小海报.png")
+            else scope.launch {
+                try { MemoryPoster.saveGallery(context, file); Toast.makeText(context, "存进相册啦 ♡", Toast.LENGTH_SHORT).show() }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) { error = "未能保存图片，请再试一次。" }
+                finally { busy = false }
+            }
+        }
+    }
+    GuluDialog(card.title, onDismiss, compact = true, dense = true, compactWidth = 300.dp,
+        confirmLabel = "存进相册", onConfirm = save, busy = busy, dismissLabel = "收起来") {
+        MemoryPhoto(card.imagePath, Modifier.fillMaxWidth().height(240.dp), androidx.compose.ui.layout.ContentScale.Fit)
         if (card.caption.isNotBlank()) Text(card.caption, style = MaterialTheme.typography.bodySmall)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            TextButton(onClick = { runCatching { MemoryPoster.share(context, file) }.onFailure { error = "暂时没能打开分享。" } }) { Text("分享") }
-            TextButton(onClick = {
-                if (Build.VERSION.SDK_INT < 29) createDocument.launch("阿噜生活小海报.png")
-                else scope.launch {
-                    busy = true
-                    try { MemoryPoster.saveGallery(context, file); Toast.makeText(context, "存进相册啦 ♡", Toast.LENGTH_SHORT).show() }
-                    catch (cancelled: CancellationException) { throw cancelled }
-                    catch (_: Exception) { error = "未能保存图片，请再试一次。" }
-                    finally { busy = false }
-                }
-            }, enabled = !busy) { Text("保存") }
-            TextButton(onClick = { deleting = true }) { Text("取下", color = MaterialTheme.colorScheme.error) }
+            TextButton(onClick = uiTap { runCatching { MemoryPoster.share(context, file) }.onFailure { error = "暂时没能打开分享。" } }, enabled = !busy) { Text("分享") }
+            TextButton(onClick = uiTap { deleting = true }, enabled = !busy) { Text("取下", color = MaterialTheme.colorScheme.error) }
         }
         error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
     }
     if (deleting) GuluDialog("把这张明信片取下？", { deleting = false }, "取下", onConfirm = {
+        busy = true
         scope.launch {
             try { app.container.littleWorld.deleteCard(card.id); onDismiss() }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { error = "没能取下，请再试一次。" }
-            finally { deleting = false }
+            finally { deleting = false; busy = false }
         }
-    }, dismissLabel = "留着", compact = true) { Text("已经保存到相册的图片会继续留在相册里。") }
+    }, dismissLabel = "留着", busy = busy, compact = true, dense = true, compactWidth = 260.dp) { Text("已经保存到相册的图片会继续留在相册里。", style = MaterialTheme.typography.bodySmall) }
 }

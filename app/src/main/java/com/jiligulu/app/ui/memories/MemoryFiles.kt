@@ -18,26 +18,79 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
+import com.jiligulu.app.JiliguluApp
 import java.io.File
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 
 /** Copy selected media into app storage, so a reboot or removed gallery permission cannot lose it. */
 object MemoryFiles {
+    private val cleanupScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val ownedStores = ConcurrentHashMap<String, OwnedMediaStore>()
     private fun root(context: Context) = File(context.filesDir, "life-memories").apply { mkdirs() }
+    private fun ownedStore(context: Context): OwnedMediaStore {
+        val folder = root(context).canonicalFile
+        return ownedStores.getOrPut(folder.path) { OwnedMediaStore(folder) }
+    }
     fun posterFile(context: Context): File = File(root(context), "posters").apply { mkdirs() }
         .let { File(it, "${UUID.randomUUID()}.png") }
 
-    suspend fun importPhoto(context: Context, uri: Uri): String = withContext(Dispatchers.IO) {
-        val bitmap = readBitmap(context, uri, 1600) ?: error("这张照片暂时打不开，换一张试试吧。")
-        val target = File(File(root(context), "photos").apply { mkdirs() }, "${UUID.randomUUID()}.jpg")
-        try {
-            target.outputStream().use { check(bitmap.compress(Bitmap.CompressFormat.JPEG, 88, it)) }
-            target.absolutePath
-        } catch (failure: Throwable) {
-            target.delete()
+    /** Only remove copies owned by this importer, never an original gallery or another file. */
+    fun deleteImportedPhoto(context: Context, path: String) {
+        if (path.isBlank()) return
+        runCatching {
+            val folder = File(root(context), "photos").canonicalFile
+            val file = File(path).canonicalFile
+            if (file.parentFile == folder && file.extension.equals("jpg", true)) file.delete()
+        }
+    }
+
+    suspend fun importPhoto(context: Context, uri: Uri): String {
+        var created: File? = null
+        try { return withContext(Dispatchers.IO) {
+            val bitmap = readBitmap(context, uri, 1600) ?: error("这张照片暂时打不开，换一张试试吧。")
+            val target = File(File(root(context), "photos").apply { mkdirs() }, "${UUID.randomUUID()}.jpg").also { created = it }
+            try {
+                target.outputStream().use { check(bitmap.compress(Bitmap.CompressFormat.JPEG, 88, it)) }
+                target.absolutePath
+            } finally { bitmap.recycle() }
+        } } catch (failure: Throwable) {
+            created?.delete()
             throw failure
-        } finally { bitmap.recycle() }
+        }
+    }
+
+    internal fun claimPrivateMedia(context: Context, path: String): AutoCloseable? = ownedStore(context).claim(path)
+
+    /** Only release paths actually created by the calling draft. Existing files are never inferred as owned. */
+    internal fun releaseDraftCopies(context: Context, paths: Collection<String>) {
+        if (paths.isEmpty()) return
+        val application = context.applicationContext
+        cleanupScope.launch {
+            val app = application as? JiliguluApp ?: return@launch // Unknown storage means keep, not guess.
+            ownedStore(application).release(paths) {
+                coroutineScope {
+                    val live = async { app.container.billRepository.observePhotoMemories().first() }
+                    val trash = async { app.container.billRepository.trash() }
+                    val world = async { app.container.littleWorld.snapshot() }
+                    val collection = world.await()
+                    ((live.await() + trash.await()).mapNotNull { it.photoUri } +
+                        collection.wishes.map { it.photoPath } + collection.cards.map { it.imagePath })
+                        .filter { it.isNotBlank() && !it.startsWith("content:") }.mapNotNull { path ->
+                            runCatching { if (path.startsWith("file:")) Uri.parse(path).path?.let { File(it).canonicalPath }
+                                else File(path).canonicalPath }.getOrNull()
+                        }.toSet()
+                }
+            }
+        }
     }
 
     fun readBitmap(context: Context, path: String, maxSide: Int = 900): Bitmap? =
@@ -78,10 +131,10 @@ object MemoryFiles {
 
 /** Decodes thumbnails off the UI thread; decoded bitmaps die with their bounded visible item. */
 @Composable
-fun MemoryPhoto(path: String, modifier: Modifier = Modifier, scale: ContentScale = ContentScale.Crop) {
+fun MemoryPhoto(path: String, modifier: Modifier = Modifier, scale: ContentScale = ContentScale.Crop, maxSide: Int = 700) {
     val context = LocalContext.current
-    val bitmap by produceState<Bitmap?>(null, path) {
-        value = withContext(Dispatchers.IO) { MemoryFiles.readBitmap(context, path, 700) }
+    val bitmap by produceState<Bitmap?>(null, path, maxSide) {
+        value = withContext(Dispatchers.IO) { MemoryFiles.readBitmap(context, path, maxSide.coerceAtLeast(32)) }
     }
     Box(modifier.background(MaterialTheme.colorScheme.surfaceVariant), contentAlignment = Alignment.Center) {
         bitmap?.let { Image(it.asImageBitmap(), "生活照片", Modifier.matchParentSize(), contentScale = scale) }

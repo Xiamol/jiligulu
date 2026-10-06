@@ -9,7 +9,7 @@ enum class CreatedBy { DEFAULT, AI, USER }
 
 /**
  * 分类 —— 对应 PRD §7 Category。
- * v0.6 起内置种子为「吃饭 / 饮品 / 待定」；AI 自动新建分类复用同一结构。
+ * 首次安装的内置种子来自 CategoryDefaults；AI 自动新建分类复用同一结构。
  */
 @Entity(tableName = "categories")
 data class CategoryEntity(

@@ -23,7 +23,20 @@ import kotlinx.coroutines.flow.first
  * 后续模块（人格引擎、悬浮窗服务）都往这里挂，保证可升级。
  */
 class AppContainer(private val app: Application) {
-    private val database: AppDatabase by lazy { AppDatabase.build(app) }
+    private val databaseResource = lazy { AppDatabase.build(app) }
+    private val database: AppDatabase by databaseResource
+
+    /** Fixture cleanup only: Android owns the production database for the whole process. */
+    @androidx.annotation.VisibleForTesting
+    internal fun closeLedgerForTests() {
+        if (databaseResource.isInitialized()) {
+            val opened = databaseResource.value
+            // Finish any lazy onOpen before close acquires Room's write lock. Otherwise an
+            // onOpen holding SQLite's ProcessLock can wait on the read side of that same lock.
+            opened.openHelper.writableDatabase
+            opened.close()
+        }
+    }
 
     val littleWorld: com.jiligulu.app.data.littleworld.LittleWorldRepository by lazy { com.jiligulu.app.data.littleworld.LittleWorldRepository(app) }
     val userPrefs: UserPrefs by lazy { UserPrefs(app) }

@@ -51,6 +51,8 @@ import com.jiligulu.app.ui.components.CategoryBadge
 import com.jiligulu.app.domain.color.GoldenAnglePalette
 import com.jiligulu.app.ui.memories.LifePhotoField
 import com.jiligulu.app.ui.memories.MemoryPosterButton
+import com.jiligulu.app.ui.components.CompactFormField
+import com.jiligulu.app.ui.components.uiTap
 
 /** The ledger and statistics both open this entry point so their details and editing stay identical. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -65,7 +67,8 @@ fun BillDetailSheet(billId: Long, onDismiss: () -> Unit) {
         initializer { BillDetailViewModel(billId, app.container.billRepository, app.container.categoryRepository) }
     })
     val state by vm.state.collectAsStateWithLifecycle()
-    val busy by rememberUpdatedState(state.isSaving)
+    var photoBusy by remember(billId) { mutableStateOf(false) }
+    val busy by rememberUpdatedState(state.isSaving || photoBusy)
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true,
         confirmValueChange = { it != SheetValue.Hidden || !busy })
     var initialized by rememberSaveable(billId) { mutableStateOf(false) }
@@ -89,19 +92,19 @@ fun BillDetailSheet(billId: Long, onDismiss: () -> Unit) {
     }
     LaunchedEffect(state.isComplete) { if (state.isComplete) onDismiss() }
 
-    ModalBottomSheet(onDismissRequest = { if (!state.isSaving) onDismiss() }, sheetState = sheetState,
+    ModalBottomSheet(onDismissRequest = { if (!busy) onDismiss() }, sheetState = sheetState,
         containerColor = MaterialTheme.colorScheme.background) {
-        SpringScrollColumn(Modifier.fillMaxWidth().imePadding()
-            .padding(horizontal = 22.dp).padding(bottom = 28.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        Column(Modifier.fillMaxWidth().imePadding().padding(horizontal = 20.dp).padding(bottom = 12.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text("这一笔小账", style = MaterialTheme.typography.titleLarge)
                     Text("把生活的小细节，好好收起来。", style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                TextButton(onClick = onDismiss, enabled = !state.isSaving) { Text("关闭") }
+                TextButton(onClick = uiTap(onDismiss), enabled = !busy) { Text("关闭") }
             }
+        SpringScrollColumn(Modifier.fillMaxWidth().weight(1f, fill = false),
+            verticalArrangement = Arrangement.spacedBy(8.dp)) {
             if (state.isLoading) {
                 CircularProgressIndicator()
             } else if (bill == null && !state.isComplete && !state.isSaving) {
@@ -120,25 +123,17 @@ fun BillDetailSheet(billId: Long, onDismiss: () -> Unit) {
                         BillSource.SCREEN -> "识屏记账"
                     }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                OutlinedTextField(value = amount, onValueChange = { amount = it },
-                    label = { Text("金额") }, prefix = { Text("¥ ") }, singleLine = true,
-                    shape = MaterialTheme.shapes.large,
+                CompactFormField("金额", amount, { amount = it }, prefix = "¥",
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    modifier = Modifier.fillMaxWidth(), enabled = !state.isSaving)
-                OutlinedTextField(value = detail, onValueChange = { detail = it },
-                    label = { Text("账单名称") }, singleLine = true, shape = MaterialTheme.shapes.large,
-                    modifier = Modifier.fillMaxWidth(), enabled = !state.isSaving)
+                    enabled = !busy)
+                CompactFormField("细则", detail, { detail = it.take(500) }, enabled = !busy)
                 BillDateTimeField(timestamp = timestamp, onTimestampChange = { timestamp = it },
                     allowCurrentTime = false, enabled = !state.isSaving)
-                OutlinedTextField(value = note, onValueChange = { note = it.take(500) },
-                    label = { Text("备注 · 留一句生活记忆") }, maxLines = 4, shape = MaterialTheme.shapes.large,
-                    modifier = Modifier.fillMaxWidth(), enabled = !state.isSaving)
-                LedgerCard {
-                    Text("给这一笔夹张生活照片", style = MaterialTheme.typography.titleSmall,
-                        color = MaterialTheme.colorScheme.primary)
-                    Text("生日饭、旅行车窗，值得记住的小片刻。", style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    LifePhotoField(photoPath, onChange = { photoPath = it })
+                CompactFormField("备注", note, { note = it.take(500) }, placeholder = "留一句生活记忆", enabled = !busy)
+                Column {
+                    LifePhotoField(photoPath, onChange = { photoPath = it }, enabled = !state.isSaving,
+                        onBusyChange = { photoBusy = it },
+                        shouldRetainCopies = { vm.state.value.isSaving || vm.state.value.isComplete })
                     MemoryPosterButton(detail.ifBlank { state.categoryName }, note, photoPath,
                         amountFen = Formatters.yuanTextToFen(amount), dateMillis = timestamp)
                 }
@@ -150,13 +145,16 @@ fun BillDetailSheet(billId: Long, onDismiss: () -> Unit) {
                     }
                 }
                 state.error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium) }
-                Button(onClick = { timestamp?.let { vm.save(amount, detail, it, note, photoPath.takeIf(String::isNotBlank)) } },
-                    enabled = !state.isSaving && initialized, modifier = Modifier.fillMaxWidth().height(52.dp)) {
-                    Text(if (state.isSaving) "正在保存…" else "保存修改")
+            }
+        }
+            if (bill != null) Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = uiTap { confirmDelete = true }, enabled = !busy) {
+                    Text("删除", color = MaterialTheme.colorScheme.error)
                 }
-                TextButton(onClick = { confirmDelete = true }, enabled = !state.isSaving,
-                    modifier = Modifier.align(Alignment.CenterHorizontally)) {
-                    Text("删除这笔账", color = MaterialTheme.colorScheme.error)
+                Spacer(Modifier.weight(1f))
+                Button(onClick = uiTap { timestamp?.let { vm.save(amount, detail, it, note, photoPath.takeIf(String::isNotBlank)) } },
+                    enabled = !busy && initialized, modifier = Modifier.height(44.dp)) {
+                    Text(if (state.isSaving) "正在保存…" else "保存修改")
                 }
             }
         }

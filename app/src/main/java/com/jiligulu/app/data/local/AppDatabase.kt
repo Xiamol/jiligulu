@@ -110,25 +110,7 @@ abstract class AppDatabase : RoomDatabase() {
         /** 当前 schema 版本，供迁移测试断言用（避免测试里散落魔法数字）。 */
         const val SCHEMA_VERSION = 6
 
-        /** v0.6 内置种子：吃饭 / 饮品（可删）+ 待定（收纳箱，不可删）。 */
-        private val DEFAULT_CATEGORIES = listOf(
-            CategorySeed(
-                name = "吃饭",
-                icon = "🍚",
-                keywords = "吃,饭,面,粉,早餐,午饭,晚饭,外卖,火锅,干锅,小炒,食堂,餐,烧烤"
-            ),
-            CategorySeed(
-                name = "饮品",
-                icon = "🥤",
-                keywords = "喝,水,奶茶,咖啡,饮料,可乐,茶,酒,矿泉水,果汁"
-            ),
-            CategorySeed(
-                name = CategoryDefaults.VACUUM_NAME,
-                icon = CategoryDefaults.FALLBACK_EMOJI,
-                keywords = CategoryDefaults.VACUUM_KEYWORDS,
-                deletable = false
-            )
-        )
+        private val DEFAULT_CATEGORIES = CategoryDefaults.presets
 
         fun build(context: Context, name: String = "jiligulu.db"): AppDatabase =
             builder(context, name)
@@ -158,7 +140,7 @@ abstract class AppDatabase : RoomDatabase() {
             DEFAULT_CATEGORIES.forEachIndexed { index, seed ->
                 connection.execSQL(
                     "INSERT INTO categories (name, iconType, iconValue, iconSvg, colorHue, colorIndex, createdBy, keywords, deletable) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    arrayOf(seed.name, IconType.EMOJI.name, seed.icon, "",
+                    arrayOf(seed.name, IconType.BUILTIN.name, seed.icon, "",
                         GoldenAnglePalette.hueFor(index), index, CreatedBy.DEFAULT.name, seed.keywords,
                         if (seed.deletable) 1 else 0)
                 )
@@ -167,12 +149,6 @@ abstract class AppDatabase : RoomDatabase() {
     }
 }
 
-private data class CategorySeed(
-    val name: String,
-    val icon: String,
-    val keywords: String,
-    val deletable: Boolean = true
-)
 
 /**
  * Step 1 的核心动作：把旧英文种子分类改名成中文，并合并 AI 已建过的同名中文重复行。

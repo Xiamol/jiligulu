@@ -178,6 +178,7 @@ fun MainScreen(
     }
     LaunchedEffect(selectedTab) { if (selectedTab == 0) homeVm.showToday() }
     val lifecycleOwner = LocalLifecycleOwner.current
+    com.jiligulu.app.ui.littleworld.SecretEntranceLifecycle { secretEntrance = null }
     BackHandler(enabled = showDrinking, onBack = personaVm::cancelDrinking)
     BackHandler(enabled = secretEntrance!=null) {secretEntrance=null}
 
@@ -237,14 +238,14 @@ fun MainScreen(
                                 onDragEnd = pageDragEnd, allowRight = true))
                         2 -> Column(Modifier.fillMaxSize()) {
                             MainPageHeader(app, selectedTab == 2, onOpenSettings) {secretEntrance=SecretEntrance.LOGO}
-                            Box(Modifier.weight(1f)) { StatsScreen(active = selectedTab == 2) }
+                            Box(Modifier.weight(1f)) { StatsScreen(active = selectedTab == 2,
+                                onPageDrag = pageDrag, onPageDragEnd = pageDragEnd) }
                         }
                     }
                 }
             }
         }
         secretEntrance?.let {entry -> SecretEntranceOverlay(entry, {
-            secretEntrance=null
             if(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) onOpenSecretBase()
         },Modifier.fillMaxSize()) }
         DrinkingOverlay(visible = showDrinking, onFinished = personaVm::completeDrinking,
@@ -276,7 +277,7 @@ private fun MainPageHeader(app: JiliguluApp, active: Boolean, onOpenSettings: ()
                 color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.weight(1f).combinedClickable(onClick = {}, onLongClick = onOpenSecretBase))
             MailboxHeaderButton(app.container.announcements,tagged=active)
-            IconButton(onClick = onOpenSettings) {
+            IconButton(onClick = com.jiligulu.app.ui.components.uiTap(onOpenSettings)) {
                 Icon(Icons.Outlined.Settings, contentDescription = "设置",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }

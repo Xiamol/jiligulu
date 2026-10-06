@@ -99,14 +99,14 @@ fun AlbumPaperPage(modifier:Modifier=Modifier,content:@Composable ColumnScope.()
 
 @Composable
 fun CountedTab(label:String,count:Int,selected:Boolean,onClick:()->Unit) {
-    FilterChip(selected=selected,onClick=onClick,label={Text(label)},modifier=Modifier.semantics {contentDescription="$label，$count 项"})
+    FilterChip(selected=selected,onClick=com.jiligulu.app.ui.components.uiTap(onClick),label={Text(label)},modifier=Modifier.semantics {contentDescription="$label，$count 项"})
 }
 
 /** A small physical wood/ivory plaque, with a top bevel, darker side and contact shadow. */
 @Composable
 fun ScenePlaqueButton(label:String,modifier:Modifier=Modifier,selected:Boolean=false,enabled:Boolean=true,onClick:()->Unit) {
     val accent=MaterialTheme.colorScheme.primary
-    Box(modifier.clickable(enabled=enabled,role=Role.Button,onClick=onClick).drawWithCache {
+    Box(modifier.clickable(enabled=enabled,role=Role.Button,onClick=com.jiligulu.app.ui.components.uiTap(onClick)).drawWithCache {
         val u=1.dp.toPx();val radius=CornerRadius(2*u)
         onDrawBehind {
             drawRoundRect(Color(0xFF3D2715).copy(alpha=.18f),Offset(1*u,2*u),size,radius)

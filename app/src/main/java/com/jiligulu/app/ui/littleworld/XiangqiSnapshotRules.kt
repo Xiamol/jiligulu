@@ -8,4 +8,14 @@ internal object XiangqiSnapshotRules {
         if(revision==Int.MAX_VALUE||next.revision!=revision+1) return false
         return next.game==XiangqiEngine.newGame() || next.game.lastMove?.let {XiangqiEngine.play(game,it)==next.game}==true
     }
+
+    /** Undo is its own consent-bound transition; it does not broaden normal STATE messages. */
+    fun acceptsUndo(
+        revision: Int,
+        game: XiangqiState,
+        initialized: Boolean,
+        localSide: XiangqiSide,
+        history: XiangqiUndoHistory,
+        next: XiangqiLanMessage.UndoSnapshot,
+    ): Boolean = initialized && history.acceptsGuestUndo(localSide, revision, game, next)
 }

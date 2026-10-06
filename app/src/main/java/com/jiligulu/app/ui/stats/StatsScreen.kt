@@ -5,6 +5,11 @@ import com.jiligulu.app.ui.components.edgeSpring
 import com.jiligulu.app.ui.components.EdgeSpringState
 import androidx.compose.material3.Surface
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.outlined.MedicalServices
+import androidx.compose.material.icons.outlined.SportsEsports
+import androidx.compose.material.icons.outlined.Savings
+import androidx.compose.material.icons.outlined.SwapHoriz
+import androidx.compose.material.icons.outlined.Inbox
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.CheckBox
 import androidx.compose.material.icons.outlined.CheckBoxOutlineBlank
@@ -35,6 +40,13 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.positionInWindow
+import com.jiligulu.app.ui.components.forwardMainPageSwipe
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -56,6 +68,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.graphics.SolidColor
+import com.jiligulu.app.ui.components.GuluDialog
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.Icons
@@ -81,6 +96,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import com.jiligulu.app.core.audio.UiSound
+import com.jiligulu.app.ui.components.uiTap
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -115,8 +133,11 @@ import java.time.ZoneOffset
 @Composable
 fun StatsScreen(
     vm: StatsViewModel = viewModel(factory = StatsViewModel.Factory),
-    active: Boolean = true
+    active: Boolean = true,
+    onPageDrag: ((Float) -> Unit)? = null,
+    onPageDragEnd: ((Float) -> Unit)? = null
 ) {
+    val context = LocalContext.current
     val flowType by vm.flowType.collectAsStateWithLifecycle()
     val bars by vm.cashFlowBars.collectAsStateWithLifecycle()
     val selectedDay by vm.selectedDay.collectAsStateWithLifecycle()
@@ -124,20 +145,20 @@ fun StatsScreen(
     val dayDetails by vm.dayDetails.collectAsStateWithLifecycle()
     val sort by vm.sort.collectAsStateWithLifecycle()
     val budget by vm.budgetUi.collectAsStateWithLifecycle()
-    val forecasts by vm.expenseForecast.collectAsStateWithLifecycle()
-    val today by vm.forecastToday.collectAsStateWithLifecycle()
+    val averages by vm.monthlyExpenseAverages.collectAsStateWithLifecycle()
+    val today by vm.today.collectAsStateWithLifecycle()
 
     var showTrend by rememberSaveable { mutableStateOf(false) }
     var showActual by rememberSaveable { mutableStateOf(true) }
-    var showPrediction by rememberSaveable { mutableStateOf(true) }
+    var showAverage by rememberSaveable { mutableStateOf(true) }
     val chartViewport = rememberCashFlowViewport()
-    val forecastMap = remember(forecasts) { forecasts.associateBy { it.date } }
-    val linePoints = remember(bars, forecastMap, today, flowType) {
+    val averageMap = remember(averages) { averages.associateBy { it.date } }
+    val linePoints = remember(bars, averageMap, today, flowType) {
         val zone = ZoneId.systemDefault()
         bars.map { bar ->
             val date = Instant.ofEpochMilli(bar.dayStartMillis).atZone(zone).toLocalDate()
             SpendingLinePoint(bar.dayStartMillis, bar.amountFen.takeIf { !date.isAfter(today) },
-                forecastMap[date]?.expectedFen.takeIf { flowType == BillType.EXPENSE })
+                averageMap[date]?.averageFen.takeIf { flowType == BillType.EXPENSE })
         }
     }
 
@@ -147,18 +168,29 @@ fun StatsScreen(
 
     var showCategoryDetails by remember { mutableStateOf(false) }
     LaunchedEffect(active) {
+        if (active) vm.selectCalendarDate(Formatters.dayStart(System.currentTimeMillis()))
         vm.toggleCategory(null)
         showCategoryDetails = false
     }
     LaunchedEffect(selectedDay, flowType) { showCategoryDetails = false }
     val selectCategory: (Any?) -> Unit = { key ->
+        UiSound.select(context)
         val id = key as? Long
         if (id != null && id == dayDonut.selectedCategoryId) showCategoryDetails = true
         else { showCategoryDetails = false; vm.toggleCategory(id) }
     }
     var visibleRange by remember { mutableStateOf<Pair<Long, Long>?>(null) }
     val scroll = rememberLazyListState()
-    Box(Modifier.fillMaxSize()) {
+    var sceneOrigin by remember { mutableStateOf(Offset.Zero) }
+    var cashFlowBounds by remember { mutableStateOf<Rect?>(null) }
+    var distributionBounds by remember { mutableStateOf<Rect?>(null) }
+    val mainSwipe = Modifier.forwardMainPageSwipe(enabled = { active },
+        onDrag = onPageDrag, onDragEnd = onPageDragEnd, allowRight = true,
+        startAllowed = { local ->
+            val point = local + sceneOrigin
+            cashFlowBounds?.contains(point) != true && distributionBounds?.contains(point) != true
+        })
+    Box(Modifier.fillMaxSize().onGloballyPositioned { sceneOrigin = it.positionInWindow() }.then(mainSwipe)) {
     LazyColumn(
         state = scroll,
         modifier = Modifier
@@ -171,7 +203,7 @@ fun StatsScreen(
         item(key = "filters") {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Surface(Modifier.weight(1f).height(44.dp).clickable { showDateFilter = true },
+                Surface(Modifier.weight(1f).height(44.dp).clickable { UiSound.tap(context); showDateFilter = true },
                     shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surface) {
                     val date = Instant.ofEpochMilli(selectedDay).atZone(ZoneId.systemDefault()).toLocalDate()
                     val range = if (showTrend && bars.isNotEmpty()) bars.first().dayStartMillis to bars.last().dayStartMillis else visibleRange
@@ -188,7 +220,7 @@ fun StatsScreen(
                 }
                 Row(Modifier.height(44.dp).background(MaterialTheme.colorScheme.surface, RoundedCornerShape(24.dp)).padding(3.dp), verticalAlignment = Alignment.CenterVertically) {
                     listOf(BillType.EXPENSE to "支出", BillType.INCOME to "收入").forEach { (type, label) ->
-                        Surface(onClick = { vm.setFlowType(type) }, shape = RoundedCornerShape(24.dp),
+                        Surface(onClick = uiTap { vm.setFlowType(type) }, shape = RoundedCornerShape(24.dp),
                             color = if (flowType == type) MaterialTheme.colorScheme.primary.copy(alpha = .78f) else Color.Transparent) {
                             Text(label, Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
                                 style = MaterialTheme.typography.labelLarge,
@@ -201,11 +233,12 @@ fun StatsScreen(
 
         // ---------- 收支长河 ----------
         item(key = "cash_flow") {
-            ChartCard(title = "每日收支", action = {
+            DisposableEffect(Unit) { onDispose { cashFlowBounds = null } }
+            ChartCard(title = "每日收支", modifier = Modifier.onGloballyPositioned { cashFlowBounds = it.boundsInWindow() }, action = {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(Modifier.background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = .35f), RoundedCornerShape(20.dp)).padding(2.dp)) {
                         listOf(false to "柱图", true to "折线").forEach { (trend, label) ->
-                            Surface(onClick = { showTrend = trend }, shape = RoundedCornerShape(20.dp),
+                            Surface(onClick = uiTap { showTrend = trend }, shape = RoundedCornerShape(20.dp),
                                 color = if (showTrend == trend) MaterialTheme.colorScheme.surface else Color.Transparent) {
                                 Text(label, Modifier.padding(horizontal = 9.dp, vertical = 5.dp), style = MaterialTheme.typography.labelSmall,
                                     color = if (showTrend == trend) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
@@ -217,35 +250,22 @@ fun StatsScreen(
             }) {
                 if (showTrend) {
                     val actualColor = if (flowType == BillType.EXPENSE) ExpenseCoral else IncomeGreen
-                    // Keep the semantic forecast ink distinct even in the strawberry (pink) skin.
-                    val predictionColor = ActionPurple
-                    val selectedDate = Instant.ofEpochMilli(selectedDay).atZone(ZoneId.systemDefault()).toLocalDate()
-                    Row(Modifier.fillMaxWidth().height(24.dp), verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text((if (flowType == BillType.EXPENSE) "消费轻估计" else "每日收入") + " · ${selectedDate.dayOfMonth}日", Modifier.weight(1f),
-                            style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        LineVisibilityChoice("实际", showActual, actualColor) { showActual = it }
-                        if (flowType == BillType.EXPENSE) LineVisibilityChoice("预测", showPrediction, predictionColor) { showPrediction = it }
-                    }
-                    SpendingLineChart(bars, linePoints, selectedDay, showActual,
-                        showPrediction && flowType == BillType.EXPENSE, actualColor, predictionColor,
-                        onSelectDay = { vm.selectDay(it) }, modifier = Modifier.fillMaxWidth().height(168.dp))
-                    val point = linePoints.firstOrNull { it.dayStartMillis == selectedDay }
-                    Row(Modifier.fillMaxWidth().padding(top = 3.dp).height(18.dp),
-                        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        if (showActual) Text(point?.actualFen?.let { "实际 ¥${Formatters.fenToYuanText(it)}${if (selectedDay == Formatters.dayStart(System.currentTimeMillis())) " · 截至现在" else ""}" } ?: "实际 —",
-                            modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
-                            style = MaterialTheme.typography.labelSmall, color = actualColor)
-                        if (showPrediction && flowType == BillType.EXPENSE) Text(point?.predictedFen?.let { "预测 ≈¥${forecastYuan(it)}" }
-                            ?: "积累 7 个完整日后预测",
-                            modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
-                            style = MaterialTheme.typography.labelSmall, color = predictionColor)
+                    val averageColor = ActionPurple
+                    Box(Modifier.fillMaxWidth().height(202.dp)) {
+                        SpendingLineChart(bars, linePoints, selectedDay, showActual,
+                            showAverage && flowType == BillType.EXPENSE, actualColor, averageColor,
+                            onSelectDay = { UiSound.select(context); vm.selectDay(it) }, modifier = Modifier.fillMaxSize())
+                        Row(Modifier.align(Alignment.TopEnd).padding(end = 2.dp), verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            LineVisibilityChoice("实际", showActual, actualColor) { showActual = it }
+                            if (flowType == BillType.EXPENSE) LineVisibilityChoice("日均", showAverage, averageColor) { showAverage = it }
+                        }
                     }
                 } else CashFlowBarChart(
                     bars = bars,
                     onVisibleRange = { first, last -> visibleRange = first to last },
                     selectedDayMillis = selectedDay,
-                    onSelectDay = { vm.selectDay(it) },
+                    onSelectDay = { UiSound.select(context); vm.selectDay(it) },
                     color = if (flowType == BillType.EXPENSE) ExpenseCoral else IncomeGreen,
                     trackColor = MaterialTheme.colorScheme.outlineVariant,
                     viewport = chartViewport,
@@ -258,7 +278,9 @@ fun StatsScreen(
 
         // ---------- 当日分类 ----------
         item(key = "day_categories") {
-            ChartCard(title = if (flowType == BillType.EXPENSE) "支出分布" else "收入分布") {
+            DisposableEffect(Unit) { onDispose { distributionBounds = null } }
+            ChartCard(title = if (flowType == BillType.EXPENSE) "支出分布" else "收入分布",
+                modifier = Modifier.onGloballyPositioned { distributionBounds = it.boundsInWindow() }) {
                 val pageData = dayDonut
                 BoxWithConstraints(Modifier.fillMaxWidth().testTag("statistics-day-swipe").pointerInput(selectedDay) {
                     var drag = 0f
@@ -330,7 +352,7 @@ fun StatsScreen(
                             style = MaterialTheme.typography.headlineSmall,
                             color = if (budget.overspendPercentText.isNotBlank()) ExpenseCoral else MaterialTheme.colorScheme.primary)
                     }
-                    androidx.compose.material3.IconButton(onClick = { showBudgetDialog = true }) {
+                    androidx.compose.material3.IconButton(onClick = uiTap { showBudgetDialog = true }) {
                         Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "设置或调整预算",
                             tint = MaterialTheme.colorScheme.primary)
                     }
@@ -371,7 +393,7 @@ fun StatsScreen(
                 Column(Modifier.padding(16.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("${dayDonut.selectedLabel}的小账单", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
-                        TextButton(onClick = { showCategoryDetails = false }) { Text("关闭") }
+                        TextButton(onClick = uiTap { showCategoryDetails = false }) { Text("关闭") }
                     }
                     Text("${dayDonut.dayLabel} · ${dayDetails.size} 笔 · ¥${dayDonut.selectedAmountText}",
                         style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
@@ -385,7 +407,7 @@ fun StatsScreen(
                                 LedgerBillRow(icon = d.icon, colorHue = d.colorHue, categoryName = d.categoryName,
                                     title = d.detail.ifBlank { d.categoryName }, subtitle = d.timeLabel,
                                     amountText = d.amountText, isExpense = d.isExpense,
-                                    onClick = { selectedBillId = d.id }, showDivider = index < dayDetails.lastIndex)
+                                    onClick = { UiSound.tap(context); selectedBillId = d.id }, showDivider = index < dayDetails.lastIndex)
                             }
                         }
                         Box(Modifier.matchParentSize()) {
@@ -416,13 +438,10 @@ fun StatsScreen(
 
 }
 
-/** Prediction amounts deliberately avoid displaying cents as if the estimate were exact. */
-private fun forecastYuan(fen: Long): String = java.math.BigDecimal.valueOf(fen).divide(java.math.BigDecimal(100))
-    .setScale(0, java.math.RoundingMode.HALF_UP).toPlainString()
-
 @Composable
 private fun LineVisibilityChoice(label: String, checked: Boolean, color: Color, onChange: (Boolean) -> Unit) {
-    Row(Modifier.toggleable(value = checked, role = Role.Checkbox, onValueChange = onChange).padding(vertical = 4.dp),
+    val context = LocalContext.current
+    Row(Modifier.toggleable(value = checked, role = Role.Checkbox, onValueChange = { UiSound.tap(context); onChange(it) }).padding(vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
         Icon(if (checked) Icons.Outlined.CheckBox else Icons.Outlined.CheckBoxOutlineBlank, contentDescription = null,
             tint = if (checked) color else MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
@@ -435,9 +454,10 @@ private fun ChartCard(
     title: String,
     subtitle: String? = null,
     action: (@Composable () -> Unit)? = null,
+    modifier: Modifier = Modifier,
     content: @Composable ColumnScope.() -> Unit
 ) {
-    LedgerCard {
+    LedgerCard(modifier) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
             action?.invoke()
@@ -465,6 +485,11 @@ private fun CategoryGlyph(label: String, color: Color) {
         "住房" -> Icons.Outlined.Home
         "数码" -> Icons.Outlined.Devices
         "宠物" -> Icons.Outlined.Pets
+        "医疗" -> Icons.Outlined.MedicalServices
+        "娱乐" -> Icons.Outlined.SportsEsports
+        "生活费" -> Icons.Outlined.Savings
+        "转账" -> Icons.Outlined.SwapHoriz
+        com.jiligulu.app.domain.category.CategoryDefaults.VACUUM_NAME -> Icons.Outlined.Inbox
         "购物", "日用品" -> Icons.Outlined.ShoppingBag
         "学习" -> Icons.Outlined.School
         "工资", "生活服务" -> Icons.Outlined.WorkOutline
@@ -483,6 +508,7 @@ private fun BudgetDialog(
     onDisable: (() -> Unit)? = null,
     onSave: (amountFen: Long, period: BudgetPeriod, anchorDay: Int) -> Unit
 ) {
+    val context = LocalContext.current
     var amountText by rememberSaveable { mutableStateOf(initialBudget.totalText.takeIf { initialBudget.visible }.orEmpty()) }
     var period by rememberSaveable { mutableStateOf(initialBudget.period) }
     var anchorDayText by rememberSaveable { mutableStateOf(initialBudget.anchorDay.toString()) }
@@ -492,65 +518,60 @@ private fun BudgetDialog(
     val amountInvalid = amountText.isNotBlank() && amountFen == null
     val canSave = amountFen != null && (period != BudgetPeriod.MONTHLY || anchorDay != null)
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("设置预算") },
-        text = {
-            Column(
-                modifier = Modifier.verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                if (onDisable != null) TextButton(onClick = onDisable) { Text("停用预算") }
-                OutlinedTextField(
-                    value = amountText,
-                    onValueChange = { value ->
-                        // 保留负号以明确报错，避免把粘贴的负数静默改成正数；同时限制金额位数防溢出。
+    GuluDialog("小预算", onDismiss, confirmLabel = "设好啦", dismissLabel = "取消", compact = true,
+        compactWidth = 260.dp, dense = true, confirmEnabled = canSave,
+        onConfirm = { amountFen?.let { if (canSave) onSave(it, period, anchorDay ?: 1) } }) {
+        Row(Modifier.fillMaxWidth().height(46.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("预算", style = MaterialTheme.typography.labelLarge, modifier = Modifier.width(44.dp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("¥", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(end = 4.dp))
+                    BasicTextField(amountText, onValueChange = { value ->
                         if (value.matches(Regex("-?\\d{0,12}(\\.\\d{0,2})?"))) amountText = value
-                    },
-                    label = { Text("金额（元）") },
-                    prefix = { Text("¥") },
-                    singleLine = true,
-                    isError = amountInvalid,
-                    supportingText = {
-                        Text(if (amountInvalid) "请输入大于 0 的预算金额" else "预算须大于 0，最多保留两位小数")
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
-                )
-                Text("预算周期", style = MaterialTheme.typography.labelMedium)
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(period == BudgetPeriod.DAILY, { period = BudgetPeriod.DAILY },
-                        label = { Text("每天", style = MaterialTheme.typography.labelMedium) })
-                    FilterChip(period == BudgetPeriod.WEEKLY, { period = BudgetPeriod.WEEKLY },
-                        label = { Text("每 7 天", style = MaterialTheme.typography.labelMedium) })
-                    FilterChip(period == BudgetPeriod.MONTHLY, { period = BudgetPeriod.MONTHLY },
-                        label = { Text("每月", style = MaterialTheme.typography.labelMedium) })
+                    }, modifier = Modifier.weight(1f).testTag("budget-amount"), singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                        textStyle = MaterialTheme.typography.titleLarge.copy(color = MaterialTheme.colorScheme.onSurface),
+                        decorationBox = { field -> Box {
+                            if (amountText.isBlank()) Text("0", style = MaterialTheme.typography.titleLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .5f))
+                            field()
+                        } })
                 }
-                if (period == BudgetPeriod.MONTHLY) {
-                    OutlinedTextField(
-                        value = anchorDayText,
-                        onValueChange = { value ->
-                            if (value.length <= 2 && value.all { it.isDigit() }) anchorDayText = value
-                        },
-                        label = { Text("每月开始日") },
-                        suffix = { Text("号") },
-                        supportingText = { Text("可填写 1–28 号") },
-                        isError = anchorDay == null,
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
-                    )
+                HorizontalDivider(Modifier.padding(top = 5.dp), color = MaterialTheme.colorScheme.outlineVariant)
+            }
+        }
+        if (amountInvalid) Text("预算需要大于 0", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf(BudgetPeriod.MONTHLY to "每月", BudgetPeriod.WEEKLY to "每 7 天", BudgetPeriod.DAILY to "每天").forEach { (value, label) ->
+                Surface(Modifier.weight(1f), shape = MaterialTheme.shapes.medium,
+                    color = if (period == value) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .45f)) {
+                    Box(Modifier.height(34.dp).clickable { UiSound.tap(context); period = value }, contentAlignment = Alignment.Center) {
+                        Text(label, style = MaterialTheme.typography.labelMedium,
+                            color = if (period == value) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
             }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = { amountFen?.let { onSave(it, period, anchorDay ?: 1) } },
-                enabled = canSave
-            ) { Text("保存") }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
         }
-    )
+        if (period == BudgetPeriod.MONTHLY) Row(Modifier.fillMaxWidth().height(40.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("从", modifier = Modifier.width(44.dp), style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Column(Modifier.width(38.dp)) {
+                BasicTextField(anchorDayText, onValueChange = { value ->
+                    if (value.length <= 2 && value.all(Char::isDigit)) anchorDayText = value
+                }, singleLine = true, modifier = Modifier.fillMaxWidth().testTag("budget-anchor-day"),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface, textAlign = TextAlign.Center))
+                HorizontalDivider(Modifier.padding(top = 4.dp), color = MaterialTheme.colorScheme.outlineVariant)
+            }
+            Text(" 号开始", style = MaterialTheme.typography.bodyMedium)
+            Spacer(Modifier.weight(1f))
+            Text("1–28", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        if (onDisable != null) TextButton(onClick = uiTap(onDisable), modifier = Modifier.height(30.dp)) {
+            Text("停用预算", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
 }

@@ -113,7 +113,10 @@ dependencies {
     testImplementation(libs.robolectric)
     testImplementation(libs.androidx.work.testing)
     testImplementation(libs.kotlinx.coroutines.test)
-    testImplementation(libs.androidx.compose.ui.test.junit4)
+    // 1.8.0 fixes the test dispatcher interceptor key when a real Flow switches to I/O.
+    // Keep this harness correction separate from the production Compose BOM.
+    testImplementation("androidx.compose.ui:ui-test-junit4:1.8.0")
+    testImplementation("androidx.compose.ui:ui-test:1.8.0")
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.compose)
@@ -121,6 +124,9 @@ dependencies {
     implementation(libs.androidx.activity.compose)
 
     implementation(platform(libs.androidx.compose.bom))
+    // Debug compilation must match the corrected UI-test runtime (FlowRow ABI changed in 1.8).
+    // This platform applies only to debug; release keeps the catalog's production BOM.
+    debugImplementation(platform("androidx.compose:compose-bom:2025.04.01"))
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)

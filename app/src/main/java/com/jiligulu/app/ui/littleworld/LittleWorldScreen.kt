@@ -43,6 +43,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.flowOn
 import java.time.LocalDate
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -75,14 +76,20 @@ fun LittleWorldScreen(
     val state by produceState(initialState, repository, active, lifecycleOwner) {
         try {
             if (active) lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-                withContext(Dispatchers.IO) { repository.state.collect { value = it } }
+                repository.state.flowOn(Dispatchers.IO).collect { value = it }
             } else {
                 // Pre-composed neighbour pages get one real snapshot, then keep it quietly.
                 // Restarting this producer retains its previous value instead of flashing empty.
                 value = withContext(Dispatchers.IO) { repository.snapshot() }
             }
         } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
-        catch (_: Exception) { error = "小收藏暂时没读好，稍后再来看看吧" }
+        catch (failure: Exception) {
+            if (com.jiligulu.app.BuildConfig.DEBUG) {
+                android.util.Log.w("WorldState", failure.javaClass.name + "\n" +
+                    failure.stackTrace.joinToString("\n") { it.toString() })
+            }
+            error = "小收藏暂时没读好，稍后再来看看吧"
+        }
     }
     val scope = rememberCoroutineScope()
     var date by remember { mutableStateOf(LocalDate.now()) }
@@ -99,6 +106,7 @@ fun LittleWorldScreen(
     var secretPullAt by remember { mutableLongStateOf(0L) }
     var secretHint by remember { mutableStateOf(false) }
     var secretEntrance by remember { mutableStateOf<SecretEntrance?>(null) }
+    SecretEntranceLifecycle { secretEntrance = null }
     LaunchedEffect(active) { secretPullAt=0L;secretHint=false;if(!active) secretEntrance=null }
     LaunchedEffect(secretHint) { if(secretHint) {delay(2600);secretHint=false} }
     val notifyModal by rememberUpdatedState(onModalChanged)
@@ -157,7 +165,6 @@ fun LittleWorldScreen(
             }
         }
         secretEntrance?.let {entry -> SecretEntranceOverlay(entry,{
-            secretEntrance=null
             if(active && lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) onOpenSecretBase()
         },Modifier.matchParentSize()) }
         if(secretHint) Surface(Modifier.align(Alignment.TopCenter)
@@ -170,28 +177,11 @@ fun LittleWorldScreen(
         }
     }
     if (active && showCalculator) CalculatorDialog(onDismiss = { showCalculator = false }, onUse = { amount -> showCalculator = false; onRecordAmount(amount) })
-    if(active && showFortune) GuluDialog("今日小签",{showFortune=false},compact=true) {
-        Text("${fortune.mark}  ${fortune.title}",style=MaterialTheme.typography.titleMedium,color=MaterialTheme.colorScheme.primary)
-        Text(fortune.text,style=MaterialTheme.typography.bodyLarge)
-        Row(verticalAlignment=Alignment.CenterVertically) {
-            TextButton(onClick={favorite(fortune.id)}) {Text(if(fortune.id in state.favoriteFortunes) "已夹进书里 ♡" else "收藏这张小签 ♡")}
-            TextButton(onClick={showFortune=false;showFavorites=true}) {Text("翻翻收藏")}
-        }
-    }
-    if (active && showFavorites) GuluDialog("夹在书里的小签", { showFavorites = false }, compact = true) {
-        val favorites = DailyFortunes.all.filter { it.id in state.favoriteFortunes }
-        if (favorites.isEmpty()) Text("还没有收藏。抽到喜欢的小签，点一下小爱心吧 ♡")
-        favorites.forEach { note ->
-            Row(verticalAlignment = Alignment.Top) {
-                Column(Modifier.weight(1f)) {
-                    Text("${note.mark}  ${note.title}", fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.primary)
-                    Text(note.text, modifier = Modifier.padding(top = 4.dp), style = MaterialTheme.typography.bodyMedium)
-                }
-                IconButton(onClick = { favorite(note.id) }) { Icon(Icons.Outlined.Favorite, "取消收藏", tint = MaterialTheme.colorScheme.primary) }
-            }
-            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = .45f))
-        }
-    }
+    if (active && showFortune) DailyFortuneDialog(fortune, fortune.id in state.favoriteFortunes,
+        onDismiss = { showFortune = false }, onBookmark = { favorite(fortune.id) },
+        onCollection = { showFortune = false; showFavorites = true })
+    if (active && showFavorites) FortuneCollectionDialog(state.favoriteFortunes,
+        onDismiss = { showFavorites = false }, onBookmark = ::favorite)
     if (active) error?.let { message -> GuluDialog("阿噜的小提示", { error = null }, compact = true) { Text(message) } }
 }
 

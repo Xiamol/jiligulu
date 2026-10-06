@@ -18,8 +18,8 @@ import com.jiligulu.app.domain.budget.BudgetStatus
 import com.jiligulu.app.domain.category.CategoryLabels
 import com.jiligulu.app.domain.color.GoldenAnglePalette
 import com.jiligulu.app.domain.forecast.DailySpending
-import com.jiligulu.app.domain.forecast.SpendingForecast
-import com.jiligulu.app.domain.forecast.SpendingForecastDay
+import com.jiligulu.app.domain.forecast.MonthlySpendingAverage
+import com.jiligulu.app.domain.forecast.MonthlyAverageDay
 import com.jiligulu.app.ui.stats.charts.DayBar
 import com.jiligulu.app.ui.stats.charts.DonutSlice
 import com.jiligulu.app.ui.theme.BudgetRemainGreen
@@ -180,27 +180,20 @@ class StatsViewModel(
             }
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    /** Forecast work stays bounded to the displayed month plus its preceding 28 days. */
-    val forecastToday: StateFlow<LocalDate> = flow {
+    /** A day clock refreshes after midnight without collecting a second historical ledger query. */
+    val today: StateFlow<LocalDate> = flow {
         while (true) { emit(LocalDate.now()); delay(60_000L) }
     }.distinctUntilChanged().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), LocalDate.now())
 
-    @OptIn(ExperimentalCoroutinesApi::class)
-    val expenseForecast: StateFlow<List<SpendingForecastDay>> = combine(displayedMonth, forecastToday) { range, now -> range to now }
-        .flatMapLatest { (range, now) ->
-            val zone = ZoneId.systemDefault()
-            val start = Instant.ofEpochMilli(range.first).atZone(zone).toLocalDate()
-            val end = Instant.ofEpochMilli(range.second).atZone(zone).toLocalDate()
-            billRepository.observeBetween(start.minusDays(SpendingForecast.HISTORY_DAYS.toLong()).atStartOfDay(zone).toInstant().toEpochMilli(),
-                minOf(range.second, now.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()))
-                .map { bills ->
-                    val expenses = bills.asSequence().filter { it.type == BillType.EXPENSE }
-                        .map { DailySpending(Instant.ofEpochMilli(it.timestamp).atZone(zone).toLocalDate(), it.amountFen) }.toList()
-                    val days = (0 until ChronoUnit.DAYS.between(start, end).toInt()).map { start.plusDays(it.toLong()) }
-                    SpendingForecast.forDates(expenses, days, now)
-                }
-        }.flowOn(Dispatchers.Default)
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val monthlyExpenseAverages: StateFlow<List<MonthlyAverageDay>> = combine(monthBills, displayedMonth, today) { bills, range, now ->
+        val zone = ZoneId.systemDefault()
+        val start = Instant.ofEpochMilli(range.first).atZone(zone).toLocalDate()
+        val end = Instant.ofEpochMilli(range.second).atZone(zone).toLocalDate()
+        val expenses = bills.asSequence().filter { it.type == BillType.EXPENSE }
+            .map { DailySpending(Instant.ofEpochMilli(it.timestamp).atZone(zone).toLocalDate(), it.amountFen) }.toList()
+        val days = (0 until ChronoUnit.DAYS.between(start, end).toInt()).map { start.plusDays(it.toLong()) }
+        MonthlySpendingAverage.forDates(expenses, days, now)
+    }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     /** 今日瓜分：选中日的分类切片（≤7 片，超出合并「其他」） */
     val dayDonut: StateFlow<DayDonutUi> =

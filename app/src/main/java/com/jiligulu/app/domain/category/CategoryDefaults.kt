@@ -22,6 +22,30 @@ object CategoryDefaults {
     /** 图标兜底（R8）：空串 → 渲染首字圆徽章，替代旧的 🫧 占位。 */
     const val FALLBACK_EMOJI = ""
 
+    data class Preset(val name: String, val icon: String, val keywords: String, val deletable: Boolean = true)
+
+    /** Curated on a fresh install only; upgrades never recreate a category the user has removed. */
+    val presets = listOf(
+        Preset("吃饭", "builtin_food", "早餐,午餐,午饭,晚餐,晚饭,吃饭,面条,牛肉面,米饭,外卖,食堂,火锅,烧烤,炒饭"),
+        Preset("饮品", "builtin_drink", "奶茶,咖啡,饮料,可乐,矿泉水,果汁,牛奶,茶饮"),
+        Preset("零食", "builtin_snack", "零食,薯片,饼干,糖果,蛋糕,巧克力,冰淇淋,面包"),
+        Preset("交通", "builtin_bus", "地铁,公交,打车,出租车,高铁,车票,油费,停车,交通"),
+        Preset("购物", "builtin_shopping", "衣服,鞋子,裤子,化妆品,护肤品,购物"),
+        Preset("日用品", "builtin_daily", "纸巾,洗发水,沐浴露,牙膏,洗衣液,日用品"),
+        Preset("住房", "builtin_home", "房租,租金,水电,电费,水费,物业,住宿"),
+        Preset("数码", "builtin_digital", "手机,电脑,耳机,数码,软件,订阅,API,Gemini,ChatGPT"),
+        Preset("学习", "builtin_study", "教材,书本,学费,课程,买书,文具,学习"),
+        Preset("医疗", "builtin_health", "医院,看病,药品,买药,体检,医疗"),
+        Preset("娱乐", "builtin_play", "电影,演唱会,游戏,音乐,游乐园,娱乐"),
+        Preset("生活服务", "builtin_service", "理发,洗衣,快递,维修,清洁,生活服务"),
+        Preset("宠物", "builtin_pet", "猫粮,狗粮,宠物,猫砂,兽医"),
+        Preset("工资", "builtin_salary", "工资,薪水,奖金,薪资"),
+        Preset("生活费", "builtin_living", "生活费,零花钱"),
+        Preset("红包", "builtin_gift", "红包,压岁钱"),
+        Preset("转账", "builtin_transfer", "转账,收款,汇款"),
+        Preset(VACUUM_NAME, "builtin_pending", VACUUM_KEYWORDS, deletable = false)
+    )
+
     /** 收纳箱判据：唯一不可删的分类。 */
     fun isVacuum(category: CategoryEntity): Boolean = !category.deletable
 }

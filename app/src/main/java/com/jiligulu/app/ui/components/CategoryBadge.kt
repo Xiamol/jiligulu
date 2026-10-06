@@ -6,6 +6,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.Icon
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.*
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -49,13 +53,46 @@ fun CategoryBadge(
     tint: Color = MaterialTheme.colorScheme.primary
 ) {
     val displayName = remember(name) { CategoryLabels.displayName(name) }
+    val iconTint = when (displayName) {
+        "吃饭", "餐饮" -> Color(0xFFEF8D87)
+        "交通" -> Color(0xFF69B89A)
+        "零食" -> Color(0xFFEAB567)
+        "饮品" -> Color(0xFFDB92B8)
+        else -> tint
+    }
+    val curated = remember(displayName) { curatedCategoryIcon(displayName) }
     val glyph = remember(name, icon) { categoryBadgeGlyph(name, icon) }
     Box(
-        modifier.size(size).background(tint.copy(alpha = 0.12f), CircleShape)
+        modifier.size(size).background(iconTint.copy(alpha = 0.12f), CircleShape)
             .clearAndSetSemantics { contentDescription = "${displayName}分类图标" },
         contentAlignment = Alignment.Center
     ) {
-        Text(glyph, fontSize = (size.value * 0.53f).sp,
+        if (curated != null) Icon(curated, contentDescription = null, tint = iconTint,
+            modifier = Modifier.size(size * .57f))
+        else Text(glyph, fontSize = (size.value * 0.53f).sp,
             fontWeight = FontWeight.Medium, color = tint, maxLines = 1)
     }
+}
+
+/** Fixed vector silhouettes make familiar categories consistent across every Android font. */
+private fun curatedCategoryIcon(name: String): ImageVector? = when (name) {
+    "吃饭", "餐饮" -> Icons.Outlined.Restaurant
+    "饮品" -> Icons.Outlined.LocalCafe
+    "零食" -> Icons.Outlined.Cookie
+    "交通" -> Icons.Outlined.DirectionsBus
+    "购物" -> Icons.Outlined.ShoppingBag
+    "日用品" -> Icons.Outlined.LocalMall
+    "住房" -> Icons.Outlined.Home
+    "数码" -> Icons.Outlined.Devices
+    "学习" -> Icons.Outlined.School
+    "医疗" -> Icons.Outlined.MedicalServices
+    "娱乐" -> Icons.Outlined.SportsEsports
+    "生活服务" -> Icons.Outlined.WorkOutline
+    "宠物" -> Icons.Outlined.Pets
+    "工资" -> Icons.Outlined.AccountBalanceWallet
+    "生活费" -> Icons.Outlined.Savings
+    "红包", "人情" -> Icons.Outlined.CardGiftcard
+    "转账" -> Icons.Outlined.SwapHoriz
+    com.jiligulu.app.domain.category.CategoryDefaults.VACUUM_NAME -> Icons.Outlined.Inbox
+    else -> null
 }

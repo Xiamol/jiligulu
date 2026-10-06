@@ -12,6 +12,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.PauseCircleOutline
 import androidx.compose.material.icons.outlined.PlayCircleOutline
 import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.automirrored.outlined.Undo
+import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material.icons.outlined.Logout
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -33,21 +36,26 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.LocalContext
+import com.jiligulu.app.core.audio.UiSound
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.roundToInt
 import kotlin.math.sin
 
+enum class GomokuPlayMode { CPU, NEARBY, ONLINE, HOTSEAT }
+
 @Composable
 internal fun ColumnScope.SecretSnakeGame(state: SnakeState, running: Boolean, started: Boolean, boardSize: Dp,
     onDirection: (SnakeDirection) -> Unit, onToggle: () -> Unit, onRestart: () -> Unit) {
     val latestDirection by rememberUpdatedState(onDirection)
+    val context = LocalContext.current
     val status = when {
         state.won -> "小蛇把星星全收好啦！"
         state.gameOver -> "碰到啦，再陪小蛇走一圈吧"
-        running -> "吃星星得分，小心墙壁和自己的尾巴"
+        running -> "墙的另一边也是这里，小心自己的尾巴"
         started -> "小蛇休息中，继续时会从这里出发"
-        else -> "点开始，再用方向键或滑动转弯"
+        else -> "滑一下棋盘或拨动摇杆，小蛇就会出发"
     }
     Row(Modifier.width(boardSize), horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically) {
@@ -60,12 +68,15 @@ internal fun ColumnScope.SecretSnakeGame(state: SnakeState, running: Boolean, st
         .semantics { contentDescription = "贪吃蛇棋盘，收好${state.score}颗星星。可以滑动改变方向。" }
         .pointerInput(Unit) {
             var drag = Offset.Zero
-            detectDragGestures(onDragStart = { drag = Offset.Zero }, onDragEnd = {
-                if (drag.getDistance() >= 12.dp.toPx()) latestDirection(
-                    if (abs(drag.x) > abs(drag.y)) {
+            detectDragGestures(onDragStart = { UiSound.tap(context); drag = Offset.Zero }, onDragCancel = { drag = Offset.Zero }) { change, amount ->
+                change.consume(); drag += amount
+                if (drag.getDistance() >= 12.dp.toPx()) {
+                    latestDirection(if (abs(drag.x) > abs(drag.y)) {
                         if (drag.x > 0) SnakeDirection.RIGHT else SnakeDirection.LEFT
                     } else if (drag.y > 0) SnakeDirection.DOWN else SnakeDirection.UP)
-            }, onDragCancel = { drag = Offset.Zero }) { change, amount -> change.consume(); drag += amount }
+                    drag = Offset.Zero
+                }
+            }
         }) {
         val cellW = size.width / state.width
         val cellH = size.height / state.height
@@ -103,52 +114,118 @@ internal fun ColumnScope.SecretSnakeGame(state: SnakeState, running: Boolean, st
     Text(status, modifier = Modifier.padding(vertical = 12.dp), style = MaterialTheme.typography.bodySmall,
         color = Color(0xFF887F86))
     Spacer(Modifier.height(12.dp))
-    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        SnakeDirectionButton("↑", "向上", onClick = { onDirection(SnakeDirection.UP) }, enabled = !state.gameOver)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            SnakeDirectionButton("←", "向左", onClick = { onDirection(SnakeDirection.LEFT) }, enabled = !state.gameOver)
-            SnakeDirectionButton("↓", "向下", onClick = { onDirection(SnakeDirection.DOWN) }, enabled = !state.gameOver)
-            SnakeDirectionButton("→", "向右", onClick = { onDirection(SnakeDirection.RIGHT) }, enabled = !state.gameOver)
-        }
-    }
+    SnakeJoystick(enabled = !state.gameOver, onDirection)
     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        FilledTonalButton(onClick = onToggle, enabled = !state.gameOver,
+        FilledTonalButton(onClick = { UiSound.tap(context); onToggle() }, enabled = !state.gameOver,
             shape = RoundedCornerShape(14.dp), modifier = Modifier.width(120.dp)) { Text(if (running) "暂停" else if (started) "继续" else "开始") }
-        TextButton(onClick = onRestart) { Text("重新开始") }
+        TextButton(onClick = { UiSound.tap(context); onRestart() }) { Text("重新开始") }
     }
     Spacer(Modifier.height(8.dp))
 }
 
 @Composable
-private fun SnakeDirectionButton(symbol: String, label: String, enabled: Boolean, onClick: () -> Unit) {
-    FilledTonalButton(onClick = onClick, enabled = enabled, modifier = Modifier.size(width = 60.dp, height = 46.dp)
-        .semantics { contentDescription = label }, contentPadding = PaddingValues(0.dp), shape = RoundedCornerShape(14.dp)) {
-        Text(symbol, fontSize = 25.sp)
+private fun SnakeJoystick(enabled: Boolean, onDirection: (SnakeDirection) -> Unit) {
+    val latestDirection by rememberUpdatedState(onDirection)
+    val context = LocalContext.current
+    var thumb by remember { mutableStateOf(Offset.Zero) }
+    Canvas(Modifier.size(92.dp).semantics { contentDescription = "小蛇方向摇杆，拖动改变方向" }
+        .pointerInput(enabled) {
+            if (enabled) detectDragGestures(onDragStart = { p -> UiSound.tap(context); thumb = p - Offset(size.width / 2f, size.height / 2f) },
+                onDragEnd = { thumb = Offset.Zero }, onDragCancel = { thumb = Offset.Zero }) { change, amount ->
+                change.consume()
+                val next = thumb + amount
+                val distance = next.getDistance()
+                val limit = size.width * .29f
+                thumb = if (distance > limit) next * (limit / distance) else next
+                if (distance >= 8.dp.toPx()) latestDirection(if (abs(next.x) > abs(next.y)) {
+                    if (next.x > 0) SnakeDirection.RIGHT else SnakeDirection.LEFT
+                } else if (next.y > 0) SnakeDirection.DOWN else SnakeDirection.UP)
+            }
+        }) {
+        drawCircle(Color(0xFF8A9B86).copy(alpha = .09f), size.width * .46f)
+        drawCircle(Color(0xFF849280).copy(alpha = .28f), size.width * .46f, style = Stroke(1.dp.toPx()))
+        listOf(Offset(0f,-1f),Offset(1f,0f),Offset(0f,1f),Offset(-1f,0f)).forEach { direction ->
+            drawCircle(Color(0xFF879580).copy(alpha = .4f), 1.8.dp.toPx(), center + direction * (size.width * .36f))
+        }
+        drawCircle(Color(0xFF688065).copy(alpha = .13f), size.width * .19f, center + thumb + Offset(0f,2.dp.toPx()))
+        drawCircle(Brush.radialGradient(listOf(Color(0xFFC9D7BD),Color(0xFF9BB88E)), center + thumb, size.width*.19f), size.width*.19f, center + thumb)
+        drawCircle(Color.White.copy(alpha = .35f), size.width*.08f, center + thumb - Offset(3.dp.toPx(),3.dp.toPx()))
     }
 }
 
 @Composable
 internal fun ColumnScope.SecretGomokuGame(state: GomokuState, paused: Boolean, boardSize: Dp,
     onMove: (Int, Int) -> Unit, onToggle: () -> Unit, onRestart: () -> Unit,
+    canUndo: Boolean = false, onUndo: () -> Unit = {},
+    mode: GomokuPlayMode = GomokuPlayMode.CPU, onMode: (GomokuPlayMode) -> Unit = {},
+    room: GomokuRoomUiState? = null, nearby: NearbyRoomsState? = null,
+    onHost: () -> Unit = {}, onJoin: (String) -> Unit = {}, onDisconnect: () -> Unit = {},
+    onNearbyRetry: () -> Unit = {}, onUndoResponse: (Boolean) -> Unit = {},
     helpBusy: Boolean = false, onControlsBottom: (Float) -> Unit = {}) {
+    val context = LocalContext.current
+    var modeMenu by remember { mutableStateOf(false) }
+    val network = mode == GomokuPlayMode.ONLINE || mode == GomokuPlayMode.NEARBY
+    val localPlayer = if (network) room?.localPlayer else 1
+    val modeNames = remember { mapOf(GomokuPlayMode.CPU to "和阿噜下", GomokuPlayMode.NEARBY to "附近的人",
+        GomokuPlayMode.ONLINE to "创建房间", GomokuPlayMode.HOTSEAT to "同屏双人") }
+    Row(Modifier.width(boardSize).height(36.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box {
+            TextButton(onClick = { UiSound.tap(context); modeMenu = true }, contentPadding = PaddingValues(horizontal = 6.dp)) {
+                Text(modeNames.getValue(mode), color = Color(0xFF766A7F), style = MaterialTheme.typography.bodySmall)
+                Icon(Icons.Outlined.ExpandMore, "选择对局方式", Modifier.size(16.dp), tint = Color(0xFF928497))
+            }
+            DropdownMenu(modeMenu, { modeMenu = false }) {
+                modeNames.forEach { (value, label) -> DropdownMenuItem(text = { Text(label) }, onClick = {
+                    UiSound.tap(context); modeMenu = false; if (value != mode) onMode(value)
+                }) }
+            }
+        }
+    }
+    if (network && room != null && !room.connected) {
+        if (mode == GomokuPlayMode.NEARBY) NearbyChessLobby(nearby, room.status, room.error, onJoin, onNearbyRetry, onControlsBottom)
+        else OnlineChessLobby(room.sessionActive, room.busy, room.hostAddress, room.status, room.error,
+            onHost, onJoin, onDisconnect, onControlsBottom)
+        return
+    }
+    var undoResponseSent by remember(mode, room?.revision, room?.pendingUndoRequest) { mutableStateOf(false) }
+    if (network && room?.pendingUndoRequest != null && room.pendingUndoRequest != room.localPlayer) {
+        fun respond(accept: Boolean) { if (!undoResponseSent) { undoResponseSent = true; onUndoResponse(accept) } }
+        com.jiligulu.app.ui.components.GuluDialog("棋友想退回一步", { respond(false) }, compact = true, busy = undoResponseSent,
+            confirmLabel = "同意", onConfirm = { respond(true) }, dismissLabel = "继续这局") {
+            Text("同意后，两张棋桌会一起回到上一步。", style = MaterialTheme.typography.bodySmall)
+        }
+    }
     val latestMove by rememberUpdatedState(onMove)
-    val canMove = !paused && !helpBusy && state.currentPlayer == 1 && state.outcome == GomokuOutcome.PLAYING
+    val canMove = !helpBusy && state.outcome == GomokuOutcome.PLAYING && when (mode) {
+        GomokuPlayMode.CPU -> !paused && state.currentPlayer == 1
+        GomokuPlayMode.HOTSEAT -> !paused
+        else -> room?.connected == true && !room.awaitingAck && room.pendingUndoRequest == null && state.currentPlayer == localPlayer
+    }
     val wood = remember { Brush.linearGradient(listOf(Color(0xFFF2DFB9), Color(0xFFE5C79A))) }
     val status = when (state.outcome) {
-        GomokuOutcome.HUMAN_WON -> "你连成五颗啦，阿噜给你鼓掌 ♡"
-        GomokuOutcome.CPU_WON -> "阿噜连成五颗了，再来一局？"
+        GomokuOutcome.HUMAN_WON -> if (mode == GomokuPlayMode.CPU) "你连成五颗啦，阿噜给你鼓掌 ♡" else "黑方连成五颗啦 ♡"
+        GomokuOutcome.CPU_WON -> if (mode == GomokuPlayMode.CPU) "阿噜连成五颗了，再来一局？" else "白方连成五颗啦 ♡"
         GomokuOutcome.DRAW -> "棋盘坐满啦，这一局平手 ♡"
-        GomokuOutcome.PLAYING -> if (paused) "棋局已暂停，棋子都替你留着" else if (state.currentPlayer == 1) "轮到你了 · 你执黑棋" else "阿噜在想下一步…"
+        GomokuOutcome.PLAYING -> when {
+            network && room?.pendingUndoRequest != null -> "等棋友商量这一步…"
+            network && room?.awaitingAck == true -> "等另一张棋桌落稳…"
+            !network && paused -> "棋局已暂停，棋子都替你留着"
+            mode == GomokuPlayMode.CPU && state.currentPlayer == 2 -> "阿噜在想下一步…"
+            network -> if (state.currentPlayer == localPlayer) "轮到你了" else "轮到棋友了"
+            else -> if (state.currentPlayer == 1) "轮到黑方了" else "轮到白方了"
+        }
     }
     BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
-    // The header takes 56 dp; offset half of it so the board itself centers on the page.
-    val boardTop = ((maxHeight - boardSize) / 2 - 28.dp).coerceAtLeast(60.dp)
+    // Header and mode selector take 92 dp; offset half so the board itself centers on the page.
+    val boardTop = ((maxHeight - boardSize) / 2 - 46.dp).coerceAtLeast(60.dp)
     Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
     Spacer(Modifier.height((boardTop - 60.dp).coerceAtLeast(0.dp)))
     Row(Modifier.width(boardSize).height(36.dp), verticalAlignment = Alignment.CenterVertically) {
-        GameSeat("你", Color(0xFF4C4950), active = state.currentPlayer == 1 && !paused)
+        GameSeat(if (mode == GomokuPlayMode.CPU || network && localPlayer == 1) "你" else if (network) "棋友" else "黑方",
+            Color(0xFF4C4950), active = state.currentPlayer == 1 && (network || !paused))
         Spacer(Modifier.weight(1f))
-        GameSeat("阿噜", Color(0xFFF9F5EA), active = state.currentPlayer == 2 && !paused)
+        GameSeat(if (mode == GomokuPlayMode.CPU) "阿噜" else if (network && localPlayer == 2) "你" else if (network) "棋友" else "白方",
+            Color(0xFFF9F5EA), active = state.currentPlayer == 2 && (network || !paused))
     }
     Spacer(Modifier.height(24.dp))
     Canvas(Modifier.size(boardSize).shadow(3.dp, RoundedCornerShape(13.dp), clip = false)
@@ -165,7 +242,11 @@ internal fun ColumnScope.SecretGomokuGame(state: GomokuState, paused: Boolean, b
                 drawRoundRect(Color(0xFFBD9966).copy(alpha = .6f), cornerRadius = CornerRadius(13.dp.toPx()), style = Stroke(1.dp.toPx()))
             }
         }
-        .semantics { contentDescription = "${state.size}路五子棋棋盘，你执黑棋，阿噜执白棋。$status" }
+        .semantics { contentDescription = "${state.size}路五子棋棋盘，" + when (mode) {
+            GomokuPlayMode.CPU -> "你执黑棋，阿噜执白棋。"
+            GomokuPlayMode.HOTSEAT -> "同屏双人，黑方先行。"
+            else -> if (localPlayer == 1) "你执黑棋，棋友执白棋。" else "你执白棋，棋友执黑棋。"
+        } + status }
         .pointerInput(canMove, state.size) {
             if (canMove) detectTapGestures { offset ->
                 val padding = size.width * .047f
@@ -203,10 +284,12 @@ internal fun ColumnScope.SecretGomokuGame(state: GomokuState, paused: Boolean, b
     }
     Text(status, modifier = Modifier.padding(top = 14.dp), color = Color(0xFF766A7F), style = MaterialTheme.typography.bodyMedium)
     Spacer(Modifier.height(20.dp))
-    Row(Modifier.width(boardSize).padding(horizontal = 48.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-        GameIconTool(if (paused) Icons.Outlined.PlayCircleOutline else Icons.Outlined.PauseCircleOutline,
+    Row(Modifier.width(boardSize).padding(horizontal = 34.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+        if (!network) GameIconTool(if (paused) Icons.Outlined.PlayCircleOutline else Icons.Outlined.PauseCircleOutline,
             if (paused) "继续" else "暂停", onToggle, Modifier.weight(1f), enabled = state.outcome == GomokuOutcome.PLAYING)
-        GameIconTool(Icons.Outlined.Refresh, "重开", onRestart, Modifier.weight(1f))
+        else GameIconTool(androidx.compose.material.icons.Icons.Outlined.Logout, "离开", onDisconnect, Modifier.weight(1f))
+        GameIconTool(Icons.Outlined.Refresh, "重开", onRestart, Modifier.weight(1f), enabled = !network || room?.localPlayer == 1 && room.pendingUndoRequest == null)
+        GameIconTool(Icons.AutoMirrored.Outlined.Undo, "悔棋", onUndo, Modifier.weight(1f), enabled = canUndo && !helpBusy && (!network || room?.pendingUndoRequest == null))
     }
     Text("黑棋先行 · 连成五子获胜", Modifier.padding(top = 4.dp, bottom = 10.dp)
         .onGloballyPositioned { onControlsBottom(it.boundsInRoot().bottom) },

@@ -71,14 +71,15 @@ class SecretGameEnginesTest {
         assertEquals(7, initial.score)
     }
 
-    @Test fun snakeWallAndBodyCollisionsEndTheGameWithoutMovingTheBody() {
+    @Test fun snakeWrapsWallsAndOnlyBodyCollisionsEndTheGame() {
         val wall = SnakeState(
             body = listOf(GridCell(15, 8), GridCell(14, 8), GridCell(13, 8)),
         )
         val wallResult = SnakeEngine.tick(wall)
-        assertTrue(wallResult.gameOver)
+        assertFalse(wallResult.gameOver)
         assertFalse(wallResult.won)
-        assertEquals(wall.body, wallResult.body)
+        assertEquals(GridCell(0, 8), wallResult.body.first())
+        assertEquals(3, wallResult.body.size)
 
         val body = SnakeState(
             width = 4,
@@ -90,6 +91,33 @@ class SecretGameEnginesTest {
             direction = SnakeDirection.LEFT,
         )
         assertTrue(SnakeEngine.tick(body).gameOver)
+    }
+
+    @Test fun snakeWrapsAllFourEdgesAndCanEatAcrossTheBoundary() {
+        val cases = listOf(
+            SnakeDirection.LEFT to (GridCell(0, 2) to GridCell(4, 2)),
+            SnakeDirection.RIGHT to (GridCell(4, 2) to GridCell(0, 2)),
+            SnakeDirection.UP to (GridCell(2, 0) to GridCell(2, 4)),
+            SnakeDirection.DOWN to (GridCell(2, 4) to GridCell(2, 0)),
+        )
+        for ((direction, cells) in cases) {
+            val original = SnakeState(width = 5, height = 5, body = listOf(cells.first),
+                direction = direction, food = cells.second)
+            val moved = SnakeEngine.tick(original, Random(6))
+            assertEquals(cells.second, moved.body.first())
+            assertEquals(2, moved.body.size)
+            assertEquals(1, moved.score)
+            assertFalse(moved.gameOver)
+        }
+    }
+
+    @Test fun snakeWrappingOntoItsOwnBodyStillLosesAndItsOldTailCanVacate() {
+        val body = listOf(GridCell(0, 1), GridCell(1, 1), GridCell(2, 1), GridCell(3, 1), GridCell(3, 2))
+        val state = SnakeState(width = 4, height = 4, body = body, direction = SnakeDirection.LEFT)
+        assertTrue(SnakeEngine.tick(state).gameOver)
+        val tailAtEdge = state.copy(body = body.dropLast(1))
+        assertFalse(SnakeEngine.tick(tailAtEdge).gameOver)
+        assertEquals(GridCell(3, 1), SnakeEngine.tick(tailAtEdge).body.first())
     }
 
     @Test fun snakeFillingTheBoardWinsAndTerminalStatesStayFrozen() {

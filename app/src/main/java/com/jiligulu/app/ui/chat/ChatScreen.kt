@@ -73,6 +73,7 @@ import com.jiligulu.app.data.local.entity.BillType
 import com.jiligulu.app.data.local.entity.CategoryEntity
 import com.jiligulu.app.ui.persona.GuluMascot
 import com.jiligulu.app.ui.components.CategoryBadge
+import com.jiligulu.app.ui.components.uiTap
 import com.jiligulu.app.domain.category.CategoryDefaults
 import com.jiligulu.app.ui.theme.ExpenseCoral
 import com.jiligulu.app.ui.theme.IncomeGreen
@@ -161,7 +162,7 @@ fun ChatScreen(
                 .padding(start = 4.dp, end = 20.dp, top = 8.dp, bottom = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = onBack) {
+            IconButton(onClick = uiTap(onBack)) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
             }
             Column(Modifier.weight(1f)) {
@@ -240,7 +241,7 @@ fun ChatScreen(
             if (hasOlderHistory) {
                 item(key = "older-history", contentType = "history-control") {
                     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                        TextButton(onClick = vm::loadOlderHistory, enabled = !loadingOlderHistory) {
+                        TextButton(onClick = uiTap(vm::loadOlderHistory), enabled = !loadingOlderHistory) {
                             if (loadingOlderHistory) {
                                 CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
                                 Spacer(Modifier.width(8.dp))
@@ -277,7 +278,7 @@ fun ChatScreen(
         if (error != null) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(error.orEmpty(), Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-                if (!ready) TextButton(onClick = vm::loadHistory) { Text("重试") }
+                if (!ready) TextButton(onClick = uiTap(vm::loadHistory)) { Text("重试") }
             }
         }
 
@@ -315,7 +316,7 @@ fun ChatScreen(
             )
             Spacer(Modifier.width(8.dp))
             IconButton(
-                onClick = sendInput,
+                onClick = uiTap(sendInput),
                 enabled = input.isNotBlank() && ready && !sending,
                 modifier = Modifier.size(48.dp),
                 colors = IconButtonDefaults.iconButtonColors(
@@ -422,7 +423,7 @@ internal fun DraftCardView(
             fontWeight = FontWeight.SemiBold
         )
         if (!expanded && editing) {
-            TextButton(onClick = { onExpandedChange(true) }, modifier = Modifier.height(32.dp)
+            TextButton(onClick = uiTap { onExpandedChange(true) }, modifier = Modifier.height(32.dp)
                 .testTag("draft-expand-${card.id}"), contentPadding = PaddingValues(horizontal = 6.dp)) {
                 Text("展开 · 编辑草稿", style = MaterialTheme.typography.labelSmall)
             }
@@ -484,15 +485,15 @@ internal fun DraftCardView(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    TextButton(onClick = { onExpandedChange(false) }, modifier = Modifier.testTag("draft-collapse-${card.id}")) { Text("收起") }
-                    TextButton(onClick = { confirmDelete = true }, modifier = Modifier.testTag("draft-delete-${card.id}")) {
+                    TextButton(onClick = uiTap { onExpandedChange(false) }, modifier = Modifier.testTag("draft-collapse-${card.id}")) { Text("收起") }
+                    TextButton(onClick = uiTap { confirmDelete = true }, modifier = Modifier.testTag("draft-delete-${card.id}")) {
                         Text("删除", color = MaterialTheme.colorScheme.error)
                     }
                     Spacer(Modifier.weight(1f))
                     val selected = card.drafts.filter { it.checked }
                     val validCount = selected.size
                     Button(
-                        onClick = onConfirm,
+                        onClick = uiTap(onConfirm),
                         enabled = validCount > 0 && selected.all { it.isValid },
                         modifier = Modifier.testTag("draft-confirm-${card.id}")
                     ) {
@@ -528,8 +529,8 @@ internal fun DraftCardView(
                     Text("删掉就找不回来了。已经记入账本的账单不会受影响。",
                         style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                        TextButton(onClick = { confirmDelete = false }) { Text("再留一会儿") }
-                        Button(onClick = { confirmDelete = false; onDelete() },
+                        TextButton(onClick = uiTap { confirmDelete = false }) { Text("再留一会儿") }
+                        Button(onClick = uiTap { confirmDelete = false; onDelete() },
                             modifier = Modifier.testTag("draft-delete-confirm-${card.id}")) { Text("删除草稿") }
                     }
                 }
@@ -624,14 +625,14 @@ private fun CommandCardView(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                TextButton(onClick = onCancel) { Text("取消") }
+                TextButton(onClick = uiTap(onCancel)) { Text("取消") }
                 Spacer(Modifier.width(4.dp))
-                TextButton(onClick = onToggleAll, modifier = Modifier.testTag("command-toggle-all")) {
+                TextButton(onClick = uiTap(onToggleAll), modifier = Modifier.testTag("command-toggle-all")) {
                     Text(if (card.params.any { !it.checked }) "全选" else "全不选")
                 }
                 Spacer(Modifier.weight(1f))
                 Button(
-                    onClick = onConfirm,
+                    onClick = uiTap(onConfirm),
                     enabled = card.pendingCount > 0,
                     modifier = Modifier.testTag("command-confirm")
                 ) {
@@ -745,7 +746,7 @@ private fun ActionPill(text: String, onClick: () -> Unit) {
     Surface(
         modifier = Modifier
             .clip(RoundedCornerShape(50))
-            .clickable(onClick = onClick),
+            .clickable(onClick = uiTap(onClick)),
         shape = RoundedCornerShape(50),
         color = MaterialTheme.colorScheme.primaryContainer,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f))

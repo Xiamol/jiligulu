@@ -1,0 +1,24 @@
+{
+  "date": "2026-10-06",
+  "mode": "built-in image_gen edit",
+  "prompts": [
+    {
+      "key": "empty",
+      "prompt": "Use case: precise-object-edit. Asset type: exact three-panel portrait scene atlas for an Android app.\nImage1 is the edit target. Preserve the EXACT dimensions, three vertical panels, camera, every prop and lighting. Only remove the white letter protruding from the slot of the wooden mailbox on the RIGHT of the FIRST (leftmost) panel. The slot is around x=450,y=270 in the full1717x916atlas. Make that mailbox slot empty and naturally dark, preserving its wood edge and highlights. Do NOT remove the letter held by the purple cloud courier. Do NOT change the courier, title plaque, letter chest, or the second scrapbook panel or third train panel. This is the no-arrived-mail scene variant. No new text, no letters in that mailbox slot, no watermark. Keep the atlas aligned pixel-for-pixel as closely as possible; no reframing.",
+      "paths": [
+        "D:/jiligulu/app/src/main/res/drawable-nodpi/world_destination_portraits_v3.png"
+      ]
+    },
+    {
+      "key": "night",
+      "prompt": "Use case: lighting-weather. Asset type: exact portrait nighttime variant of a cozy anime secret game room.\nImage1 is the edit target. Preserve exact portrait aspect ratio and camera, all prop coordinates, big blank hanging title plaque, wheel, handheld game console, board table, notebook, ladders, vines, furniture, caption tags, cushions and mascot silhouette.\nTurn OFF the prominent oil lamp high on the RIGHT shelf and the smaller oil lamp on the LEFT writing table: dark unlit glass, no golden bulb flame/glow. The whole room enters gentle quiet NIGHT. Deep desaturated blue-lavender moonlight from the back window, subdued wood and fabric, tiny star lights now faint, lovely soft outlines, readable props. Outside the window a calm dark blue sky and moonlight. The purple sprout-cloud mascot on the lower cushion now sleeps peacefully: eyes closed, mouth small sleeping smile, same body/sprout/cheeks/paws position, hugging same little cream cushion. No text Zzz painted, no new UI, no moved objects. This must be naturally nighttime lighting, not merely a flat dark filter. Keep warm details very faint, low saturation, coherent tender anime mood, no oversaturated neon and no watermarks.",
+      "paths": [
+        "D:/jiligulu/app/src/main/res/drawable-nodpi/world_secret_room_portrait_v3.png"
+      ]
+    }
+  ],
+  "assets": {
+    "empty": "app/src/main/res/drawable-nodpi/world_destination_portraits_v4_empty.png",
+    "night": "app/src/main/res/drawable-nodpi/world_secret_room_portrait_v4_night.png"
+  }
+}

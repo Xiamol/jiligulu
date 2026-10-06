@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -50,6 +51,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -71,6 +73,9 @@ import com.jiligulu.app.ui.components.GuluDialog
 import com.jiligulu.app.ui.components.SpringScrollColumn
 import com.jiligulu.app.ui.components.TimePickerDialog
 import com.jiligulu.app.ui.components.TimePickerField
+import com.jiligulu.app.ui.components.CompactFormField
+import com.jiligulu.app.ui.components.uiTap
+import com.jiligulu.app.core.audio.UiSound
 import com.jiligulu.app.ui.persona.GuluMascot
 import com.jiligulu.app.ui.theme.GuluBrandFont
 import kotlinx.coroutines.launch
@@ -86,14 +91,16 @@ fun SettingsScreen(
 ) {
     val state by vm.uiState.collectAsStateWithLifecycle()
     val fieldScope = rememberCoroutineScope()
-    var editingField by rememberSaveable { mutableStateOf<ProfileSettingField?>(null) }
-    var fieldText by rememberSaveable { mutableStateOf("") }
+    var editingField by remember { mutableStateOf<ProfileSettingField?>(null) }
+    var fieldText by remember { mutableStateOf("") }
     fun edit(field: ProfileSettingField, value: String) { vm.clearError(); fieldText=value; editingField=field }
     editingField?.let { field ->
-        GuluDialog(field.title, { if(!state.isSaving) editingField=null }, confirmLabel="保存", compact=true,
-            busy=state.isSaving, onConfirm={ fieldScope.launch { if(vm.saveField(field,fieldText)) editingField=null } }) {
-            OutlinedTextField(fieldText,{fieldText=it;vm.clearError()},Modifier.fillMaxWidth(),singleLine=true,
-                label={Text(field.title)},shape=RoundedCornerShape(14.dp),enabled=!state.isSaving,
+        GuluDialog(field.title, { if(!state.isSaving) {editingField=null;fieldText=""} }, confirmLabel="保存", compact=true,
+            dense=true,compactWidth=280.dp,busy=state.isSaving,
+            confirmEnabled=field!=ProfileSettingField.NAME || fieldText.isNotBlank(),
+            onConfirm={ fieldScope.launch { if(vm.saveField(field,fieldText)) {editingField=null;fieldText=""} } }) {
+            CompactFormField(if(field==ProfileSettingField.API_KEY) "密钥" else field.title,
+                fieldText,{fieldText=it;vm.clearError()},enabled=!state.isSaving,
                 visualTransformation=if(field==ProfileSettingField.API_KEY) PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None)
             if(field==ProfileSettingField.SUFFIX) Text("留空时使用「大人」",style=MaterialTheme.typography.bodySmall)
             if(field==ProfileSettingField.API_KEY) Text("留空使用内置配置",style=MaterialTheme.typography.bodySmall)
@@ -104,6 +111,8 @@ fun SettingsScreen(
     // Permission launchers belong to the UI; preference writes and scheduling belong to the VM.
     var settingsTab by rememberSaveable { mutableStateOf(if (checkUpdatesOnOpen) "关于" else "日常") }
     val context = LocalContext.current
+    var feedbackSound by remember(context) { mutableStateOf(UiSound.enabled(context)) }
+    LaunchedEffect(context) { UiSound.warmup(context) }
     val notificationPermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { /* The in-app reminder still works when notification permission is declined. */ }
@@ -114,9 +123,9 @@ fun SettingsScreen(
     var showIntervalPicker by rememberSaveable { mutableStateOf(false) }
     var showQuietStart by rememberSaveable { mutableStateOf(false) }
     var showQuietEnd by rememberSaveable { mutableStateOf(false) }
-    val settingsScroll = rememberScrollState()
-    LaunchedEffect(checkUpdatesOnOpen, settingsScroll.maxValue) {
-        if (checkUpdatesOnOpen && settingsScroll.maxValue in 1 until Int.MAX_VALUE) {
+    val settingsScroll = remember(settingsTab) { ScrollState(0) }
+    LaunchedEffect(checkUpdatesOnOpen, settingsTab, settingsScroll.maxValue) {
+        if (checkUpdatesOnOpen && settingsTab == "关于" && settingsScroll.maxValue in 1 until Int.MAX_VALUE) {
             settingsScroll.scrollTo(settingsScroll.maxValue)
         }
     }
@@ -166,17 +175,24 @@ fun SettingsScreen(
         modifier = Modifier.imePadding(),
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
+            Column {
             TopAppBar(
                 title = { Text("设置", style = MaterialTheme.typography.titleLarge) },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.background
                 ),
                 navigationIcon = {
-                    IconButton(onClick = onBack, enabled = !state.isSaving) {
+                    IconButton(onClick = uiTap(onBack), enabled = !state.isSaving) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                     }
                 }
             )
+            FlowRow(Modifier.fillMaxWidth().padding(horizontal=16.dp),horizontalArrangement=Arrangement.spacedBy(6.dp)) {
+                listOf("日常", "提醒", "数据", "关于").forEach { tab ->
+                    FilterChip(selected=settingsTab==tab,onClick=uiTap {settingsTab=tab},enabled=state.isLoaded,label={Text(tab)})
+                }
+            }
+            }
         }
     ) { padding ->
         if (state.isLoading) {
@@ -189,9 +205,9 @@ fun SettingsScreen(
                     .fillMaxSize()
                     .padding(padding)
                     .testTag("settings-list")
-                    .padding(horizontal = 20.dp, vertical = 8.dp),
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
                 state = settingsScroll,
-                verticalArrangement = Arrangement.spacedBy(20.dp)
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 state.error?.let { error ->
                     Card(
@@ -199,7 +215,7 @@ fun SettingsScreen(
                     ) {
                         Column(Modifier.padding(16.dp)) {
                             Text(error, color = MaterialTheme.colorScheme.onErrorContainer)
-                            if (!state.isLoaded) TextButton(onClick = vm::load) { Text("重新读取") }
+                            if (!state.isLoaded) TextButton(onClick = uiTap(vm::load)) { Text("重新读取") }
                         }
                     }
                 }
@@ -207,14 +223,7 @@ fun SettingsScreen(
                 if (state.isLoaded) {
                     SettingsCompanionHeader(state.nickname, state.suffix)
 
-                    Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(26.dp), color = MaterialTheme.colorScheme.surface,
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .5f))) {
-                        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
-                            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                listOf("日常", "提醒", "数据", "关于").forEach { tab ->
-                                    FilterChip(selected = settingsTab == tab, onClick = { settingsTab = tab }, label = { Text(tab) })
-                                }
-                            }
+                    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     if (settingsTab == "日常") SettingsSection("你的称呼", "让阿噜用你喜欢的方式叫你", "💌") {
                         ProfileSettingRow("名字",state.nickname,editable) { edit(ProfileSettingField.NAME,state.nickname) }
                         ProfileSettingRow("称呼后缀",state.suffix,editable) { edit(ProfileSettingField.SUFFIX,state.suffix) }
@@ -229,13 +238,21 @@ fun SettingsScreen(
                             ).forEach { (mode, label) ->
                                 FilterChip(
                                     selected = state.themeMode == mode,
-                                    onClick = { vm.setThemeMode(mode) },
+                                    onClick = uiTap { vm.setThemeMode(mode) },
                                     enabled = editable,
                                     label = { Text(label) }
                                 )
                             }
                         }
                         LittleWorldSkinSettings(enabled = editable)
+                        Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
+                            Text("按键与棋子音效",Modifier.weight(1f),style=MaterialTheme.typography.bodyMedium)
+                            TextButton(onClick=uiTap {},enabled=feedbackSound) {Text("试听",style=MaterialTheme.typography.labelSmall)}
+                            Switch(checked=feedbackSound,onCheckedChange={enabled->
+                                feedbackSound=enabled;UiSound.setEnabled(context,enabled)
+                                if(enabled) UiSound.tap(context)
+                            })
+                        }
                     }
 
                     if (settingsTab == "提醒") SettingsSection("喝水提醒", "工作再忙，也记得照顾自己", "💧") {
@@ -256,6 +273,7 @@ fun SettingsScreen(
                                 checked = state.waterEnabled,
                                 enabled = editable,
                                 onCheckedChange = { enabled ->
+                                    UiSound.tap(context)
                                     vm.setWaterEnabled(enabled)
                                     if (enabled && Build.VERSION.SDK_INT >= 33 &&
                                         context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
@@ -274,20 +292,20 @@ fun SettingsScreen(
                                 value = intervalText(intervalHours, intervalMinutes),
                                 supporting = "点右边选个时长，1 分钟到 12 小时 59 分都行",
                                 enabled = editable,
-                                onClick = { showIntervalPicker = true }
+                                onClick = uiTap { showIntervalPicker = true }
                             )
                             Text("免打扰时段", style = MaterialTheme.typography.labelLarge)
                             TimePickerField(
                                 label = "开始",
                                 value = state.quietStartText.ifBlank { "23:00" },
                                 enabled = editable,
-                                onClick = { showQuietStart = true }
+                                onClick = uiTap { showQuietStart = true }
                             )
                             TimePickerField(
                                 label = "结束",
                                 value = state.quietEndText.ifBlank { "08:00" },
                                 enabled = editable,
-                                onClick = { showQuietEnd = true }
+                                onClick = uiTap { showQuietEnd = true }
                             )
                             Text(
                                 "支持跨午夜；开始和结束相同则不免打扰。喝水时间到了，阿噜会提醒你；账本页也能点水杯开始。",
@@ -322,7 +340,7 @@ fun SettingsScreen(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
-                            TextButton(onClick = onOpenTrash, modifier = Modifier.testTag("settings-trash-entry")) {
+                            TextButton(onClick = uiTap(onOpenTrash), modifier = Modifier.testTag("settings-trash-entry")) {
                                 Text("去看看")
                             }
                         }
@@ -362,12 +380,11 @@ fun SettingsScreen(
                         )
 
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            TextButton(onClick = { showHandbook = true }) { Text("阿噜使用手册") }
-                            TextButton(onClick = { showFontLicense = true }) { Text("字体与开源许可") }
+                            TextButton(onClick = uiTap { showHandbook = true }) { Text("阿噜使用手册") }
+                            TextButton(onClick = uiTap { showFontLicense = true }) { Text("字体与开源许可") }
                         }
                     }
                     if (settingsTab == "关于") SettingsSection("版本与更新", "查看版本、检查新消息", "🎁") { UpdateSettingsCard(checkOnOpen = checkUpdatesOnOpen) }
-                        }
                     }
                     Text("慢慢记，日子也会慢慢发光 ♡", modifier = Modifier.align(Alignment.CenterHorizontally).padding(bottom = 8.dp),
                         style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -442,22 +459,19 @@ private fun String.minutesOfDayOr(fallback: Int): Int {
 private fun SettingsCompanionHeader(nickname: String, suffix: String) {
     var noteIndex by rememberSaveable { mutableStateOf(CompanionCornerNotes.randomIndex()) }
     val nextNote = { noteIndex = CompanionCornerNotes.nextIndex(noteIndex) }
-    Surface(color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
-        shape = MaterialTheme.shapes.extraLarge, modifier = Modifier.fillMaxWidth()) {
-        Row(Modifier.padding(start = 20.dp, end = 10.dp, top = 12.dp, bottom = 12.dp),
+        Row(Modifier.fillMaxWidth().padding(vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("你的专属小角落", style = MaterialTheme.typography.titleLarge.copy(fontFamily = GuluBrandFont, fontWeight = FontWeight.Normal),
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("阿噜的小角落", style = MaterialTheme.typography.titleSmall.copy(fontFamily = GuluBrandFont, fontWeight = FontWeight.Normal),
                     color = MaterialTheme.colorScheme.primary)
                 PaperNote(CompanionCornerNotes.render(noteIndex, nickname, suffix),
                     modifier = Modifier.padding(vertical = 2.dp))
-                TextButton(onClick = nextNote, contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)) {
+                TextButton(onClick = uiTap(nextNote), contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)) {
                     Text("再听一句悄悄话 ♡", style = MaterialTheme.typography.labelSmall)
                 }
             }
-            GuluMascot(modifier = Modifier.size(116.dp), onClick = nextNote)
+            GuluMascot(modifier = Modifier.padding(start=8.dp).size(76.dp), onClick = uiTap(nextNote))
         }
-    }
 }
 
 @Composable
@@ -467,7 +481,7 @@ private fun SettingsSection(
     icon: String,
     content: @Composable ColumnScope.() -> Unit
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(icon, style = MaterialTheme.typography.titleMedium)
             Text(title, style = MaterialTheme.typography.titleSmall)

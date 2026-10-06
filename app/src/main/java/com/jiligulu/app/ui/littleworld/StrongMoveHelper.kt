@@ -16,17 +16,18 @@ object XiangqiStrongMoveHelper {
 object GomokuStrongMoveHelper {
     fun chooseMove(
         state: GomokuState,
+        timeBudgetMillis: Long = 1_500,
         shouldCancel: () -> Boolean = { false },
     ): GridCell? {
         if (state.outcome != GomokuOutcome.PLAYING || shouldCancel()) return null
-        return GomokuSearch(shouldCancel).choose(state)
+        return GomokuSearch(shouldCancel, timeBudgetMillis.coerceIn(100, 2_000)).choose(state)
     }
 }
 
 private class SearchStopped : RuntimeException(null, null, false, false)
 
-private class SearchBudget(private val shouldCancel: () -> Boolean) {
-    private val deadline = System.nanoTime() + 850_000_000L
+private class SearchBudget(private val shouldCancel: () -> Boolean, millis: Long = 850) {
+    private val deadline = System.nanoTime() + millis * 1_000_000L
     private var nodes = 0
     var cancelled = false
         private set
@@ -38,7 +39,7 @@ private class SearchBudget(private val shouldCancel: () -> Boolean) {
                 cancelled = true
                 throw SearchStopped()
             }
-            if (nodes >= 64_000 || System.nanoTime() >= deadline) throw SearchStopped()
+            if (nodes >= 100_000 || System.nanoTime() >= deadline) throw SearchStopped()
         }
     }
 
@@ -220,8 +221,8 @@ private data class GomokuCandidate(val cell: GridCell, val attack: Int, val defe
 }
 private data class GomokuEntry(val depth: Int, val score: Int, val bound: Bound, val move: GridCell?)
 
-private class GomokuSearch(shouldCancel: () -> Boolean) {
-    private val budget = SearchBudget(shouldCancel)
+private class GomokuSearch(shouldCancel: () -> Boolean, timeBudgetMillis: Long) {
+    private val budget = SearchBudget(shouldCancel, timeBudgetMillis)
     private val table = HashMap<Long, GomokuEntry>()
     private val axes = listOf(GridCell(1, 0), GridCell(0, 1), GridCell(1, 1), GridCell(1, -1))
     private val mate = 5_000_000
@@ -397,7 +398,21 @@ private class GomokuSearch(shouldCancel: () -> Boolean) {
             }
             axisScore = maxOf(axisScore, strongestWindow)
             if (axisScore >= 14_000) fours++
-            if (length == 3 && open == 2) strongThrees++
+            // A split three can make an open four next move, just like a contiguous live three.
+            // Merely counting adjacent runs missed these common human attacks.
+            val liveThree = length == 3 && open == 2 || (-4..4).any { gap ->
+                if (gap == 0 || !emptyAt(gap)) false else {
+                    fun mine(step: Int): Boolean = step == 0 || step == gap ||
+                        inside(state, cell.x + axis.x * step, cell.y + axis.y * step) &&
+                        state.cellAt(cell.x + axis.x * step, cell.y + axis.y * step) == player
+                    var low = gap
+                    var high = gap
+                    while (mine(low - 1)) low--
+                    while (mine(high + 1)) high++
+                    high - low + 1 >= 4 && emptyAt(low - 1) && emptyAt(high + 1)
+                }
+            }
+            if (liveThree) { strongThrees++; axisScore = maxOf(axisScore, 6_000) }
             score += axisScore
         }
         if (fours >= 2) score += 400_000
@@ -409,8 +424,11 @@ private class GomokuSearch(shouldCancel: () -> Boolean) {
     private fun evaluate(state: GomokuState): Int {
         val own = patternValue(state, state.currentPlayer)
         val other = patternValue(state, 3 - state.currentPlayer)
+        val potentials = candidates(state)
+        val ownThreat = potentials.maxOfOrNull { it.attack } ?: 0
+        val otherThreat = potentials.maxOfOrNull { it.defense } ?: 0
         // Threats by the side about to move carry a small tempo advantage, not a fictitious win.
-        return (own * 11 / 10 - other).coerceIn(-mate / 2, mate / 2)
+        return (own * 11 / 10 - other + ownThreat * 2 - otherThreat).coerceIn(-mate / 2, mate / 2)
     }
 
     private fun patternValue(state: GomokuState, player: Int): Int {

@@ -29,6 +29,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -43,6 +44,7 @@ import com.jiligulu.app.ui.components.SpringScrollColumn
 
 @Composable
 fun CalculatorDialog(initial: String = "", onDismiss: () -> Unit, onUse: (String) -> Unit) {
+    val soundContext = LocalContext.current.applicationContext
     var expression by rememberSaveable { mutableStateOf(initial.take(160)) }
     var showError by rememberSaveable { mutableStateOf(false) }
     val result = remember(expression) { DecimalCalculator.evaluate(expression) }
@@ -52,7 +54,7 @@ fun CalculatorDialog(initial: String = "", onDismiss: () -> Unit, onUse: (String
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         com.jiligulu.app.ui.capture.DialogGlassBackdrop()
         val dialogWindow = (LocalView.current.parent as? DialogWindowProvider)?.window
-        SideEffect { dialogWindow?.setGravity(android.view.Gravity.BOTTOM) }
+        SideEffect { dialogWindow?.setGravity(android.view.Gravity.CENTER) }
         Surface(
             Modifier.padding(horizontal = 12.dp, vertical = 16.dp).widthIn(max = 284.dp).fillMaxWidth(),
             shape = RoundedCornerShape(24.dp),
@@ -65,7 +67,7 @@ fun CalculatorDialog(initial: String = "", onDismiss: () -> Unit, onUse: (String
                     Text("阿噜小算盘 ✿", fontFamily = GuluBrandFont, fontWeight = FontWeight.Normal,
                         style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f),
                         color = MaterialTheme.colorScheme.primary)
-                    TextButton(onClick = onDismiss) { Text("收起") }
+                    TextButton(onClick = com.jiligulu.app.ui.components.uiTap(onDismiss)) { Text("收起") }
                 }
                 OutlinedTextField(
                     value = expression,
@@ -104,6 +106,7 @@ fun CalculatorDialog(initial: String = "", onDismiss: () -> Unit, onUse: (String
                             val operator = key !in listOf("0", "1", "2", "3", "4", "5", "6", "7", "8", "9", ".")
                             Surface(
                                 onClick = {
+                                    com.jiligulu.app.core.audio.UiSound.tap(soundContext)
                                     when (key) {
                                         "C" -> { expression = ""; showError = false }
                                         "⌫" -> { expression = expression.dropLast(1); showError = false }
@@ -135,7 +138,7 @@ fun CalculatorDialog(initial: String = "", onDismiss: () -> Unit, onUse: (String
                         }
                     }
                 }
-                Button(onClick = { amount?.let(onUse) }, enabled = amount != null,
+                Button(onClick = com.jiligulu.app.ui.components.uiTap { amount?.let(onUse) }, enabled = amount != null,
                     shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
                     Text("¥${amount ?: "0"} · 带入记账")
                 }

@@ -30,6 +30,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.jiligulu.app.R
 import com.jiligulu.app.ui.components.LedgerCard
+import com.jiligulu.app.ui.components.uiTap
 import com.jiligulu.app.ui.components.SpringLazyColumn
 import com.jiligulu.app.ui.theme.GuluBrandFont
 import kotlinx.coroutines.Dispatchers
@@ -67,17 +68,19 @@ fun ImmersiveDestinationScene(
     objects: List<DestinationObject>,
     modifier: Modifier = Modifier,
     labelBottomClearance: Dp = 0.dp,
+    hasMail: Boolean = true,
     foreground: @Composable BoxScope.() -> Unit = {}
 ) {
     SceneSystemBars(lightIcons=destination!=ImmersiveDestination.MEMORIES)
     val resources = LocalContext.current.resources
-    val resource = R.drawable.world_destination_portraits_v3
+    val resource = if (destination == ImmersiveDestination.FUTURE_POST && !hasMail)
+        R.drawable.world_destination_portraits_v4_empty else R.drawable.world_destination_portraits_v3
     val decoded by produceState<ImageBitmap?>(LittleWorldArtwork.cachedImage(resource), resources, resource) {
         value = withContext(Dispatchers.IO) { LittleWorldArtwork.image(resources, resource) }
     }
     BoxWithConstraints(modifier.fillMaxSize().clipToBounds().background(
         Brush.verticalGradient(listOf(Color(0xFFF0DFBF), Color(0xFFCBA879))))) {
-        val image = decoded
+        val image = LittleWorldArtwork.cachedImage(resource) ?: decoded
         // Atlas source ratio is available before decoding, preventing controls jumping on load.
         val panelWidth = image?.let { it.width / 3f - 8f } ?: 564f
         val panelHeight = image?.let { it.height.toFloat() - 8f } ?: 908f
@@ -113,7 +116,7 @@ fun ImmersiveDestinationScene(
             val bottom = (rawY + paintedHeight * prop.height).coerceAtMost(maxHeight)
             if (right > x && bottom > y) {
                 Box(Modifier.offset(x, y).size(right - x, bottom - y)
-                    .clickable(enabled = prop.enabled, role = Role.Button, onClickLabel = prop.label, onClick = prop.onClick)
+                    .clickable(enabled = prop.enabled, role = Role.Button, onClickLabel = prop.label, onClick = uiTap(prop.onClick))
                     .semantics { contentDescription = prop.label })
             }
         }
@@ -124,7 +127,7 @@ fun ImmersiveDestinationScene(
             val labelY = (top + paintedHeight * prop.labelY)
                 .coerceIn(58.dp, (maxHeight - 54.dp - labelBottomClearance).coerceAtLeast(58.dp))
             ScenePlaqueButton(prop.label, Modifier.offset(labelX, labelY).width(labelWidth).heightIn(min = 32.dp).rotate(prop.tilt),
-                enabled = prop.enabled, onClick = prop.onClick)
+                enabled = prop.enabled, onClick = uiTap(prop.onClick))
         }
         val titleWidth = (paintedWidth * if(destination == ImmersiveDestination.TIME_TRAIN) .55f else .45f)
             .coerceAtMost((maxWidth - 80.dp).coerceAtLeast(100.dp))
@@ -133,7 +136,7 @@ fun ImmersiveDestinationScene(
         Text(title, Modifier.offset(titleX, titleY).width(titleWidth), color = Color(0xFF5E4229),
             fontFamily = GuluBrandFont, fontSize = 17.sp, maxLines = 1, textAlign = TextAlign.Center)
         ScenePlaqueButton("‹ 小窝", Modifier.align(Alignment.TopStart).statusBarsPadding().padding(start = 14.dp, top = 12.dp)
-            .heightIn(min = 44.dp).rotate(-2f), onClick = onBack)
+            .heightIn(min = 44.dp).rotate(-2f), onClick = uiTap(onBack))
         foreground()
     }
 }
@@ -160,25 +163,26 @@ fun DestinationDrawer(
     title: String,
     onDismiss: () -> Unit,
     subtitle: String? = null,
+    compact: Boolean = false,
     actions: @Composable RowScope.() -> Unit = {},
     content: LazyListScope.() -> Unit
 ) {
-    val height = (LocalConfiguration.current.screenHeightDp * .64f).dp
+    val height = minOf(if (compact) 310.dp else 380.dp, (LocalConfiguration.current.screenHeightDp * .62f).dp)
     Dialog(onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)) {
         com.jiligulu.app.ui.capture.DialogGlassBackdrop()
-        LedgerCard(Modifier.widthIn(max = 410.dp).fillMaxWidth(.9f).height(height)) {
-            Text(title, style = MaterialTheme.typography.titleLarge.copy(fontFamily = GuluBrandFont,
+        LedgerCard(Modifier.widthIn(max = if (compact) 280.dp else 300.dp).fillMaxWidth().height(height), contentPadding = 12.dp) {
+            Text(title, style = MaterialTheme.typography.titleMedium.copy(fontFamily = GuluBrandFont,
                 fontWeight = FontWeight.Normal), color = MaterialTheme.colorScheme.primary)
             subtitle?.let { Text(it, style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp)) }
-            SpringLazyColumn(Modifier.weight(1f).fillMaxWidth().padding(top = 12.dp),
-                contentPadding = PaddingValues(bottom = 10.dp), verticalArrangement = Arrangement.spacedBy(12.dp),
+            SpringLazyColumn(Modifier.weight(1f).fillMaxWidth().padding(top = 8.dp),
+                contentPadding = PaddingValues(bottom = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp),
                 content = content)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically) {
                 actions()
-                TextButton(onClick = onDismiss) { Text("收起来") }
+                TextButton(onClick = uiTap(onDismiss)) { Text("收起来") }
             }
         }
     }

@@ -1,5 +1,9 @@
 package com.jiligulu.app.ui.add
 
+import android.net.Uri
+import com.jiligulu.app.ui.memories.MemoryFiles
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.APPLICATION_KEY
 import androidx.lifecycle.viewModelScope
@@ -12,6 +16,15 @@ import com.jiligulu.app.data.repository.BillRepository
 import com.jiligulu.app.data.repository.CategoryAdminRepository
 import com.jiligulu.app.data.repository.CategoryDeletionResult
 import com.jiligulu.app.data.repository.CategoryRepository
+import com.jiligulu.app.core.ai.AiBillDraft
+import com.jiligulu.app.core.ai.DeepSeekClient
+import com.jiligulu.app.core.ai.ManualCategoryClassifier
+import com.jiligulu.app.domain.category.CategoryEngine
+import com.jiligulu.app.domain.category.CategoryDefaults
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -27,10 +40,30 @@ data class AddBillSaveState(
     val error: String? = null
 )
 
+internal fun manualCategoryInputKey(detail: String, note: String, type: BillType): String {
+    val title = detail.trim()
+    val comment = note.trim()
+    return "${type.name}|${title.length}:$title|${comment.length}:$comment"
+}
+
+data class ManualCategoryPreview(
+    val inputKey: String = "",
+    val name: String = "",
+    val categoryId: Long? = null,
+    val proposal: AiBillDraft? = null,
+    val resolving: Boolean = false,
+    val error: String? = null
+)
+
+data class ManualPhotoState(val path: String = "", val importing: Boolean = false, val error: String? = null)
+
 class AddBillViewModel(
     private val billRepository: BillRepository,
-    categoryRepository: CategoryRepository,
-    private val categoryAdminRepository: CategoryAdminRepository
+    private val categoryRepository: CategoryRepository,
+    private val categoryAdminRepository: CategoryAdminRepository,
+    private val remoteCategory: suspend (String, BillType, List<CategoryEntity>) -> AiBillDraft? = { _, _, _ -> null },
+    private val importPhotoFile: suspend (Uri) -> String = { error("Photo importer unavailable") },
+    private val deletePhotoFile: (String) -> Unit = {}
 ) : ViewModel() {
 
     val categories: StateFlow<List<CategoryEntity>> = categoryRepository.categories
@@ -41,6 +74,106 @@ class AddBillViewModel(
 
     private val savedEvents = Channel<Unit>(Channel.BUFFERED)
     val saved = savedEvents.receiveAsFlow()
+
+    private val _photo = MutableStateFlow(ManualPhotoState())
+    val photo = _photo.asStateFlow()
+    private var photoJob: Job? = null
+    private var photoEpoch = 0
+    private var photoCommitted = false
+    private var saveJob: Job? = null
+    private var cleared = false
+
+    fun importPhoto(uri: Uri) {
+        if (_saveState.value.isSaving) return
+        photoJob?.cancel()
+        val epoch = ++photoEpoch
+        _photo.value = _photo.value.copy(importing = true, error = null)
+        photoJob = viewModelScope.launch {
+            var imported: String? = null
+            try {
+                // Finish the bounded file copy, then clean it if this screen/request was cancelled.
+                val path = withContext(NonCancellable) { importPhotoFile(uri) }
+                imported = path
+                currentCoroutineContext().ensureActive()
+                if (epoch == photoEpoch) {
+                    _photo.value.path.takeIf { it.isNotBlank() }?.let(deletePhotoFile)
+                    _photo.value = ManualPhotoState(path = path)
+                    imported = null
+                }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) {
+                if (epoch == photoEpoch) _photo.value = _photo.value.copy(error = "照片没能夹好，再选一次试试")
+            } finally {
+                imported?.let(deletePhotoFile)
+                if (epoch == photoEpoch) _photo.value = _photo.value.copy(importing = false)
+            }
+        }
+    }
+
+    fun removePhoto() {
+        if (_saveState.value.isSaving) return
+        photoEpoch++
+        photoJob?.cancel()
+        _photo.value.path.takeIf { it.isNotBlank() }?.let(deletePhotoFile)
+        _photo.value = ManualPhotoState()
+    }
+
+    override fun onCleared() {
+        cleared = true
+        photoEpoch++
+        photoJob?.cancel()
+        cancelCategoryPreview()
+        if (!photoCommitted && (!_saveState.value.isSaving || saveJob?.isCompleted == true)) cleanUncommittedPhoto()
+        super.onCleared()
+    }
+
+    private fun cleanUncommittedPhoto() {
+        if (photoCommitted) return
+        val path = _photo.value.path
+        _photo.value = _photo.value.copy(path = "", importing = false)
+        if (path.isNotBlank()) deletePhotoFile(path)
+    }
+
+    private val _categoryPreview = MutableStateFlow(ManualCategoryPreview())
+    val categoryPreview = _categoryPreview.asStateFlow()
+    private var categoryJob: Job? = null
+    private val previewCache = linkedMapOf<String, AiBillDraft>()
+
+    fun cancelCategoryPreview() { categoryJob?.cancel(); categoryJob = null }
+
+    /** A semantic preview is ready before confirmation; changing input cancels stale requests. */
+    fun prepareCategory(detail: String, note: String, type: BillType, enabled: Boolean) {
+        cancelCategoryPreview()
+        if (!enabled || detail.isBlank()) { _categoryPreview.value = ManualCategoryPreview(); return }
+        val text = listOf(detail.trim(), note.trim()).filter { it.isNotEmpty() }.joinToString(" · ")
+        val inputKey = manualCategoryInputKey(detail, note, type)
+        val catalog = categories.value
+        val local = CategoryEngine.suggest(text, catalog)?.takeUnless { CategoryDefaults.isVacuum(it) }
+        if (local != null) { _categoryPreview.value = ManualCategoryPreview(inputKey = inputKey, name = local.name, categoryId = local.id); return }
+        val key = inputKey + "|" + catalog.hashCode()
+        previewCache[key]?.let { publishCategory(it, catalog, inputKey); return }
+        _categoryPreview.value = ManualCategoryPreview(inputKey = inputKey, resolving = true)
+        categoryJob = viewModelScope.launch {
+            try {
+                delay(650)
+                val proposed = remoteCategory(text, type, catalog)
+                currentCoroutineContext().ensureActive()
+                if (proposed == null) _categoryPreview.value = ManualCategoryPreview(inputKey = inputKey, error = "还没找到合适分类，选一个也可以")
+                else {
+                    previewCache[key] = proposed
+                    if (previewCache.size > 24) previewCache.remove(previewCache.keys.first())
+                    publishCategory(proposed, catalog, inputKey)
+                }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { _categoryPreview.value = ManualCategoryPreview(inputKey = inputKey, error = "自动分类暂时没连上，可手动选择") }
+        }
+    }
+
+    private fun publishCategory(proposed: AiBillDraft, catalog: List<CategoryEntity>, inputKey: String) {
+        val existing = catalog.firstOrNull { it.name.equals(proposed.category, true) }
+        _categoryPreview.value = ManualCategoryPreview(inputKey = inputKey, name = existing?.name ?: proposed.category,
+            categoryId = existing?.id, proposal = proposed.takeIf { existing == null })
+    }
 
     /**
      * 该分类下的活账单条数。
@@ -65,33 +198,53 @@ class AddBillViewModel(
         categoryId: Long,
         detail: String,
         note: String,
-        timestamp: Long? = null
+        timestamp: Long? = null,
+        proposedCategory: AiBillDraft? = null,
+        autoCategorized: Boolean = false
     ) {
         val previous = _saveState.value
-        if (previous.isSaving) return
-        if (amountFen <= 0 || categoryId <= 0) {
+        if (previous.isSaving || _photo.value.importing) return
+        if (amountFen <= 0 || (categoryId <= 0 && proposedCategory == null)) {
             _saveState.value = AddBillSaveState(error = "请填写有效金额并选择分类。")
             return
         }
+        if (autoCategorized) {
+            val preview = _categoryPreview.value
+            val ready = preview.inputKey == manualCategoryInputKey(detail, note, type) &&
+                preview.name.isNotBlank() && !preview.resolving &&
+                (if (categoryId > 0) preview.categoryId == categoryId else
+                    preview.proposal != null && preview.proposal == proposedCategory)
+            if (!ready) {
+                _saveState.value = AddBillSaveState(error = "分类还在更新，等阿噜选好再确认")
+                return
+            }
+        }
         // Claim the save synchronously, before launching: fast repeated taps cannot insert twice.
         if (!_saveState.compareAndSet(previous, AddBillSaveState(isSaving = true))) return
-        viewModelScope.launch {
+        saveJob = viewModelScope.launch {
             try {
-                billRepository.addManual(
-                    amountFen = amountFen,
-                    type = type,
-                    categoryId = categoryId,
-                    detail = detail,
-                    note = note,
-                    timestamp = timestamp ?: System.currentTimeMillis()
-                )
+                val finalCategoryId = if (categoryId > 0) categoryId else proposedCategory?.let { proposal ->
+                    categoryRepository.createCategory(proposal.category, iconValue = proposal.iconEmoji, keywords = proposal.keywords)
+                } ?: error("Missing category")
+                withContext(NonCancellable) {
+                    billRepository.addManual(
+                        amountFen = amountFen, type = type, categoryId = finalCategoryId,
+                        detail = detail, note = note, timestamp = timestamp ?: System.currentTimeMillis(),
+                        photoUri = _photo.value.path.takeIf { it.isNotBlank() }
+                    )
+                    photoCommitted = true
+                }
                 // Stay locked until navigation completes; the event survives a screen recreation.
                 savedEvents.send(Unit)
             } catch (error: CancellationException) {
                 throw error
             } catch (_: Exception) {
                 _saveState.value = AddBillSaveState(error = "保存失败，账单尚未保存，请重试。")
+            } finally {
+                if (cleared && !photoCommitted) cleanUncommittedPhoto()
             }
+        }.also { job ->
+            job.invokeOnCompletion { if (cleared && !photoCommitted) cleanUncommittedPhoto() }
         }
     }
 
@@ -102,7 +255,15 @@ class AddBillViewModel(
                 AddBillViewModel(
                     app.container.billRepository,
                     app.container.categoryRepository,
-                    app.container.categoryAdminRepository
+                    app.container.categoryAdminRepository,
+                    remoteCategory = { text, type, catalog ->
+                        val client = DeepSeekClient(app.container.aiRepository.effectiveApiKey(), onUsage = app.container.aiUsage::record)
+                        val result = client.parseBill(ManualCategoryClassifier.PROMPT,
+                            ManualCategoryClassifier.input(text, type, catalog)).getOrThrow()
+                        ManualCategoryClassifier.suggestion(result, catalog)
+                    },
+                    importPhotoFile = { uri -> MemoryFiles.importPhoto(app, uri) },
+                    deletePhotoFile = { path -> MemoryFiles.deleteImportedPhoto(app, path) }
                 )
             }
         }

@@ -8,6 +8,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import com.jiligulu.app.ui.theme.LocalSkinMaterial
 import com.jiligulu.app.ui.theme.skinPaperSurface
 
@@ -15,6 +16,7 @@ import com.jiligulu.app.ui.theme.skinPaperSurface
 @Composable
 fun LedgerCard(
     modifier: Modifier = Modifier,
+    contentPadding: Dp = 16.dp,
     content: @Composable ColumnScope.() -> Unit
 ) {
     val material = LocalSkinMaterial.current
@@ -23,6 +25,6 @@ fun LedgerCard(
         shape = material.shapes.large,
         color = material.paper
     ) {
-        Column(Modifier.skinPaperSurface(material).padding(16.dp), content = content)
+        Column(Modifier.skinPaperSurface(material).padding(contentPadding), content = content)
     }
 }

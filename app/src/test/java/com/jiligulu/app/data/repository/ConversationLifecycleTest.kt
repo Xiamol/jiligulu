@@ -46,7 +46,7 @@ class ConversationLifecycleTest {
             assertEquals(listOf(editing, collapsed), history.getAll().map { it.id })
             assertEquals(listOf(live), db.billDao().observeAll().first().map { it.id })
             assertEquals(listOf(trash), bills.trash().map { it.id })
-            assertEquals(3, db.categoryDao().count())
+            assertEquals(com.jiligulu.app.domain.category.CategoryDefaults.presets.size, db.categoryDao().count())
             assertEquals(1L, history.conversationGeneration.value)
         }
     }

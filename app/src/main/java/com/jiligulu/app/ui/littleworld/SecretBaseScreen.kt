@@ -57,6 +57,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.jiligulu.app.JiliguluApp
 import com.jiligulu.app.R
+import com.jiligulu.app.core.audio.UiSound
 import com.jiligulu.app.ui.theme.GuluBrandFont
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -118,11 +119,18 @@ private val xiangqiClockSaver = listSaver<XiangqiThinkingClock, Long>(
 fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories: () -> Unit) {
     val context = LocalContext.current
     val prefs = (context.applicationContext as JiliguluApp).container.userPrefs
-    val sleeping by prefs.secretPetSleeping.collectAsStateWithLifecycle(false)
+    val gamePreferences = remember(context) { context.getSharedPreferences("gulu_secret_games", android.content.Context.MODE_PRIVATE) }
+    val archive = remember(context) { LocalGameArchive(context) }
+    var archiveReady by remember { mutableStateOf(false) }
+    var gameLoading by remember { mutableStateOf(false) }
+    var modeLoadJob by remember { mutableStateOf<Job?>(null) }
+    var modeLoadGeneration by remember { mutableIntStateOf(0) }
+    var leaveRoomAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+    val petSleeping by prefs.secretPetSleeping.collectAsStateWithLifecycle(gamePreferences.getBoolean("secret_night", false))
+    val nickname by prefs.nickname.collectAsStateWithLifecycle("")
     var activity by rememberSaveable { mutableStateOf<SecretActivity?>(null) }
     val fullGame = activity == SecretActivity.SNAKE || activity == SecretActivity.GOMOKU || activity == SecretActivity.XIANGQI
     SceneSystemBars(lightIcons = !fullGame)
-    var note by rememberSaveable { mutableIntStateOf(0) }
     var prize by rememberSaveable { mutableStateOf<String?>(null) }
     var spinning by remember { mutableStateOf(false) }
     val rotation = remember { Animatable(0f) }
@@ -132,9 +140,17 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
     var snakeRunning by remember { mutableStateOf(false) }
     var snakeStarted by rememberSaveable { mutableStateOf(false) }
     var gomoku by rememberSaveable(stateSaver = gomokuStateSaver) { mutableStateOf(GomokuEngine.newGame()) }
+    var gomokuHistory by remember { mutableStateOf<List<GomokuState>>(emptyList()) }
     var gomokuPaused by remember { mutableStateOf(true) }
+    var gomokuStarted by remember { mutableStateOf(false) }
+    var gomokuMode by rememberSaveable { mutableStateOf(GomokuPlayMode.CPU) }
+    var gomokuUndoConsent by remember { mutableStateOf(false) }
+    var gomokuUndoResume by remember { mutableStateOf(false) }
     var xiangqi by rememberSaveable(stateSaver = xiangqiStateSaver) { mutableStateOf(XiangqiEngine.newGame()) }
-    val gamePreferences = remember(context) { context.getSharedPreferences("gulu_secret_games", android.content.Context.MODE_PRIVATE) }
+    var xiangqiHistory by remember { mutableStateOf<List<XiangqiState>>(emptyList()) }
+    var xiangqiRestoreToken by remember { mutableIntStateOf(0) }
+    var undoConfirmVisible by remember { mutableStateOf(false) }
+    var undoResume by remember { mutableStateOf(false) }
     var thinkingSeconds by rememberSaveable { mutableIntStateOf(gamePreferences.getInt("xiangqi_thinking_seconds", 120)
         .coerceIn(XiangqiThinkingClock.MIN_SECONDS, XiangqiThinkingClock.MAX_SECONDS)) }
     var xiangqiClock by rememberSaveable(stateSaver = xiangqiClockSaver) { mutableStateOf(XiangqiThinkingClock.reset(xiangqi, thinkingSeconds)) }
@@ -142,14 +158,24 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
     var clockSetupVisible by rememberSaveable { mutableStateOf(false) }
     var resumeAfterClockSetup by remember { mutableStateOf(false) }
     var clockEpoch by remember { mutableIntStateOf(0) }
+    var clockTickAt by remember { mutableLongStateOf(0L) }
     var xiangqiPaused by remember { mutableStateOf(true) }
     var xiangqiMode by rememberSaveable { mutableStateOf(XiangqiPlayMode.CPU) }
     val lanSession = remember { XiangqiLanSession() }
     val lan by lanSession.state.collectAsStateWithLifecycle()
     val onlineSession = remember(context) { XiangqiOnlineSession(context) }
     val online by onlineSession.state.collectAsStateWithLifecycle()
+    val gomokuLanSession = remember { GomokuLanSession() }
+    val gomokuLan by gomokuLanSession.state.collectAsStateWithLifecycle()
+    val gomokuOnlineSession = remember(context) { GomokuOnlineSession(context) }
+    val gomokuOnline by gomokuOnlineSession.state.collectAsStateWithLifecycle()
+    val xiangqiDiscovery = remember(context, nickname) { NsdRoomDiscovery(context, NearbyGameKind.XIANGQI, nickname.ifBlank { "棋友" }) }
+    val gomokuDiscovery = remember(context, nickname) { NsdRoomDiscovery(context, NearbyGameKind.GOMOKU, nickname.ifBlank { "棋友" }) }
+    val nearbyXiangqi by xiangqiDiscovery.state.collectAsStateWithLifecycle()
+    val nearbyGomoku by gomokuDiscovery.state.collectAsStateWithLifecycle()
     var starTaps by rememberSaveable { mutableIntStateOf(0) }
-    var lampLit by rememberSaveable { mutableStateOf(false) }
+    var night by remember { mutableStateOf(gamePreferences.getBoolean("secret_night", false)) }
+    val sleeping = night || petSleeping
     var secretBubble by remember { mutableStateOf<String?>(null) }
     var bubbleToken by remember { mutableIntStateOf(0) }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -163,13 +189,120 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
     var helpGomokuPosition by remember { mutableStateOf<GomokuState?>(null) }
     var gameControlsBottom by remember { mutableFloatStateOf(0f) }
 
+    fun gomokuLocalMode(): LocalGameMode? = when (gomokuMode) {
+        GomokuPlayMode.CPU -> LocalGameMode.CPU
+        GomokuPlayMode.HOTSEAT -> LocalGameMode.HOTSEAT
+        else -> null
+    }
+    fun xiangqiLocalMode(): LocalGameMode? = when (xiangqiMode) {
+        XiangqiPlayMode.CPU -> LocalGameMode.CPU
+        XiangqiPlayMode.HOTSEAT -> LocalGameMode.HOTSEAT
+        else -> null
+    }
+    fun checkpointGomoku() {
+        if (!archiveReady || gameLoading) return
+        val mode = gomokuLocalMode() ?: return
+        archive.saveGomoku(LocalGomokuSave(mode, gomoku, gomokuHistory, gomokuStarted, gomokuPaused))
+    }
+    fun checkpointXiangqi() {
+        if (!archiveReady || gameLoading) return
+        val mode = xiangqiLocalMode() ?: return
+        archive.saveXiangqi(LocalXiangqiSave(mode, xiangqi, xiangqiHistory, xiangqiClock.forPosition(xiangqi),
+            thinkingSeconds, xiangqiStarted, xiangqiPaused))
+    }
+    fun checkpointSnake() {
+        if (archiveReady) archive.saveSnake(LocalSnakeSave(snake, snakeStarted, paused = !snakeRunning))
+    }
+    fun freezeThinkingClock() {
+        if (clockTickAt > 0L) {
+            xiangqiClock = xiangqiClock.forPosition(xiangqi).elapse(SystemClock.elapsedRealtime() - clockTickAt,
+                active = !xiangqiPaused && xiangqiLocalMode() != null)
+            clockTickAt = 0L
+            clockEpoch++ // The cancelled ticker's finally block must not subtract this fraction twice.
+        }
+    }
+    fun cancelModeLoad() {
+        modeLoadGeneration++
+        modeLoadJob?.cancel(); modeLoadJob = null; gameLoading = false
+    }
+    fun restoreGomoku(save: LocalGomokuSave?) {
+        gomoku = save?.game ?: GomokuEngine.newGame()
+        gomokuHistory = save?.undoHistory ?: emptyList()
+        gomokuStarted = save?.started ?: false
+        gomokuPaused = true
+    }
+    fun restoreXiangqi(save: LocalXiangqiSave?) {
+        xiangqiRestoreToken++
+        xiangqi = save?.game ?: XiangqiEngine.newGame()
+        xiangqiHistory = save?.undoHistory ?: emptyList()
+        thinkingSeconds = save?.thinkingSeconds ?: gamePreferences.getInt("xiangqi_thinking_seconds", 120)
+            .coerceIn(XiangqiThinkingClock.MIN_SECONDS, XiangqiThinkingClock.MAX_SECONDS)
+        xiangqiClock = save?.clock ?: XiangqiThinkingClock.reset(xiangqi, thinkingSeconds)
+        xiangqiStarted = save?.started ?: false
+        xiangqiPaused = true; clockTickAt = 0L; clockEpoch++
+    }
+    LaunchedEffect(archive) {
+        val goMode = archive.preferredGomokuMode()
+        val xqMode = archive.preferredXiangqiMode()
+        val savedGo = archive.loadGomoku(goMode)
+        val savedXq = archive.loadXiangqi(xqMode)
+        val savedSnake = archive.loadSnake()
+        restoreGomoku(savedGo); restoreXiangqi(savedXq)
+        gomokuMode = if (goMode == LocalGameMode.CPU) GomokuPlayMode.CPU else GomokuPlayMode.HOTSEAT
+        xiangqiMode = if (xqMode == LocalGameMode.CPU) XiangqiPlayMode.CPU else XiangqiPlayMode.HOTSEAT
+        savedSnake?.let { snake = it.game; snakeStarted = it.started }
+        snakeRunning = false; archiveReady = true
+    }
+
+    fun commitGomoku(next: GomokuState) {
+        if (next == gomoku) return
+        gomokuHistory = (gomokuHistory + gomoku).takeLast(225)
+        gomoku = next; gomokuStarted = true
+        checkpointGomoku()
+        if (foreground && activity == SecretActivity.GOMOKU) UiSound.drop(context)
+    }
+    fun commitXiangqi(next: XiangqiState) {
+        if (next == xiangqi) return
+        xiangqiHistory = (xiangqiHistory + xiangqi).takeLast(512)
+        xiangqi = next
+        clockTickAt = 0L; clockEpoch++; xiangqiClock = xiangqiClock.forPosition(next)
+        checkpointXiangqi()
+        if (foreground && activity == SecretActivity.XIANGQI) UiSound.drop(context)
+    }
+
     fun currentXiangqiPosition(): XiangqiState = when (xiangqiMode) {
         XiangqiPlayMode.ONLINE -> onlineSession.state.value.game
         XiangqiPlayMode.LAN -> lanSession.state.value.game
         else -> xiangqi
     }
+    fun currentGomokuPosition(): GomokuState = when (gomokuMode) {
+        GomokuPlayMode.NEARBY -> gomokuLanSession.state.value.game
+        GomokuPlayMode.ONLINE -> gomokuOnlineSession.state.value.game
+        else -> gomoku
+    }
+    fun eligibleGomokuTurn(): Boolean {
+        if (!archiveReady || gameLoading || !foreground || sleeping || activity != SecretActivity.GOMOKU || gomokuUndoConsent) return false
+        val position = currentGomokuPosition()
+        if (position.outcome != GomokuOutcome.PLAYING) return false
+        return when (gomokuMode) {
+            GomokuPlayMode.CPU -> !gomokuPaused && position.currentPlayer == 1
+            GomokuPlayMode.HOTSEAT -> !gomokuPaused
+            GomokuPlayMode.NEARBY, GomokuPlayMode.ONLINE -> {
+                val room = if (gomokuMode == GomokuPlayMode.ONLINE) gomokuOnlineSession.state.value else gomokuLanSession.state.value
+                room.connected && !room.awaitingAck && room.pendingUndoRequest == null && position.currentPlayer == room.localPlayer
+            }
+        }
+    }
+    fun playGomokuMove(cell: GridCell) {
+        if (!eligibleGomokuTurn()) return
+        when (gomokuMode) {
+            GomokuPlayMode.NEARBY -> gomokuLanSession.submitMove(cell)
+            GomokuPlayMode.ONLINE -> gomokuOnlineSession.submitMove(cell)
+            else -> commitGomoku(GomokuEngine.play(gomoku, cell.x, cell.y))
+        }
+    }
     fun eligibleXiangqiTurn(): Boolean {
-        if (!foreground || sleeping || activity != SecretActivity.XIANGQI || clockSetupVisible) return false
+        if (!archiveReady || gameLoading || !foreground || sleeping || activity != SecretActivity.XIANGQI || clockSetupVisible) return false
         val position = currentXiangqiPosition()
         if (position.outcome != XiangqiOutcome.PLAYING) return false
         return when (xiangqiMode) {
@@ -177,7 +310,7 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
             XiangqiPlayMode.HOTSEAT -> xiangqiStarted && !xiangqiPaused
             XiangqiPlayMode.ONLINE, XiangqiPlayMode.LAN -> {
                 val room = if (xiangqiMode == XiangqiPlayMode.ONLINE) onlineSession.state.value else lanSession.state.value
-                room.connected && !room.awaitingAck && position.turnSide == room.localSide
+                room.connected && !room.awaitingAck && room.pendingUndoRequest == null && position.turnSide == room.localSide
             }
         }
     }
@@ -185,7 +318,7 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
         if (!eligibleXiangqiTurn()) return
         if (xiangqiMode == XiangqiPlayMode.LAN) lanSession.submitMove(move)
         else if (xiangqiMode == XiangqiPlayMode.ONLINE) onlineSession.submitMove(move)
-        else xiangqi = XiangqiEngine.play(xiangqi, move)
+        else commitXiangqi(XiangqiEngine.play(xiangqi, move))
     }
     fun cancelHelp() {
         helpGeneration++
@@ -209,6 +342,7 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
                 } ?: return@launch
                 if (helpGeneration != generation || !eligibleXiangqiTurn() || currentXiangqiPosition() != position) return@launch
                 assistedSelection = move.from
+                UiSound.select(context)
                 if (xiangqiMode == XiangqiPlayMode.ONLINE) onlineSession.selectPiece(move.from)
                 else if (xiangqiMode == XiangqiPlayMode.LAN) lanSession.selectPiece(move.from)
                 delay(600)
@@ -222,10 +356,8 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
         }
     }
     fun requestGomokuHelp() {
-        fun eligible() = foreground && !sleeping && activity == SecretActivity.GOMOKU && !gomokuPaused &&
-            gomoku.currentPlayer == 1 && gomoku.outcome == GomokuOutcome.PLAYING
-        if (helpBusy || !eligible()) return
-        val position = gomoku
+        if (helpBusy || !eligibleGomokuTurn()) return
+        val position = currentGomokuPosition()
         val generation = ++helpGeneration
         helpGomokuPosition = position; helpBusy = true
         helpJob = scope.launch {
@@ -235,8 +367,8 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
                     GomokuStrongMoveHelper.chooseMove(position) { !computeContext.isActive }
                 } ?: return@launch
                 delay(500)
-                if (helpGeneration == generation && eligible() && gomoku == position)
-                    gomoku = GomokuEngine.play(position, move.x, move.y)
+                if (helpGeneration == generation && eligibleGomokuTurn() && currentGomokuPosition() == position)
+                    playGomokuMove(move)
             } finally {
                 if (helpGeneration == generation) { helpBusy = false; helpGomokuPosition = null; helpJob = null }
             }
@@ -245,26 +377,85 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
 
     fun pauseLocalToys() {
         cancelHelp()
+        freezeThinkingClock()
         snakeRunning = false
         gomokuPaused = true
         xiangqiPaused = true
         spinJob?.cancel()
         spinning = false
+        checkpointGomoku(); checkpointXiangqi(); checkpointSnake()
     }
     fun closeNetworkRooms() {
         networkGraceJob?.cancel()
         networkGraceJob = null
         lanSession.close()
         onlineSession.close()
+        gomokuLanSession.close(); gomokuOnlineSession.close()
+        xiangqiDiscovery.stop(); gomokuDiscovery.stop()
+    }
+    fun changeGomokuMode(value: GomokuPlayMode) {
+        if (!archiveReady) return
+        pauseLocalToys(); cancelModeLoad(); closeNetworkRooms(); gomokuUndoConsent = false
+        if (value == GomokuPlayMode.NEARBY || value == GomokuPlayMode.ONLINE) { gomokuMode = value; return }
+        val localMode = if (value == GomokuPlayMode.CPU) LocalGameMode.CPU else LocalGameMode.HOTSEAT
+        val token = ++modeLoadGeneration
+        gameLoading = true
+        modeLoadJob = scope.launch {
+            try {
+                val saved = archive.loadGomoku(localMode)
+                if (token != modeLoadGeneration) return@launch
+                restoreGomoku(saved); gomokuMode = value
+                if (saved == null) { gomokuStarted = true; gomokuPaused = !foreground }
+                gameLoading = false; checkpointGomoku()
+            } finally { if (token == modeLoadGeneration) { gameLoading = false; modeLoadJob = null } }
+        }
+    }
+    fun changeXiangqiMode(value: XiangqiPlayMode) {
+        if (!archiveReady) return
+        pauseLocalToys(); cancelModeLoad(); closeNetworkRooms(); undoConfirmVisible = false
+        clockSetupVisible = false; resumeAfterClockSetup = false
+        if (value == XiangqiPlayMode.LAN || value == XiangqiPlayMode.ONLINE) { xiangqiMode = value; return }
+        val localMode = if (value == XiangqiPlayMode.CPU) LocalGameMode.CPU else LocalGameMode.HOTSEAT
+        val token = ++modeLoadGeneration
+        gameLoading = true
+        modeLoadJob = scope.launch {
+            try {
+                val saved = archive.loadXiangqi(localMode)
+                if (token != modeLoadGeneration) return@launch
+                restoreXiangqi(saved); xiangqiMode = value
+                gameLoading = false; checkpointXiangqi()
+                if (!xiangqiStarted && foreground && activity == SecretActivity.XIANGQI) clockSetupVisible = true
+            } finally { if (token == modeLoadGeneration) { gameLoading = false; modeLoadJob = null } }
+        }
+    }
+    fun activeRoomConnected(): Boolean = when (activity) {
+        SecretActivity.GOMOKU -> when (gomokuMode) {
+            GomokuPlayMode.ONLINE -> gomokuOnlineSession.state.value.connected
+            GomokuPlayMode.NEARBY -> gomokuLanSession.state.value.connected
+            else -> false
+        }
+        SecretActivity.XIANGQI -> when (xiangqiMode) {
+            XiangqiPlayMode.ONLINE -> onlineSession.state.value.connected
+            XiangqiPlayMode.LAN -> lanSession.state.value.connected
+            else -> false
+        }
+        else -> false
+    }
+    fun leaveNetworkSafely(action: () -> Unit) {
+        if (activeRoomConnected()) { cancelHelp(); leaveRoomAction = action } else action()
     }
     fun pauseToys() { pauseLocalToys(); closeNetworkRooms() }
-    fun closeToy() { pauseToys(); activity = null; clockSetupVisible = false; resumeAfterClockSetup = false }
+    fun closeToy() { pauseToys(); cancelModeLoad(); leaveRoomAction = null; activity = null; clockSetupVisible = false; resumeAfterClockSetup = false; undoConfirmVisible = false; gomokuUndoConsent = false }
     fun openToy(value: SecretActivity) {
+        if (!archiveReady || gameLoading) return
+        UiSound.tap(context)
         pauseToys()
         gameControlsBottom = 0f
         if (!sleeping && foreground) {
             activity = value
-            if (value == SecretActivity.GOMOKU && gomoku.board.all { it == 0 }) gomokuPaused = false
+            if (value == SecretActivity.GOMOKU && gomokuLocalMode() != null && !gomokuStarted) {
+                gomokuStarted = true; gomokuPaused = false; checkpointGomoku()
+            }
             if (value == SecretActivity.XIANGQI && xiangqiMode != XiangqiPlayMode.ONLINE && xiangqiMode != XiangqiPlayMode.LAN && !xiangqiStarted) {
                 xiangqiPaused = true
                 resumeAfterClockSetup = false
@@ -273,23 +464,65 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
         }
     }
     fun rest(value: Boolean) {
+        UiSound.tap(context)
         closeToy()
+        night = value
+        gamePreferences.edit().putBoolean("secret_night", value).apply()
         scope.launch { withContext(NonCancellable) { prefs.setSecretPetSleeping(value) } }
+    }
+
+    fun undoXiangqi() {
+        cancelHelp()
+        val target = LocalChessUndo.xiangqiTarget(xiangqiHistory, xiangqiMode == XiangqiPlayMode.CPU)
+        if (target < 0) return
+        xiangqi = xiangqiHistory[target]
+        xiangqiHistory = xiangqiHistory.take(target)
+        xiangqiClock = XiangqiThinkingClock.reset(xiangqi, thinkingSeconds)
+        clockTickAt = 0L; clockEpoch++; checkpointXiangqi()
+    }
+    fun undoGomoku() {
+        cancelHelp()
+        val target = if (gomokuMode == GomokuPlayMode.HOTSEAT) gomokuHistory.lastIndex else LocalChessUndo.gomokuTarget(gomokuHistory)
+        if (target >= 0) { gomoku = gomokuHistory[target]; gomokuHistory = gomokuHistory.take(target); checkpointGomoku() }
+    }
+
+    DisposableEffect(xiangqiDiscovery, gomokuDiscovery) {
+        onDispose { xiangqiDiscovery.stop(); gomokuDiscovery.stop() }
+    }
+    LaunchedEffect(activity, foreground, sleeping, archiveReady, gameLoading, xiangqiMode, xiangqiDiscovery, lan.connected, lan.hostAddress, lan.sessionActive, lan.error) {
+        if (archiveReady && !gameLoading && activity == SecretActivity.XIANGQI && foreground && !sleeping && xiangqiMode == XiangqiPlayMode.LAN && !lan.connected) {
+            if (!lanSession.state.value.sessionActive && lanSession.state.value.error == null) lanSession.host()
+            val room = lanSession.state.value
+            if (room.sessionActive && room.localSide == XiangqiSide.RED && room.hostAddress.isNotBlank() && room.error == null) xiangqiDiscovery.start()
+            else xiangqiDiscovery.stop()
+        } else xiangqiDiscovery.stop()
+    }
+    LaunchedEffect(activity, foreground, sleeping, archiveReady, gameLoading, gomokuMode, gomokuDiscovery, gomokuLan.connected, gomokuLan.hostAddress, gomokuLan.sessionActive, gomokuLan.error) {
+        if (archiveReady && !gameLoading && activity == SecretActivity.GOMOKU && foreground && !sleeping && gomokuMode == GomokuPlayMode.NEARBY && !gomokuLan.connected) {
+            if (!gomokuLanSession.state.value.sessionActive && gomokuLanSession.state.value.error == null) gomokuLanSession.host()
+            val room = gomokuLanSession.state.value
+            if (room.sessionActive && room.localPlayer == 1 && room.hostAddress.isNotBlank() && room.error == null) gomokuDiscovery.start()
+            else gomokuDiscovery.stop()
+        } else gomokuDiscovery.stop()
     }
 
     DisposableEffect(lifecycle) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_STOP) {
-                foreground = false
                 resumeAfterClockSetup = false
                 pauseLocalToys()
+                archive.flushBlocking(350)
+                foreground = false
+                xiangqiDiscovery.stop(); gomokuDiscovery.stop()
                 networkGraceJob?.cancel()
-                val sharingRoom = activity == SecretActivity.XIANGQI && !sleeping &&
+                val sharingRoom = !sleeping && (activity == SecretActivity.XIANGQI &&
                     (xiangqiMode == XiangqiPlayMode.ONLINE || xiangqiMode == XiangqiPlayMode.LAN) &&
-                    (lanSession.state.value.sessionActive || onlineSession.state.value.sessionActive)
+                    (lanSession.state.value.sessionActive || onlineSession.state.value.sessionActive) ||
+                    activity == SecretActivity.GOMOKU && (gomokuMode == GomokuPlayMode.NEARBY || gomokuMode == GomokuPlayMode.ONLINE) &&
+                    (gomokuLanSession.state.value.sessionActive || gomokuOnlineSession.state.value.sessionActive))
                 if (sharingRoom) networkGraceJob = scope.launch {
                     delay(120_000)
-                    lanSession.close(); onlineSession.close()
+                    closeNetworkRooms()
                     networkGraceJob = null
                 } else closeNetworkRooms()
             }
@@ -299,31 +532,52 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
             }
         }
         lifecycle.addObserver(observer)
-        onDispose { lifecycle.removeObserver(observer); spinJob?.cancel(); cancelHelp(); closeNetworkRooms() }
+        onDispose { lifecycle.removeObserver(observer); pauseLocalToys(); cancelModeLoad(); spinJob?.cancel(); closeNetworkRooms() }
     }
     LaunchedEffect(sleeping) { if (sleeping) closeToy() }
+    val visibleNetwork = if (xiangqiMode == XiangqiPlayMode.ONLINE) online else lan
+    var lastNetworkGame by remember(activity, xiangqiMode, foreground) { mutableStateOf(visibleNetwork.game) }
+    LaunchedEffect(visibleNetwork.revision, activity, xiangqiMode, foreground) {
+        val next = visibleNetwork.game
+        if (foreground && activity == SecretActivity.XIANGQI &&
+            (xiangqiMode == XiangqiPlayMode.ONLINE || xiangqiMode == XiangqiPlayMode.LAN) &&
+            next.ply == lastNetworkGame.ply + 1 && next.board != lastNetworkGame.board) UiSound.drop(context)
+        lastNetworkGame = next
+    }
+    val visibleGomokuRoom = if (gomokuMode == GomokuPlayMode.ONLINE) gomokuOnline else gomokuLan
+    var lastNetworkGomoku by remember(activity, gomokuMode, foreground) { mutableStateOf(visibleGomokuRoom.game) }
+    LaunchedEffect(visibleGomokuRoom.revision, activity, gomokuMode, foreground) {
+        val next = visibleGomokuRoom.game
+        if (foreground && activity == SecretActivity.GOMOKU &&
+            (gomokuMode == GomokuPlayMode.ONLINE || gomokuMode == GomokuPlayMode.NEARBY) &&
+            next.board.count { it != 0 } == lastNetworkGomoku.board.count { it != 0 } + 1 && next.board != lastNetworkGomoku.board) UiSound.drop(context)
+        lastNetworkGomoku = next
+    }
     LaunchedEffect(bubbleToken) { if (secretBubble != null) { delay(3000); secretBubble = null } }
-    LaunchedEffect(gomoku, xiangqi, online.game, lan.game, online.connected, lan.connected, online.awaitingAck, lan.awaitingAck) {
-        if (helpBusy && ((helpGomokuPosition != null && helpGomokuPosition != gomoku) ||
+    LaunchedEffect(gomoku, xiangqi, online.game, lan.game, gomokuOnline.game, gomokuLan.game,
+        online.connected, lan.connected, online.awaitingAck, lan.awaitingAck, online.pendingUndoRequest, lan.pendingUndoRequest,
+        gomokuOnline.pendingUndoRequest, gomokuLan.pendingUndoRequest) {
+        if (helpBusy && ((helpGomokuPosition != null && (helpGomokuPosition != currentGomokuPosition() || !eligibleGomokuTurn())) ||
             (helpXiangqiPosition != null && (helpXiangqiPosition != currentXiangqiPosition() || !eligibleXiangqiTurn())))) cancelHelp()
     }
-    LaunchedEffect(activity, foreground, sleeping, xiangqiPaused, xiangqiMode, xiangqi.turnSide, xiangqi.outcome) {
-        if (activity == SecretActivity.XIANGQI && foreground && !sleeping && !xiangqiPaused &&
+    LaunchedEffect(activity, foreground, sleeping, archiveReady, gameLoading, xiangqiPaused, xiangqiMode, xiangqi.turnSide, xiangqi.outcome) {
+        if (archiveReady && !gameLoading && activity == SecretActivity.XIANGQI && foreground && !sleeping && !xiangqiPaused &&
             xiangqiMode == XiangqiPlayMode.CPU && xiangqi.turnSide == XiangqiSide.BLACK && xiangqi.outcome == XiangqiOutcome.PLAYING) {
             val position = xiangqi
             delay(420)
             val move = withContext(Dispatchers.Default) { XiangqiEngine.chooseCpuMove(position) }
-            if (activity == SecretActivity.XIANGQI && foreground && !sleeping && !xiangqiPaused &&
-                xiangqiMode == XiangqiPlayMode.CPU && xiangqi == position && move != null) xiangqi = XiangqiEngine.play(position, move)
+            if (archiveReady && !gameLoading && activity == SecretActivity.XIANGQI && foreground && !sleeping && !xiangqiPaused &&
+                xiangqiMode == XiangqiPlayMode.CPU && xiangqi == position && move != null) commitXiangqi(XiangqiEngine.play(position, move))
         }
     }
-    LaunchedEffect(activity, foreground, sleeping, xiangqiPaused, xiangqiMode, xiangqi.ply,
+    LaunchedEffect(activity, foreground, sleeping, archiveReady, gameLoading, xiangqiPaused, xiangqiMode, xiangqi.ply,
         xiangqi.turnSide, xiangqi.outcome, clockEpoch) {
         xiangqiClock = xiangqiClock.forPosition(xiangqi)
         val localMode = xiangqiMode == XiangqiPlayMode.CPU || xiangqiMode == XiangqiPlayMode.HOTSEAT
-        if (activity == SecretActivity.XIANGQI && foreground && !sleeping && !xiangqiPaused &&
+        if (archiveReady && !gameLoading && activity == SecretActivity.XIANGQI && foreground && !sleeping && !xiangqiPaused &&
             localMode && xiangqi.outcome == XiangqiOutcome.PLAYING) {
             var lastTick = SystemClock.elapsedRealtime()
+            clockTickAt = lastTick
             val clockPosition = xiangqi
             val epoch = clockEpoch
             try {
@@ -332,48 +586,62 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
                     val now = SystemClock.elapsedRealtime()
                     xiangqiClock = xiangqiClock.elapse(now - lastTick, active = true)
                     lastTick = now
+                    clockTickAt = now
                 }
             } finally {
                 if (clockEpoch == epoch && xiangqiClock.ply == clockPosition.ply && xiangqiClock.side == clockPosition.turnSide)
                     xiangqiClock = xiangqiClock.elapse(SystemClock.elapsedRealtime() - lastTick, active = true)
+                if (clockEpoch == epoch) clockTickAt = 0L
             }
         }
     }
-    LaunchedEffect(activity, foreground, sleeping, snakeRunning) {
-        while (activity == SecretActivity.SNAKE && foreground && !sleeping && snakeRunning && !snake.gameOver) {
+    LaunchedEffect(activity, foreground, sleeping, archiveReady, gameLoading, snakeRunning) {
+        var ticks = 0
+        while (archiveReady && !gameLoading && activity == SecretActivity.SNAKE && foreground && !sleeping && snakeRunning && !snake.gameOver) {
             delay((260L - (snake.score / 3) * 8L).coerceAtLeast(140L))
             if (activity == SecretActivity.SNAKE && foreground && !sleeping && snakeRunning) {
+                val oldScore = snake.score
                 snake = SnakeEngine.tick(snake)
                 if (snake.gameOver) snakeRunning = false
+                if (++ticks % 4 == 0 || oldScore != snake.score || snake.gameOver) checkpointSnake()
             }
         }
     }
-    LaunchedEffect(activity, foreground, sleeping, gomokuPaused, gomoku.currentPlayer, gomoku.outcome, gomoku.size) {
-        if (activity == SecretActivity.GOMOKU && foreground && !sleeping && !gomokuPaused &&
+    LaunchedEffect(activity, foreground, sleeping, archiveReady, gameLoading, gomokuMode, gomokuPaused, gomoku.currentPlayer, gomoku.outcome, gomoku.size) {
+        if (archiveReady && !gameLoading && activity == SecretActivity.GOMOKU && foreground && !sleeping && !gomokuPaused &&
+            gomokuMode == GomokuPlayMode.CPU &&
             gomoku.currentPlayer == 2 && gomoku.outcome == GomokuOutcome.PLAYING) {
             val position = gomoku
             delay(420)
-            val move = withContext(Dispatchers.Default) { GomokuEngine.chooseCpuMove(position) }
-            if (activity == SecretActivity.GOMOKU && foreground && !sleeping && !gomokuPaused && gomoku == position) {
-                move?.let { gomoku = GomokuEngine.play(position, it.x, it.y) }
+            val move = withContext(Dispatchers.Default) {
+                val computeContext = currentCoroutineContext()
+                GomokuEngine.chooseCpuMove(position) { !computeContext.isActive }
+            }
+            if (archiveReady && !gameLoading && activity == SecretActivity.GOMOKU && foreground && !sleeping && !gomokuPaused && gomokuMode == GomokuPlayMode.CPU && gomoku == position) {
+                move?.let { commitGomoku(GomokuEngine.play(position, it.x, it.y)) }
             }
         }
     }
-    BackHandler { if (activity != null) closeToy() else { pauseToys(); onBack() } }
+    BackHandler { if (activity != null) leaveNetworkSafely(::closeToy) else { pauseToys(); onBack() } }
 
     Box(Modifier.fillMaxSize().background(Color(0xFFE8D1B0))) {
-        if (!fullGame) SecretRoomStage(sleeping = sleeping, onBack = { pauseToys(); onBack() }, onPet = { rest(!sleeping) },
+        if (!fullGame) SecretRoomStage(sleeping = sleeping, toysEnabled = archiveReady && !gameLoading, onPet = { rest(!sleeping) },
             onWheel = { openToy(SecretActivity.WHEEL) }, onSnake = { openToy(SecretActivity.SNAKE) },
             onGomoku = { openToy(SecretActivity.BOARD) }, onPaper = { openToy(SecretActivity.PAPER) },
-            lampLit = lampLit, sparkleToken = starTaps, bubble = secretBubble,
-            onStar = { starTaps++; secretBubble = if (starTaps % 3 == 0) "找到暗号啦：今天可以慢慢来 ♡" else "这颗星星把一点好运藏进你口袋里了 ✦"; bubbleToken++ },
-            onLamp = { lampLit = !lampLit; secretBubble = if (lampLit) "小灯亮一点，阿噜就靠近一点 ♡" else "小灯轻轻歇一会儿，星星还在陪你"; bubbleToken++ },
-            onPetSecret = { secretBubble = "嘘，阿噜偷偷告诉你：它最喜欢你来坐一会儿。"; bubbleToken++ })
+            night = sleeping, sparkleToken = starTaps, bubble = secretBubble,
+            onStar = { UiSound.select(context); starTaps++; secretBubble = if (starTaps % 3 == 0) "找到暗号啦：今天可以慢慢来 ♡" else "这颗星星把一点好运藏进你口袋里了 ✦"; bubbleToken++ },
+            onLamp = { rest(!sleeping) },
+            onPetSecret = { UiSound.select(context); secretBubble = "嘘，阿噜偷偷告诉你：它最喜欢你来坐一会儿。"; bubbleToken++ })
         if (activity == SecretActivity.XIANGQI && xiangqiMode == XiangqiPlayMode.ONLINE && online.sessionActive) {
             onlineSession.transportView?.let { transport ->
                 key(transport) {
                     AndroidView(factory = { transport }, modifier = Modifier.size(1.dp).graphicsLayer { alpha = 0f })
                 }
+            }
+        }
+        if (activity == SecretActivity.GOMOKU && gomokuMode == GomokuPlayMode.ONLINE && gomokuOnline.sessionActive) {
+            gomokuOnlineSession.transportView?.let { transport ->
+                key(transport) { AndroidView(factory = { transport }, modifier = Modifier.size(1.dp).graphicsLayer { alpha = 0f }) }
             }
         }
         if (!sleeping) activity?.let { toy ->
@@ -388,14 +656,42 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
         val toyContent: @Composable ColumnScope.(androidx.compose.ui.unit.Dp) -> Unit = { boardSize ->
             when (toy) {
                 SecretActivity.SNAKE -> SecretSnakeGame(snake, snakeRunning, snakeStarted, boardSize,
-                    onDirection = { snake = SnakeEngine.turn(snake, it) },
-                    onToggle = { snakeStarted = true; snakeRunning = !snakeRunning && !snake.gameOver && foreground },
-                    onRestart = { snake = SnakeEngine.newGame(); snakeRunning = false; snakeStarted = false })
-                SecretActivity.GOMOKU -> SecretGomokuGame(gomoku, gomokuPaused, boardSize,
-                    onMove = { x, y -> if (!helpBusy && !gomokuPaused && foreground && gomoku.currentPlayer == 1) gomoku = GomokuEngine.play(gomoku, x, y) },
-                    onToggle = { cancelHelp(); gomokuPaused = !gomokuPaused },
-                    onRestart = { cancelHelp(); gomoku = GomokuEngine.newGame(); gomokuPaused = false },
-                    helpBusy = helpBusy, onControlsBottom = { gameControlsBottom = it })
+                    onDirection = { if (archiveReady && !snake.gameOver && foreground) {
+                        snake = SnakeEngine.turn(snake, it); snakeStarted = true; snakeRunning = true; checkpointSnake()
+                    } },
+                    onToggle = { snakeStarted = true; snakeRunning = !snakeRunning && !snake.gameOver && foreground; checkpointSnake() },
+                    onRestart = { snake = SnakeEngine.newGame(); snakeRunning = false; snakeStarted = false; checkpointSnake() })
+                SecretActivity.GOMOKU -> SecretGomokuGame(currentGomokuPosition(), gomokuPaused || gameLoading || !archiveReady, boardSize,
+                    onMove = { x, y -> if (!helpBusy) playGomokuMove(GridCell(x, y)) },
+                    onToggle = { cancelHelp(); gomokuStarted = true; gomokuPaused = !gomokuPaused; checkpointGomoku() },
+                    onRestart = { cancelHelp(); when (gomokuMode) {
+                        GomokuPlayMode.ONLINE -> gomokuOnlineSession.restart()
+                        GomokuPlayMode.NEARBY -> gomokuLanSession.restart()
+                        else -> { gomokuHistory = emptyList(); gomoku = GomokuEngine.newGame(); gomokuStarted = true; gomokuPaused = false; checkpointGomoku() }
+                    } },
+                    mode = gomokuMode, onMode = { value -> leaveNetworkSafely { changeGomokuMode(value) } }, room = visibleGomokuRoom, nearby = nearbyGomoku,
+                    onHost = { if (foreground) gomokuOnlineSession.host() },
+                    onJoin = { address -> if (foreground) {
+                        if (gomokuMode == GomokuPlayMode.ONLINE) gomokuOnlineSession.join(address)
+                        else { gomokuDiscovery.stop(); gomokuLanSession.join(address) }
+                    } },
+                    onDisconnect = { if (activeRoomConnected()) leaveNetworkSafely(::closeToy) else { cancelHelp(); closeNetworkRooms() } },
+                    onNearbyRetry = { if (foreground) { gomokuLanSession.host(); gomokuDiscovery.stop(); gomokuDiscovery.start() } },
+                    canUndo = when (gomokuMode) {
+                        GomokuPlayMode.ONLINE -> gomokuOnline.canUndo
+                        GomokuPlayMode.NEARBY -> gomokuLan.canUndo
+                        GomokuPlayMode.HOTSEAT -> gomokuHistory.isNotEmpty()
+                        else -> LocalChessUndo.gomokuTarget(gomokuHistory) >= 0
+                    },
+                    onUndo = { cancelHelp(); when (gomokuMode) {
+                        GomokuPlayMode.ONLINE -> gomokuOnlineSession.requestUndo()
+                        GomokuPlayMode.NEARBY -> gomokuLanSession.requestUndo()
+                        GomokuPlayMode.CPU -> undoGomoku()
+                        GomokuPlayMode.HOTSEAT -> { gomokuUndoResume = !gomokuPaused; gomokuPaused = true; checkpointGomoku(); gomokuUndoConsent = true }
+                    } },
+                    onUndoResponse = { accept -> if (gomokuMode == GomokuPlayMode.ONLINE) gomokuOnlineSession.respondToUndo(accept)
+                        else if (gomokuMode == GomokuPlayMode.NEARBY) gomokuLanSession.respondToUndo(accept) },
+                    helpBusy = helpBusy || gameLoading || !archiveReady, onControlsBottom = { gameControlsBottom = it })
                 SecretActivity.BOARD -> {
                     Text("棋盘替你铺好了，今天想下哪一种？", style = MaterialTheme.typography.bodyMedium)
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -405,7 +701,7 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
                 }
                 SecretActivity.XIANGQI -> SecretXiangqiGame(
                     state = when (xiangqiMode) { XiangqiPlayMode.LAN -> lan.game; XiangqiPlayMode.ONLINE -> online.game; else -> xiangqi },
-                    mode = xiangqiMode, paused = xiangqiPaused, boardWidth = boardSize,
+                    mode = xiangqiMode, paused = xiangqiPaused || gameLoading || !archiveReady, boardWidth = boardSize,
                     thinkingClock = xiangqiClock,
                     lan = if (xiangqiMode == XiangqiPlayMode.ONLINE) online else lan,
                     remoteSelection = when (xiangqiMode) {
@@ -417,36 +713,44 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
                         if (xiangqiMode == XiangqiPlayMode.ONLINE) onlineSession.selectPiece(cell)
                         else if (xiangqiMode == XiangqiPlayMode.LAN) lanSession.selectPiece(cell)
                     },
-                    onMode = { value ->
-                        cancelHelp(); closeNetworkRooms(); xiangqiMode = value; resumeAfterClockSetup = false
-                        clockSetupVisible = false
-                        if (value == XiangqiPlayMode.CPU || value == XiangqiPlayMode.HOTSEAT) {
-                            xiangqiPaused = !xiangqiStarted
-                            if (!xiangqiStarted) clockSetupVisible = true
-                        }
-                    },
+                    onMode = { value -> leaveNetworkSafely { changeXiangqiMode(value) } },
                     onMove = { move -> if (!helpBusy) playXiangqiMove(move) },
-                    onToggle = { cancelHelp(); if (!xiangqiStarted) { xiangqiPaused = true; resumeAfterClockSetup = false; clockSetupVisible = true }
-                        else xiangqiPaused = !xiangqiPaused },
+                    onToggle = { cancelHelp(); freezeThinkingClock(); if (!xiangqiStarted) { xiangqiPaused = true; resumeAfterClockSetup = false; clockSetupVisible = true }
+                        else xiangqiPaused = !xiangqiPaused
+                        checkpointXiangqi() },
                     onRestart = { cancelHelp(); if (xiangqiMode == XiangqiPlayMode.LAN) lanSession.restart()
                         else if (xiangqiMode == XiangqiPlayMode.ONLINE) onlineSession.restart()
-                        else { xiangqi = XiangqiEngine.newGame(); xiangqiClock = XiangqiThinkingClock.reset(xiangqi, thinkingSeconds)
-                            clockEpoch++; xiangqiStarted = false; xiangqiPaused = true; resumeAfterClockSetup = false; clockSetupVisible = true } },
+                        else { xiangqiHistory = emptyList(); xiangqi = XiangqiEngine.newGame(); xiangqiClock = XiangqiThinkingClock.reset(xiangqi, thinkingSeconds)
+                            clockTickAt = 0L; clockEpoch++; xiangqiStarted = false; xiangqiPaused = true; resumeAfterClockSetup = false; clockSetupVisible = true; checkpointXiangqi() } },
                     onHost = { if (foreground) { if (xiangqiMode == XiangqiPlayMode.ONLINE) onlineSession.host() else lanSession.host() } },
-                    onJoin = { address -> if (foreground) { if (xiangqiMode == XiangqiPlayMode.ONLINE) onlineSession.join(address) else lanSession.join(address) } },
-                    onDisconnect = { cancelHelp(); closeNetworkRooms() },
-                    onPuzzle = { position -> cancelHelp(); xiangqi=position; xiangqiClock=XiangqiThinkingClock.reset(position, thinkingSeconds)
-                        clockEpoch++; xiangqiStarted=true; xiangqiPaused=false },
-                    helpBusy = helpBusy, assistedSelection = assistedSelection,
+                    onJoin = { address -> if (foreground) { if (xiangqiMode == XiangqiPlayMode.ONLINE) onlineSession.join(address)
+                        else { xiangqiDiscovery.stop(); lanSession.join(address) } } },
+                    nearby = nearbyXiangqi,
+                    onNearbyRetry = { if (foreground) { lanSession.host(); xiangqiDiscovery.stop(); xiangqiDiscovery.start() } },
+                    onDisconnect = { if (activeRoomConnected()) leaveNetworkSafely(::closeToy) else { cancelHelp(); closeNetworkRooms() } },
+                    onPuzzle = { position -> cancelHelp(); xiangqiHistory = emptyList(); xiangqi=position; xiangqiClock=XiangqiThinkingClock.reset(position, thinkingSeconds)
+                        clockTickAt = 0L; clockEpoch++; xiangqiStarted=true; xiangqiPaused=false; checkpointXiangqi() },
+                    helpBusy = helpBusy || gameLoading || !archiveReady, assistedSelection = assistedSelection,
+                    restorationToken = xiangqiRestoreToken,
+                    canUndo = when (xiangqiMode) {
+                        XiangqiPlayMode.ONLINE -> online.canUndo
+                        XiangqiPlayMode.LAN -> lan.canUndo
+                        else -> LocalChessUndo.xiangqiTarget(xiangqiHistory, xiangqiMode == XiangqiPlayMode.CPU) >= 0
+                    },
+                    onUndo = { cancelHelp(); when (xiangqiMode) {
+                        XiangqiPlayMode.ONLINE -> onlineSession.requestUndo()
+                        XiangqiPlayMode.LAN -> lanSession.requestUndo()
+                        XiangqiPlayMode.CPU -> undoXiangqi()
+                        XiangqiPlayMode.HOTSEAT -> { undoResume = !xiangqiPaused; freezeThinkingClock(); xiangqiPaused = true; checkpointXiangqi(); undoConfirmVisible = true }
+                    } },
+                    onUndoResponse = { accept -> if (xiangqiMode == XiangqiPlayMode.ONLINE) onlineSession.respondToUndo(accept)
+                        else if (xiangqiMode == XiangqiPlayMode.LAN) lanSession.respondToUndo(accept) },
                     onModalOpened = ::cancelHelp, onControlsBottom = { gameControlsBottom = it })
-                SecretActivity.PAPER -> {
-                    AlbumPaperPage { Text(secretNotes[note % secretNotes.size],
-                        style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(vertical = 20.dp)) }
-                    TextButton(onClick = { note = (note + 1) % secretNotes.size }) { Text("再翻一张小秘密 ♡") }
-                }
+                SecretActivity.PAPER -> Unit // A fixed-size paper desk owns its own dialog below.
                 SecretActivity.WHEEL -> {
                     SecretPrizeWheel(rotation.value, minOf(boardSize, 270.dp))
                     Button(onClick = {
+                        UiSound.tap(context)
                         if (!spinning && foreground) spinJob = scope.launch {
                             spinning = true; prize = null
                             try {
@@ -469,7 +773,25 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
                 }
             }
         }
-        if (fullGame) SecretGamePage(title, ::closeToy,
+        if (gomokuUndoConsent && activity == SecretActivity.GOMOKU && gomokuMode == GomokuPlayMode.HOTSEAT) {
+            com.jiligulu.app.ui.components.GuluDialog("可以退回这一步吗？", {
+                gomokuUndoConsent = false; gomokuPaused = !gomokuUndoResume; checkpointGomoku()
+            }, compact = true, confirmLabel = "同意", onConfirm = {
+                undoGomoku(); gomokuUndoConsent = false; gomokuPaused = !gomokuUndoResume; checkpointGomoku()
+            }, dismissLabel = "不同意") {
+                Text("把手机交给对方，等对方选择后再继续。", style = MaterialTheme.typography.bodySmall)
+            }
+        }
+        if (undoConfirmVisible && activity == SecretActivity.XIANGQI && xiangqiMode == XiangqiPlayMode.HOTSEAT) {
+            com.jiligulu.app.ui.components.GuluDialog("可以退回这一步吗？", {
+                undoConfirmVisible = false; xiangqiPaused = !undoResume; checkpointXiangqi()
+            }, compact = true, confirmLabel = "同意", onConfirm = {
+                undoXiangqi(); undoConfirmVisible = false; xiangqiPaused = !undoResume; checkpointXiangqi()
+            }, dismissLabel = "不同意") {
+                Text("把手机交给对方，等对方选择后再继续。", style = MaterialTheme.typography.bodySmall)
+            }
+        }
+        if (fullGame) SecretGamePage(title, { leaveNetworkSafely(::closeToy) },
             boardAspect = if (toy == SecretActivity.XIANGQI) 1.13f else 1f,
             reservedHeight = when (toy) {
                 SecretActivity.SNAKE -> 320
@@ -489,8 +811,9 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
                         paused = xiangqiPaused, network = networkMode,
                         onClick = { if (!networkMode) {
                             cancelHelp()
+                            freezeThinkingClock()
                             resumeAfterClockSetup = xiangqiStarted && !xiangqiPaused && foreground
-                            xiangqiPaused = true; clockSetupVisible = true
+                            xiangqiPaused = true; checkpointXiangqi(); clockSetupVisible = true
                         } })
                 }
             },
@@ -498,13 +821,14 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
             gameDecor = toy == SecretActivity.XIANGQI || toy == SecretActivity.GOMOKU,
             decorEnabled = !helpBusy && when (toy) {
                 SecretActivity.XIANGQI -> eligibleXiangqiTurn()
-                SecretActivity.GOMOKU -> foreground && !sleeping && !gomokuPaused && gomoku.currentPlayer == 1 && gomoku.outcome == GomokuOutcome.PLAYING
+                SecretActivity.GOMOKU -> eligibleGomokuTurn()
                 else -> false
             },
-            decorResetKey = if (toy == SecretActivity.XIANGQI) helpGeneration to currentXiangqiPosition() else helpGeneration to gomoku,
+            decorResetKey = if (toy == SecretActivity.XIANGQI) helpGeneration to currentXiangqiPosition() else helpGeneration to currentGomokuPosition(),
             controlsBottom = gameControlsBottom,
             onDecorSecret = { if (toy == SecretActivity.XIANGQI) requestXiangqiHelp() else if (toy == SecretActivity.GOMOKU) requestGomokuHelp() },
             content = toyContent)
+        else if (toy == SecretActivity.PAPER) SecretPapersDialog(secretNotes, ::closeToy)
         else SecretToyDialog(title, ::closeToy, reservedHeight = 265, content = toyContent)
         }
         if (clockSetupVisible && activity == SecretActivity.XIANGQI &&
@@ -515,12 +839,25 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
                     if (resumeAfterClockSetup && xiangqiStarted && foreground && activity == SecretActivity.XIANGQI &&
                         xiangqiMode != XiangqiPlayMode.ONLINE && xiangqiMode != XiangqiPlayMode.LAN) xiangqiPaused = false
                     resumeAfterClockSetup = false
+                    checkpointXiangqi()
                 }, onConfirm = { seconds ->
                     thinkingSeconds = seconds
                     gamePreferences.edit().putInt("xiangqi_thinking_seconds", seconds).apply()
                     xiangqiClock = XiangqiThinkingClock.reset(xiangqi, seconds)
-                    clockEpoch++; xiangqiStarted = true; xiangqiPaused = !foreground; clockSetupVisible = false; resumeAfterClockSetup = false
+                    clockTickAt = 0L; clockEpoch++; xiangqiStarted = true; xiangqiPaused = !foreground; clockSetupVisible = false; resumeAfterClockSetup = false; checkpointXiangqi()
                 })
+        }
+        leaveRoomAction?.let { action ->
+            com.jiligulu.app.ui.components.GuluDialog("收起这张棋桌吗？", { leaveRoomAction = null },
+                confirmLabel = "离开棋桌", onConfirm = { leaveRoomAction = null; action() },
+                dismissLabel = "再坐一会儿", compact = true, dense = true, compactWidth = 280.dp) {
+                Text("离开会结束当前房间连接；本地棋局会替你留好。", style = MaterialTheme.typography.bodySmall)
+            }
+        }
+        if (fullGame && (gameLoading || !archiveReady)) {
+            Box(Modifier.matchParentSize().pointerInput(Unit) {
+                awaitPointerEventScope { while (true) awaitPointerEvent().changes.forEach { it.consume() } }
+            }, contentAlignment = Alignment.Center) { CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp) }
         }
     }
 }
@@ -535,6 +872,7 @@ private fun SecretGamePage(title: String, onBack: () -> Unit, boardAspect: Float
     onDecorSecret: () -> Unit = {},
     content: @Composable ColumnScope.(androidx.compose.ui.unit.Dp) -> Unit) {
     var stageBottom by remember(title) { mutableFloatStateOf(0f) }
+    val context = LocalContext.current
     val density = LocalDensity.current
     BoxWithConstraints(Modifier.fillMaxSize().background(Color(0xFFFAF7F1)).safeDrawingPadding()
         .onGloballyPositioned { stageBottom = it.boundsInRoot().bottom }) {
@@ -544,7 +882,7 @@ private fun SecretGamePage(title: String, onBack: () -> Unit, boardAspect: Float
         Column(Modifier.fillMaxSize().padding(horizontal = 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally) {
             Row(Modifier.fillMaxWidth().height(56.dp), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onBack, modifier = Modifier.size(44.dp)) {
+                IconButton(onClick = { UiSound.tap(context); onBack() }, modifier = Modifier.size(44.dp)) {
                     Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回秘密基地", tint = Color(0xFF665762))
                 }
                 Text(title, style = if (title == "阿噜棋桌") MaterialTheme.typography.titleLarge.copy(fontFamily = GuluBrandFont, fontSize = 18.sp)
@@ -598,6 +936,7 @@ private fun GameGuluDecoration(enabled: Boolean, resetKey: Any?, onSecret: () ->
 private fun SecretToyDialog(title: String, onDismiss: () -> Unit, reservedHeight: Int,
     content: @Composable ColumnScope.(androidx.compose.ui.unit.Dp) -> Unit) {
     val configuration = LocalConfiguration.current
+    val context = LocalContext.current
     val boardSize = minOf((configuration.screenWidthDp - 64).dp,
         (configuration.screenHeightDp - reservedHeight).coerceAtLeast(130).dp, 350.dp)
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
@@ -609,7 +948,7 @@ private fun SecretToyDialog(title: String, onDismiss: () -> Unit, reservedHeight
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text(title, Modifier.weight(1f), fontFamily = GuluBrandFont, fontSize = 20.sp,
                         color = MaterialTheme.colorScheme.primary)
-                    TextButton(onClick = onDismiss) { Text("收好") }
+                    TextButton(onClick = { UiSound.tap(context); onDismiss() }) { Text("收好") }
                 }
                 content(boardSize)
             }
@@ -645,19 +984,27 @@ private fun SecretPrizeWheel(angle: Float, diameter: androidx.compose.ui.unit.Dp
 
 @Composable
 @OptIn(ExperimentalFoundationApi::class)
-private fun SecretRoomStage(sleeping: Boolean, onBack: () -> Unit, onPet: () -> Unit,
+private fun SecretRoomStage(sleeping: Boolean, toysEnabled: Boolean, onPet: () -> Unit,
     onWheel: () -> Unit, onSnake: () -> Unit, onGomoku: () -> Unit, onPaper: () -> Unit,
-    lampLit: Boolean, sparkleToken: Int, bubble: String?, onStar: () -> Unit, onLamp: () -> Unit, onPetSecret: () -> Unit) {
+    night: Boolean, sparkleToken: Int, bubble: String?, onStar: () -> Unit, onLamp: () -> Unit, onPetSecret: () -> Unit) {
     val resources = LocalContext.current.resources
     val resource = R.drawable.world_secret_room_portrait_v3
     val art by produceState<ImageBitmap?>(LittleWorldArtwork.cachedImage(resource), resources, resource) {
         value = withContext(Dispatchers.IO) { LittleWorldArtwork.image(resources, resource) }
     }
+    val nightResource = R.drawable.world_secret_room_portrait_v4_night
+    val nightArt by produceState<ImageBitmap?>(LittleWorldArtwork.cachedImage(nightResource), resources, nightResource) {
+        value = withContext(Dispatchers.IO) { LittleWorldArtwork.image(resources, nightResource) }
+    }
     val sparkle = remember { Animatable(0f) }
+    val nightBlend = remember { Animatable(if (night) 1f else 0f) }
+    LaunchedEffect(night, nightArt) {
+        if (!night || nightArt != null) nightBlend.animateTo(if (night) 1f else 0f, tween(800))
+    }
     LaunchedEffect(sparkleToken) {
         if (sparkleToken > 0) { sparkle.snapTo(1f); sparkle.animateTo(0f, tween(1100)) }
     }
-    BoxWithConstraints(Modifier.fillMaxSize().clipToBounds()) {
+    BoxWithConstraints(Modifier.fillMaxSize().background(if (night) Color(0xFF202033) else Color(0xFFE8D1B0)).clipToBounds()) {
         // Keep first-frame hotspots at the same scale while the portrait decodes on IO.
         val ratio = art?.let { it.width.toFloat() / it.height } ?: (941f / 1672f)
         val naturalWidth = maxOf(maxWidth, maxHeight * ratio)
@@ -667,45 +1014,47 @@ private fun SecretRoomStage(sleeping: Boolean, onBack: () -> Unit, onPet: () -> 
         val sceneHeight = naturalHeight.coerceAtMost(maxHeight / .97f)
         val left = (maxWidth - sceneWidth) / 2
         val top = (maxHeight - sceneHeight) / 2
-        art?.let { bitmap -> Canvas(Modifier.matchParentSize()) {
-            drawImage(bitmap, dstOffset = IntOffset(left.toPx().roundToInt(), top.toPx().roundToInt()),
-                dstSize = IntSize(sceneWidth.toPx().roundToInt(), sceneHeight.toPx().roundToInt()),
-                filterQuality = FilterQuality.Medium, colorFilter = MutedSceneColorFilter)
-        } }
+        Canvas(Modifier.matchParentSize()) {
+            val sceneOffset = IntOffset(left.toPx().roundToInt(), top.toPx().roundToInt())
+            val sceneSize = IntSize(sceneWidth.toPx().roundToInt(), sceneHeight.toPx().roundToInt())
+            if (nightBlend.value < 1f && (!night || nightArt != null)) art?.let { bitmap ->
+                drawImage(bitmap, dstOffset = sceneOffset, dstSize = sceneSize,
+                    filterQuality = FilterQuality.Medium, colorFilter = MutedSceneColorFilter)
+            }
+            if (nightBlend.value > 0f) nightArt?.let { bitmap ->
+                drawImage(bitmap, dstOffset = sceneOffset, dstSize = sceneSize, alpha = nightBlend.value,
+                    filterQuality = FilterQuality.Medium, colorFilter = MutedSceneColorFilter)
+            }
+        }
         SkinSceneDecor(Modifier.matchParentSize(), paintBackground = false)
         // Each plaque sits against its toy; the larger adjoining target includes the painted object.
         fun hotspot(x: Float, y: Float, w: Float, h: Float) = Modifier
             .offset(left + sceneWidth * x, top + sceneHeight * y).size(sceneWidth * w, sceneHeight * h)
         @Composable fun toy(label: String, x: Float, y: Float, w: Float, h: Float,
             tagX: Float, tagY: Float, tagW: Float, tagH: Float, action: () -> Unit) {
-            Box(hotspot(x, y, w, h).clickable(enabled = !sleeping, role = Role.Button, onClickLabel = label, onClick = action)
+            Box(hotspot(x, y, w, h).clickable(enabled = !sleeping && toysEnabled, role = Role.Button, onClickLabel = label, onClick = action)
                 .semantics { contentDescription = label })
             Text(label, hotspot(tagX - tagW / 2, tagY - tagH / 2, tagW, tagH)
-                .clickable(enabled = !sleeping, role = Role.Button, onClick = action)
+                .clickable(enabled = !sleeping && toysEnabled, role = Role.Button, onClick = action)
                 .wrapContentSize(Alignment.Center), fontFamily = GuluBrandFont,
-                fontSize = 10.sp, color = Color(0xFF66462C), maxLines = 1)
+                fontSize = 10.sp, color = if (night) Color(0xFFCFC1AD) else Color(0xFF66462C), maxLines = 1)
         }
         toy("好运转盘", .15f, .236f, .24f, .168f, .27f, .418f, .107f, .028f, onWheel)
         toy("贪吃蛇", .755f, .29f, .183f, .154f, .846f, .462f, .105f, .028f, onSnake)
         toy("小棋桌", .61f, .541f, .34f, .064f, .854f, .529f, .094f, .027f, onGomoku)
-        Box(hotspot(.17f, .488f, .27f, .077f).clickable(enabled = !sleeping, role = Role.Button,
+        Box(hotspot(.17f, .488f, .27f, .077f).clickable(enabled = !sleeping && toysEnabled, role = Role.Button,
             onClickLabel = "秘密纸条", onClick = onPaper).semantics { contentDescription = "秘密纸条" })
-        ScenePlaqueButton("秘密纸条", Modifier.offset(left + sceneWidth * .27f - 35.dp, top + sceneHeight * .556f)
-            .width(70.dp), enabled = !sleeping, onClick = onPaper)
         Box(hotspot(.30f, .634f, .41f, .172f).combinedClickable(role = Role.Button,
             onClickLabel = if (sleeping) "轻轻叫醒阿噜" else "让阿噜打个盹", onClick = onPet,
             onLongClickLabel = "听阿噜藏起来的小秘密", onLongClick = onPetSecret)
             .semantics { contentDescription = if (sleeping) "轻轻叫醒阿噜" else "让阿噜打个盹" })
         Box(hotspot(.65f, .10f, .18f, .09f).clickable(role = Role.Button, onClickLabel = "摸摸挂着的小星星", onClick = onStar)
             .semantics { contentDescription = "摸摸挂着的小星星" })
-        Box(hotspot(.685f, .224f, .10f, .078f).clickable(role = Role.Button, onClickLabel = "拨亮小油灯", onClick = onLamp)
-            .semantics { contentDescription = "拨亮小油灯" })
+        Box(hotspot(.685f, .224f, .10f, .078f).clickable(role = Role.Button,
+            onClickLabel = if (night) "开灯叫醒阿噜" else "关灯陪阿噜入睡", onClick = onLamp)
+            .semantics { contentDescription = if (night) "开灯叫醒阿噜" else "关灯陪阿噜入睡" })
         Canvas(Modifier.matchParentSize()) {
             val sw = sceneWidth.toPx(); val sh = sceneHeight.toPx()
-            if (lampLit) drawCircle(androidx.compose.ui.graphics.Brush.radialGradient(
-                listOf(Color(0xFFFFD79A).copy(alpha = .30f), Color.Transparent),
-                Offset(left.toPx() + sw * .73f, top.toPx() + sh * .268f), sw * .19f), sw * .19f,
-                Offset(left.toPx() + sw * .73f, top.toPx() + sh * .268f))
             if (sparkle.value > 0f) repeat(9) { index ->
                 val phase = 1f - sparkle.value
                 val angle = index * kotlin.math.PI * 2 / 9
@@ -716,28 +1065,9 @@ private fun SecretRoomStage(sleeping: Boolean, onBack: () -> Unit, onPet: () -> 
                 drawLine(Color(0xFFFFEEC7).copy(alpha = sparkle.value), point - Offset(0f, 4.dp.toPx()), point + Offset(0f, 4.dp.toPx()), 2.dp.toPx())
             }
         }
-        Row(Modifier.align(Alignment.TopCenter).fillMaxWidth().statusBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-            ScenePlaqueButton("‹ 小窝", onClick = onBack)
-            ScenePlaqueButton(if (sleeping) "叫醒" else "打个盹", onClick = onPet)
-        }
         Text("阿噜的秘密基地", hotspot(.346f, .074f, .314f, .055f).wrapContentSize(Alignment.Center),
-            fontFamily = GuluBrandFont, fontSize = 17.sp, color = Color(0xFF594532))
+            fontFamily = GuluBrandFont, fontSize = 17.sp, color = if (night) Color(0xFFE8D8C3) else Color(0xFF594532))
         if (sleeping) {
-            Canvas(Modifier.matchParentSize()) {
-                val sceneX = left.toPx(); val sceneY = top.toPx()
-                val sw = sceneWidth.toPx(); val sh = sceneHeight.toPx()
-                listOf(Offset(.456f, .700f), Offset(.567f, .712f)).forEach { eye ->
-                    val center = Offset(sceneX + sw * eye.x, sceneY + sh * eye.y)
-                    drawOval(Color(0xFFE8CBFD), center - Offset(sw * .024f, sh * .012f), Size(sw * .048f, sh * .024f))
-                    val sleepyEye = Path().apply {
-                        moveTo(center.x - sw * .015f, center.y)
-                        quadraticBezierTo(center.x, center.y + sh * .006f, center.x + sw * .015f, center.y)
-                    }
-                    drawPath(sleepyEye, Color(0xFF715293), style = Stroke(2.dp.toPx()))
-                }
-                drawRect(Color(0xFF292C54).copy(alpha = .22f))
-            }
             Text("Z z z", hotspot(.63f, .635f, .12f, .04f).wrapContentSize(Alignment.Center),
                 fontFamily = GuluBrandFont, fontSize = 27.sp, color = Color(0xFFFFEDD3))
         }

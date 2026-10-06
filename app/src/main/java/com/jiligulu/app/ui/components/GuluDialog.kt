@@ -32,23 +32,26 @@ fun GuluDialog(
     busy: Boolean = false,
     compact: Boolean = false,
     compactWidth: Dp? = null,
+    dense: Boolean = false,
+    confirmEnabled: Boolean = true,
     content: @Composable ColumnScope.() -> Unit
 ) {
     Dialog(onDismissRequest = { if (!busy) onDismiss() },
         properties = DialogProperties(dismissOnBackPress = !busy, dismissOnClickOutside = !busy, usePlatformDefaultWidth = !compact)) {
         com.jiligulu.app.ui.capture.DialogGlassBackdrop()
-        val width = if (compact && compactWidth != null) Modifier.widthIn(max = compactWidth).fillMaxWidth()
-            else Modifier.fillMaxWidth(if (compact) .84f else 1f).then(if (compact) Modifier.widthIn(max = 330.dp) else Modifier)
-        LedgerCard(width.heightIn(max = (LocalConfiguration.current.screenHeightDp * if (compact) .62f else .82f).dp)) {
-            Text(title, modifier = Modifier.padding(bottom = 16.dp),
-                style = MaterialTheme.typography.titleLarge.copy(fontFamily = GuluBrandFont, fontWeight = FontWeight.Normal),
+        val width = if (compact) Modifier.widthIn(max = compactWidth ?: 300.dp).fillMaxWidth()
+            else Modifier.fillMaxWidth()
+        LedgerCard(width.heightIn(max = (LocalConfiguration.current.screenHeightDp * if (compact) .62f else .82f).dp),
+            contentPadding = if(dense || compact) 12.dp else 16.dp) {
+            Text(title, modifier = Modifier.padding(bottom = if(dense) 6.dp else 10.dp),
+                style = (if(dense) MaterialTheme.typography.titleMedium else MaterialTheme.typography.titleLarge).copy(fontFamily = GuluBrandFont, fontWeight = FontWeight.Normal),
                 color = MaterialTheme.colorScheme.primary)
             val bodyScroll = rememberScrollState()
             SpringScrollColumn(Modifier.weight(1f, fill = false), state = bodyScroll,
-                verticalArrangement = Arrangement.spacedBy(12.dp), content = content)
-            Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.End) {
-                dismissLabel?.let { TextButton(onClick = onDismiss, enabled = !busy) { Text(it) } }
-                TextButton(onClick = onConfirm, enabled = !busy) {
+                verticalArrangement = Arrangement.spacedBy(if(dense) 6.dp else 10.dp), content = content)
+            Row(Modifier.fillMaxWidth().padding(top = if(dense) 6.dp else 8.dp), horizontalArrangement = Arrangement.End) {
+                dismissLabel?.let { TextButton(onClick = uiTap(onDismiss), enabled = !busy) { Text(it) } }
+                TextButton(onClick = uiTap(onConfirm), enabled = !busy && confirmEnabled) {
                     Text(if (busy) "正在处理…" else confirmLabel)
                 }
             }

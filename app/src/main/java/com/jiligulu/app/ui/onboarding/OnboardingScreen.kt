@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.VolumeOff
 import androidx.compose.material.icons.automirrored.outlined.VolumeUp
@@ -20,7 +19,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -52,6 +50,9 @@ import com.jiligulu.app.JiliguluApp
 import com.jiligulu.app.core.audio.KeyboardSound
 import com.jiligulu.app.data.prefs.UserPrefs
 import com.jiligulu.app.ui.components.LedgerCard
+import com.jiligulu.app.ui.components.CompactFormField
+import com.jiligulu.app.ui.components.SpringScrollColumn
+import com.jiligulu.app.ui.components.uiTap
 import com.jiligulu.app.ui.persona.GuluMascot
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
@@ -147,33 +148,31 @@ fun OnboardingScreen(onDone: () -> Unit, active: Boolean = true, preview: Boolea
         }
     }
     Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) {
-        Column(Modifier.fillMaxSize().safeDrawingPadding().imePadding().verticalScroll(rememberScrollState())
-            .padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(18.dp)) {
+        SpringScrollColumn(Modifier.fillMaxSize().safeDrawingPadding().imePadding()
+            .padding(horizontal = 20.dp, vertical = 12.dp), horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = { vm.setSound(!sound) }) {
+                IconButton(onClick = uiTap { vm.setSound(!sound) }) {
                     Icon(if (sound) Icons.AutoMirrored.Outlined.VolumeUp else Icons.AutoMirrored.Outlined.VolumeOff,
                         contentDescription = if (sound) "关闭打字音效" else "开启打字音效")
                 }
                 Spacer(Modifier.weight(1f))
-                if (phase != Phase.INPUT) TextButton(onClick = {
+                if (phase != Phase.INPUT) TextButton(onClick = uiTap {
                     if (phase == Phase.GREETING) { shownCount = GREETING.length; phase = Phase.INPUT }
                     else finish()
                 }, enabled = active) { Text("跳过动画") }
             }
-            Spacer(Modifier.height(24.dp))
-            GuluMascot(Modifier.size(160.dp))
-            LedgerCard {
+            Spacer(Modifier.height(12.dp))
+            GuluMascot(Modifier.size(136.dp))
+            LedgerCard(contentPadding = 12.dp) {
                 Text(if (phase == Phase.REPLY) reply.take(replyCount) else GREETING.take(shownCount),
                     style = MaterialTheme.typography.titleMedium, minLines = 3)
             }
             if (phase == Phase.INPUT) {
-                OutlinedTextField(value = name, onValueChange = { name = it }, modifier = Modifier.fillMaxWidth(),
-                    label = { Text("你的名字") }, placeholder = { Text("咕噜应该怎么叫你？") },
-                    singleLine = true, enabled = !saving, shape = MaterialTheme.shapes.large)
+                CompactFormField("名字", name, { name = it }, placeholder = "阿噜应该怎么叫你？", enabled = !saving)
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                Button(onClick = { vm.saveName(name, preview) }, enabled = name.isNotBlank() && !saving,
-                    modifier = Modifier.fillMaxWidth().height(52.dp), shape = MaterialTheme.shapes.extraLarge) {
+                Button(onClick = uiTap { vm.saveName(name, preview) }, enabled = name.isNotBlank() && !saving,
+                    modifier = Modifier.fillMaxWidth().height(50.dp), shape = MaterialTheme.shapes.extraLarge) {
                     Text(if (saving) "记住啦，稍等一下…" else if (preview) "继续看动画" else "就这样称呼吧")
                 }
             }

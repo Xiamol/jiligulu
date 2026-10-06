@@ -49,13 +49,14 @@ object SnakeEngine {
         val direction = state.pendingDirection.takeUnless { it.isOpposite(state.direction) }
             ?: state.direction
         val head = state.body.first()
-        val nextHead = GridCell(head.x + direction.dx, head.y + direction.dy)
+        val nextHead = GridCell(
+            (head.x + direction.dx + state.width) % state.width,
+            (head.y + direction.dy + state.height) % state.height,
+        )
         val grows = nextHead == state.food
         // On a normal move the tail leaves before the head enters its old square.
         val occupied = if (grows) state.body else state.body.dropLast(1)
-        if (nextHead.x !in 0 until state.width || nextHead.y !in 0 until state.height ||
-            nextHead in occupied
-        ) return state.copy(direction = direction, pendingDirection = direction, gameOver = true)
+        if (nextHead in occupied) return state.copy(direction = direction, pendingDirection = direction, gameOver = true)
 
         val body = listOf(nextHead) + if (grows) state.body else state.body.dropLast(1)
         val won = body.size == state.width * state.height
@@ -131,8 +132,14 @@ object GomokuEngine {
         )
     }
 
-    fun chooseCpuMove(state: GomokuState): GridCell? {
+    fun chooseCpuMove(state: GomokuState, shouldCancel: () -> Boolean = { false }): GridCell? {
         if (state.outcome != GomokuOutcome.PLAYING || state.currentPlayer != 2) return null
+        return GomokuStrongMoveHelper.chooseMove(state, timeBudgetMillis = 650, shouldCancel = shouldCancel)
+    }
+
+    /** Legal, deterministic fallback for a cancelled or exhausted search; never used as the main AI. */
+    internal fun chooseHeuristicMove(state: GomokuState): GridCell? {
+        if (state.outcome != GomokuOutcome.PLAYING) return null
         val empty = buildList {
             for (y in 0 until state.size) for (x in 0 until state.size) {
                 if (state.cellAt(x, y) == 0) add(GridCell(x, y))

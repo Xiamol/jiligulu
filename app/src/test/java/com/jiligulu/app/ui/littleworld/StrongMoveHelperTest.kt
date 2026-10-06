@@ -101,6 +101,28 @@ class StrongMoveHelperTest {
         assertEquals(2, winningPoints.size)
     }
 
+    @Test fun normalComputerPreventsAnOpenThreeBeforeItBecomesAnUnblockableFour() {
+        val state = gomoku(2, mapOf(GridCell(5, 7) to 1, GridCell(6, 7) to 1, GridCell(7, 7) to 1,
+            GridCell(3, 3) to 2, GridCell(4, 3) to 2))
+        val move = requireNotNull(GomokuEngine.chooseCpuMove(state))
+        assertTrue("$move must stop the live three", move == GridCell(4, 7) || move == GridCell(8, 7))
+    }
+
+    @Test fun normalComputerSeesTheSplitThreeAndNotJustContiguousStones() {
+        val state = gomoku(2, mapOf(GridCell(5, 7) to 1, GridCell(6, 7) to 1, GridCell(8, 7) to 1,
+            GridCell(3, 3) to 2, GridCell(4, 3) to 2))
+        val move = requireNotNull(GomokuEngine.chooseCpuMove(state))
+        assertTrue("$move allows a split-three fork", move in listOf(GridCell(4, 7), GridCell(7, 7), GridCell(9, 7)))
+    }
+
+    @Test fun normalAndSecretHelpersBothStopTheCrossForkIntersection() {
+        val state = gomoku(2, mapOf(GridCell(5, 7) to 1, GridCell(6, 7) to 1,
+            GridCell(7, 5) to 1, GridCell(7, 6) to 1, GridCell(2, 2) to 2))
+        val defenses = setOf(GridCell(7, 7), GridCell(4, 7), GridCell(8, 7), GridCell(7, 4), GridCell(7, 8))
+        assertTrue(GomokuEngine.chooseCpuMove(state) in defenses)
+        assertTrue(GomokuStrongMoveHelper.chooseMove(state) in defenses)
+    }
+
     @Test fun gomokuEmptyBoardStartsInTheCenterAndFinishedBoardsDoNotMove() {
         assertEquals(GridCell(7, 7), GomokuStrongMoveHelper.chooseMove(GomokuEngine.newGame()))
         assertNull(GomokuStrongMoveHelper.chooseMove(GomokuState(outcome = GomokuOutcome.DRAW)))

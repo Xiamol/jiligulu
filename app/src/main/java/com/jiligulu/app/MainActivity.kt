@@ -85,6 +85,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        com.jiligulu.app.core.audio.UiSound.warmup(applicationContext)
         if (savedInstanceState == null && intent?.action == Intent.ACTION_MAIN) {
             com.jiligulu.app.ui.capture.FloatingCaptureService.hiddenForSession.value = false
         }

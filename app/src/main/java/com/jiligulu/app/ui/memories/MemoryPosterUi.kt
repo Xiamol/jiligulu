@@ -1,6 +1,9 @@
 package com.jiligulu.app.ui.memories
 
 import android.os.Build
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import android.graphics.BitmapFactory
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -11,6 +14,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -23,47 +27,77 @@ import com.jiligulu.app.JiliguluApp
 import com.jiligulu.app.data.littleworld.MemoryCard
 import com.jiligulu.app.ui.components.LedgerCard
 import com.jiligulu.app.ui.components.SpringScrollColumn
+import com.jiligulu.app.ui.components.CompactFormField
+import com.jiligulu.app.ui.components.uiTap
+import androidx.compose.ui.platform.LocalConfiguration
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.NonCancellable
 import java.io.File
 import java.util.UUID
 
 @Composable
-fun LifePhotoField(path: String, onChange: (String) -> Unit, modifier: Modifier = Modifier) {
+fun LifePhotoField(path: String, onChange: (String) -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true,
+    onBusyChange: (Boolean) -> Unit = {}, shouldRetainCopies: () -> Boolean = { false }) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    var ownedCopies by rememberSaveable { mutableStateOf<List<String>>(emptyList()) }
     val currentChange by rememberUpdatedState(onChange)
+    val currentBusyChange by rememberUpdatedState(onBusyChange)
+    val currentEnabled by rememberUpdatedState(enabled)
+    val currentRetain by rememberUpdatedState(shouldRetainCopies)
+    DisposableEffect(context) { onDispose {
+        if (!context.changingConfiguration() && !currentRetain()) MemoryFiles.releaseDraftCopies(context, ownedCopies)
+    } }
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-        if (uri != null) scope.launch {
-            busy = true; error = null
-            try { currentChange(MemoryFiles.importPhoto(context, uri)) }
+        if (uri != null && currentEnabled) scope.launch {
+            busy = true; currentBusyChange(true); error = null
+            try {
+                val imported = MemoryFiles.importPhoto(context, uri)
+                val prior = ownedCopies
+                ownedCopies = prior + imported
+                currentChange(imported)
+                MemoryFiles.releaseDraftCopies(context, prior)
+            }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { error = "照片没能收好，再选一次试试。" }
-            finally { busy = false }
+            finally { busy = false; currentBusyChange(false) }
         }
     }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        if (path.isNotBlank()) MemoryPhoto(path, Modifier.fillMaxWidth().height(180.dp).clip(RoundedCornerShape(18.dp)))
+        if (path.isNotBlank()) MemoryPhoto(path, Modifier.fillMaxWidth().height(160.dp).clip(RoundedCornerShape(12.dp)))
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = { pick.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }, enabled = !busy) {
+            TextButton(onClick = uiTap { pick.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }, enabled = !busy && enabled,
+                modifier = Modifier.heightIn(min = 50.dp)) {
                 Text(if (busy) "正在夹好照片…" else if (path.isBlank()) "📎 夹一张生活照片" else "换张照片")
             }
-            if (path.isNotBlank()) TextButton(onClick = { onChange("") }, enabled = !busy) { Text("取下") }
+            if (path.isNotBlank()) TextButton(onClick = uiTap { onChange(""); MemoryFiles.releaseDraftCopies(context, ownedCopies) }, enabled = !busy && enabled) { Text("取下") }
         }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
     }
+}
+
+private fun Context.changingConfiguration(): Boolean {
+    var current: Context = this
+    repeat(12) {
+        if (current is Activity) return (current as Activity).isChangingConfigurations
+        val next = (current as? ContextWrapper)?.baseContext ?: return false
+        if (next === current) return false
+        current = next
+    }
+    return false
 }
 
 @Composable
 fun MemoryPosterButton(title: String, caption: String, photoPath: String, amountFen: Long? = null,
     dateMillis: Long? = null, modifier: Modifier = Modifier) {
     var open by remember { mutableStateOf(false) }
-    OutlinedButton(onClick = { open = true }, modifier = modifier) { Text("✦ 做张生活海报") }
+    TextButton(onClick = uiTap { open = true }, modifier = modifier) { Text("✦ 做张生活海报") }
     if (open) MemoryPosterDialog(PosterData(title, caption, photoPath, amountFen, dateMillis), onDismiss = { open = false })
 }
 
@@ -95,10 +129,26 @@ fun MemoryPosterDialog(data: PosterData, onDismiss: () -> Unit) {
     val generated = remember { mutableSetOf<File>() }
     val preserved = remember { mutableSetOf<File>() }
     val documentFile = remember { mutableStateOf<File?>(null) }
+    var disposed by remember { mutableStateOf(false) }
 
     suspend fun archive(current: File) {
-        repository.saveCard(MemoryCard(id = id, title = title.ifBlank { data.title }, caption = caption, imagePath = current.absolutePath))
+        val claim = MemoryFiles.claimPrivateMedia(context, current.absolutePath) ?: error("海报文件已不在了")
+        var failed = false
+        // Claim locally before yielding to DataStore, so a closing/rotating dialog cannot unlink
+        // an image whose durable reference is about to commit.
         preserved.add(current)
+        try {
+            withContext(NonCancellable) {
+                repository.saveCard(MemoryCard(id = id, title = title.ifBlank { data.title }, caption = caption, imagePath = current.absolutePath))
+            }
+        } catch (failure: Throwable) {
+            failed = true
+            preserved.remove(current)
+            throw failure
+        } finally {
+            claim.close()
+            if (failed && disposed) MemoryFiles.releaseDraftCopies(context, listOf(current.absolutePath))
+        }
     }
     fun act(action: suspend (File) -> Unit) {
         val current = file ?: return
@@ -131,22 +181,27 @@ fun MemoryPosterDialog(data: PosterData, onDismiss: () -> Unit) {
             generated.add(next)
             val previous = file
             file = next
-            if (previous != null && previous !in preserved) withContext(Dispatchers.IO) { previous.delete() }
+            if (previous != null && previous !in preserved) MemoryFiles.releaseDraftCopies(context, listOf(previous.absolutePath))
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (_: Exception) { error = "海报还没画好，再试一次吧。" }
         finally { rendering = false }
     }
-    DisposableEffect(Unit) { onDispose { generated.filterNot { it in preserved }.forEach { it.delete() } } }
+    DisposableEffect(Unit) { onDispose {
+        disposed = true
+        MemoryFiles.releaseDraftCopies(context, generated.filterNot { it in preserved }.map { it.absolutePath })
+    } }
     Dialog(onDismissRequest = { if (!busy) onDismiss() }, properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = !busy, dismissOnBackPress = !busy)) {
-        LedgerCard(Modifier.fillMaxWidth(.9f).widthIn(max = 380.dp).heightIn(max = 720.dp).imePadding()) {
+        com.jiligulu.app.ui.capture.DialogGlassBackdrop()
+        LedgerCard(Modifier.widthIn(max = 300.dp).fillMaxWidth().heightIn(max = (LocalConfiguration.current.screenHeightDp * .78f).dp)
+            .imePadding(), contentPadding = 12.dp) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("把生活做成一张小海报", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
-                TextButton(onClick = onDismiss, enabled = !busy) { Text("关闭") }
+                Text("这一页生活", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
+                TextButton(onClick = uiTap(onDismiss), enabled = !busy) { Text("关闭") }
             }
-            SpringScrollColumn(Modifier.weight(1f, fill = false), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            SpringScrollColumn(Modifier.weight(1f, fill = false), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 // The actual shareable artwork leads. Its measured aspect ratio accommodates
                 // whole portrait photos and shorter, denser weekly postcards without stretching.
-                Box(Modifier.fillMaxWidth().height(300.dp).clip(RoundedCornerShape(18.dp))
+                Box(Modifier.fillMaxWidth().height(220.dp).clip(RoundedCornerShape(12.dp))
                     .background(MaterialTheme.colorScheme.surfaceContainerLow), contentAlignment = Alignment.Center) {
                     file?.let { MemoryPhoto(it.absolutePath, Modifier.fillMaxHeight().aspectRatio(previewRatio)
                         .clip(RoundedCornerShape(10.dp)), ContentScale.Fit) }
@@ -154,26 +209,26 @@ fun MemoryPosterDialog(data: PosterData, onDismiss: () -> Unit) {
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (data.amountFen != null || data.week != null) {
-                        Checkbox(checked = showAmount, onCheckedChange = { showAmount = it }); Text("展示金额", style = MaterialTheme.typography.bodySmall)
+                        Checkbox(checked = showAmount, onCheckedChange = { com.jiligulu.app.core.audio.UiSound.tap(context); showAmount = it }, enabled = !busy); Text("金额", style = MaterialTheme.typography.bodySmall)
                     }
                     Spacer(Modifier.weight(1f))
-                    TextButton(onClick = { stamp = when (stamp) { seasonalStamp -> "好好生活"; "好好生活" -> "小小快乐"; "小小快乐" -> "愿望成真"; else -> seasonalStamp } }) { Text("$stamp ▾") }
+                    TextButton(onClick = uiTap { stamp = when (stamp) { seasonalStamp -> "好好生活"; "好好生活" -> "小小快乐"; "小小快乐" -> "愿望成真"; else -> seasonalStamp } }, enabled = !busy) { Text("$stamp ▾") }
                 }
-                OutlinedTextField(title, { title = it.take(32) }, label = { Text(if (data.week == null) "给这一刻起个名字" else "给这一周起个名字") }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp), singleLine = true)
-                OutlinedTextField(caption, { caption = it.take(120) }, label = { Text("留一句话") }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp), maxLines = 3)
+                CompactFormField("名字", title, { title = it.take(32) }, placeholder = if (data.week == null) "给这一刻起个名字" else "给这一周起个名字", enabled = !busy)
+                CompactFormField("一句话", caption, { caption = it.take(120) }, singleLine = false, enabled = !busy)
                 Text("金额默认藏好，只把你想分享的生活留下。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { act { MemoryPoster.share(context, it) } }, enabled = !rendering && !busy && file != null, modifier = Modifier.weight(1f)) { Text("分享") }
-                Button(onClick = { act {
+                OutlinedButton(onClick = uiTap { act { MemoryPoster.share(context, it) } }, enabled = !rendering && !busy && file != null, modifier = Modifier.weight(1f)) { Text("分享") }
+                Button(onClick = uiTap { act {
                     if (Build.VERSION.SDK_INT >= 29) {
                         MemoryPoster.saveGallery(context, it)
                         Toast.makeText(context, "存进相册和纪念册啦 ♡", Toast.LENGTH_SHORT).show()
                     } else { documentFile.value = it; createDocument.launch("阿噜生活小海报.png") }
                 } }, enabled = !rendering && !busy && file != null, modifier = Modifier.weight(1f)) { Text(if (busy) "收好中…" else "保存图片") }
             }
-            TextButton(onClick = { act { Toast.makeText(context, "已经夹进生活纪念册啦 ♡", Toast.LENGTH_SHORT).show() } }, enabled = !rendering && !busy && file != null, modifier = Modifier.align(Alignment.CenterHorizontally)) { Text("只存进生活纪念册") }
+            TextButton(onClick = uiTap { act { Toast.makeText(context, "已经夹进生活纪念册啦 ♡", Toast.LENGTH_SHORT).show() } }, enabled = !rendering && !busy && file != null, modifier = Modifier.align(Alignment.CenterHorizontally)) { Text("只夹进纪念册") }
         }
     }
 }

@@ -8,6 +8,8 @@ import android.os.Looper
 import android.view.PixelCopy
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.isDisplayed
+import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.swipeDown
@@ -19,6 +21,15 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.hasScrollToIndexAction
+import androidx.compose.ui.test.hasAnyDescendant
+import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.isDialog
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.TouchInjectionScope
+import androidx.compose.runtime.snapshots.Snapshot
+import org.junit.After
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onAllNodesWithTag
@@ -57,6 +68,9 @@ import com.jiligulu.app.domain.persona.QuipLibrary
 import androidx.lifecycle.ViewModelStore
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.viewModelScope
 import okhttp3.OkHttpClient
 import okhttp3.Response
 import okhttp3.Protocol
@@ -70,6 +84,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestCoroutineScheduler
@@ -88,6 +103,9 @@ import org.robolectric.annotation.LooperMode
 import org.robolectric.shadows.ShadowDialog
 import java.io.File
 import java.time.Duration
+import java.util.concurrent.FutureTask
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.locks.LockSupport
 
 /** Actual Compose screens under Robolectric; screenshots are layout checks, not device captures. */
 @RunWith(RobolectricTestRunner::class)
@@ -101,6 +119,177 @@ class UiSmokeScreenshotTest {
     private val effectScheduler = TestCoroutineScheduler()
     @get:Rule val compose = createEmptyComposeRule(effectContext = StandardTestDispatcher(effectScheduler))
     private lateinit var activity: MainActivity
+    private val boundActivities = mutableSetOf<MainActivity>()
+    private val fixtureViewModelJobs = mutableSetOf<Job>()
+
+    private fun rememberFixtureViewModel(model: ViewModel) {
+        model.viewModelScope.coroutineContext[Job]?.let { fixtureViewModelJobs += it }
+    }
+
+    private fun rememberFixtureStore(store: ViewModelStore, seen: MutableSet<ViewModelStore> = mutableSetOf()) {
+        if (!seen.add(store)) return
+        store.keys().forEach { key ->
+            store[key]?.let { model ->
+                rememberFixtureViewModel(model)
+                // Navigation 2.8.5 keeps destination stores inside this internal owner. Those
+                // query jobs must finish too; inspecting ownership does not alter their data.
+                if (model.javaClass.name == "androidx.navigation.NavControllerViewModel") {
+                    val stores = model.javaClass.getDeclaredField("viewModelStores").apply { isAccessible = true }
+                        .get(model) as Map<*, *>
+                    stores.values.filterIsInstance<ViewModelStore>().forEach { rememberFixtureStore(it, seen) }
+                }
+            }
+        }
+    }
+
+    private fun rememberLiveActivityModels() {
+        if (::activity.isInitialized && !activity.isDestroyed) rememberFixtureStore(activity.viewModelStore)
+    }
+
+    private fun bindActivity(bound: MainActivity) {
+        activity = bound
+        if (boundActivities.add(bound)) {
+            // Destroy is dispatched in reverse observer order; remember the owners before
+            // ComponentActivity clears its store. Stop also covers recreation/early teardown.
+            bound.lifecycle.addObserver(LifecycleEventObserver { _, event ->
+                if (event == Lifecycle.Event.ON_STOP || event == Lifecycle.Event.ON_DESTROY) {
+                    rememberFixtureStore(bound.viewModelStore)
+                }
+            })
+        }
+    }
+
+    private fun pumpFixtureCancellation() {
+        effectScheduler.runCurrent()
+        Snapshot.sendApplyNotifications()
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(16))
+    }
+
+    @After
+    fun releaseFixtureAndFlushSnapshotNotifications() {
+        compose.mainClock.autoAdvance = true
+        if (::activity.isInitialized && !activity.isDestroyed) {
+            // Cleanup must not wait for a hierarchy whose failed held gesture prevented idleness.
+            InstrumentationRegistry.getInstrumentation().runOnMainSync {
+                activity.setContent {}
+                rememberFixtureStore(activity.viewModelStore)
+                activity.viewModelStore.clear()
+            }
+        }
+        Snapshot.sendApplyNotifications()
+        effectScheduler.runCurrent()
+        shadowOf(Looper.getMainLooper()).idle()
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
+        // ViewModelStore.clear requests cancellation but Room's blocking cursor query may still
+        // be unwinding on arch_disk_io. Closing/resetting SQLite before that completion races it.
+        while (fixtureViewModelJobs.any { !it.isCompleted } && System.nanoTime() < deadline) {
+            pumpFixtureCancellation()
+            LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(1))
+        }
+        assertTrue("Fixture ViewModel cancellation exceeded 10 seconds", fixtureViewModelJobs.all { it.isCompleted })
+        val container = (RuntimeEnvironment.getApplication() as JiliguluApp).container
+        // Room/SQLite opening and closing take locks; neither belongs on SDK Main. Keep Main
+        // available to finish disposal/cancellation, and fail boundedly if fixture I/O stalls.
+        val close = FutureTask<Unit> { container.closeLedgerForTests() }
+        val worker = Thread(close, "UiSmoke-ledger-close").apply { isDaemon = true }
+        worker.start()
+        while (!close.isDone && System.nanoTime() < deadline) {
+            pumpFixtureCancellation()
+            LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(1))
+        }
+        if (!close.isDone) {
+            val stack = worker.stackTrace.joinToString("\n") { it.toString() }
+            close.cancel(true)
+            throw AssertionError("Ledger fixture close exceeded 10 seconds\n$stack")
+        }
+        close.get()
+        Snapshot.sendApplyNotifications()
+    }
+
+    private fun whileFingerHeld(tag: String, gesture: TouchInjectionScope.() -> Unit, inspect: () -> Unit) {
+        var began = false
+        var failure: Throwable? = null
+        try {
+            compose.onNodeWithTag(tag).performTouchInput { began = true; gesture() }
+            inspect()
+        } catch (caught: Throwable) {
+            failure = caught
+            throw caught
+        } finally {
+            if (began) try { compose.onNodeWithTag(tag).performTouchInput { up() } }
+            catch (cleanup: Throwable) { if (failure != null) failure.addSuppressed(cleanup) else throw cleanup }
+        }
+    }
+
+    private fun visibleText(text: String): androidx.compose.ui.test.SemanticsNodeInteraction {
+        val nodes = compose.onAllNodesWithText(text)
+        val visible = nodes.fetchSemanticsNodes().indices.filter { nodes[it].isDisplayed() }
+        assertEquals("Exactly one visible '$text' control is expected", 1, visible.size)
+        return nodes[visible.single()]
+    }
+
+    private fun visibleClickableText(text: String): androidx.compose.ui.test.SemanticsNodeInteraction {
+        val nodes = compose.onAllNodes(hasText(text) and hasClickAction())
+        // HorizontalPager may still keep the previous page's plain category text composed.
+        // Wait for the actual target control, rather than treating that text as loaded stats.
+        try {
+            compose.waitUntil(8_000) {
+                shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(16))
+                nodes.fetchSemanticsNodes().indices.count { nodes[it].isDisplayed() } == 1
+            }
+        } catch (failure: Throwable) {
+            val tree = runCatching { allRootsSemantics() }.getOrElse { "Semantics unavailable: $it" }
+            throw AssertionError("Waiting for one visible clickable '$text'\n$tree", failure)
+        }
+        val visible = nodes.fetchSemanticsNodes().indices.filter { nodes[it].isDisplayed() }
+        assertEquals("Exactly one visible clickable '$text' is expected", 1, visible.size)
+        return nodes[visible.single()]
+    }
+
+    private fun visibleDescription(description: String): androidx.compose.ui.test.SemanticsNodeInteraction {
+        val nodes = compose.onAllNodesWithContentDescription(description)
+        // A scene title can appear before its decoded artwork exposes the real hit target.
+        try {
+            compose.waitUntil(8_000) {
+                shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(16))
+                nodes.fetchSemanticsNodes().indices.count { nodes[it].isDisplayed() } == 1
+            }
+        } catch (failure: Throwable) {
+            val tree = runCatching { allRootsSemantics() }.getOrElse { "Semantics unavailable: $it" }
+            throw AssertionError("Waiting for one visible '$description' control\n$tree", failure)
+        }
+        val visible = nodes.fetchSemanticsNodes().indices.filter { nodes[it].isDisplayed() }
+        assertEquals("Exactly one visible '$description' control is expected", 1, visible.size)
+        return nodes[visible.single()]
+    }
+
+    private fun visibleClickLabel(label: String): androidx.compose.ui.test.SemanticsNodeInteraction {
+        val nodes = compose.onAllNodes(SemanticsMatcher("OnClick label '$label'") { node ->
+            node.config.contains(SemanticsActions.OnClick) && node.config[SemanticsActions.OnClick].label == label
+        })
+        try {
+            compose.waitUntil(8_000) {
+                shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(16))
+                nodes.fetchSemanticsNodes().indices.count { nodes[it].isDisplayed() } == 1
+            }
+        } catch (failure: Throwable) {
+            val tree = runCatching { allRootsSemantics() }.getOrElse { "Semantics unavailable: $it" }
+            throw AssertionError("Waiting for one visible '$label' action\n$tree", failure)
+        }
+        val visible = nodes.fetchSemanticsNodes().indices.filter { nodes[it].isDisplayed() }
+        assertEquals("Exactly one visible '$label' action is expected", 1, visible.size)
+        return nodes[visible.single()]
+    }
+
+    private fun allRootsSemantics(): String {
+        val roots = compose.onAllNodes(isRoot())
+        return roots.fetchSemanticsNodes().indices.joinToString("\n\n") { index -> roots[index].printToString() }
+    }
+
+    private fun currentStatisticsList(): androidx.compose.ui.test.SemanticsNodeInteraction {
+        val node = compose.onNode(hasScrollToIndexAction() and hasAnyDescendant(hasText("每日收支"))).fetchSemanticsNode()
+        return compose.onNode(SemanticsMatcher("statistics list with stable id ${node.id}") { it.id == node.id })
+    }
 
     @Test(timeout = 120_000)
     fun homeDetailsStatisticsAndSettingsRenderInBothThemes() {
@@ -111,6 +300,8 @@ class UiSmokeScreenshotTest {
             container.userPrefs.setThemeMode(UserPrefs.THEME_LIGHT)
             container.userPrefs.setWaterEnabled(false)
             container.userPrefs.setUpdateRepository("")
+            container.userPrefs.setAnnouncementSource("")
+            container.announcements.initialize()
             val food = container.categoryRepository.getAll().first { it.name == "吃饭" }.id
             val drinks = container.categoryRepository.getAll().first { it.name == "饮品" }.id
             val travel = container.categoryRepository.createCategory("交通", iconValue = "🚇")
@@ -130,21 +321,22 @@ class UiSmokeScreenshotTest {
         }
 
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
-            scenario.onActivity { activity = it }
+            scenario.onActivity { bindActivity(it) }
             awaitText("账本")
             awaitText("牛肉面")
-            compose.onNodeWithText("叽里咕噜").assertIsDisplayed()
+            visibleText("叽里咕噜").assertIsDisplayed()
             compose.onNodeWithText("统计").assertIsDisplayed()
-            compose.onNodeWithContentDescription("设置").assertIsDisplayed()
+            visibleDescription("设置").assertIsDisplayed()
             val lightBackground = capture("home-light")
             captureLauncherIcon()
 
             compose.onNodeWithText("记一笔").performClick()
-            awaitText("保存这一笔")
+            awaitText("确认记账")
             capture("manual-entry-light")
-            compose.onNodeWithText("账单时间").performScrollTo().assertIsDisplayed()
-            compose.onNodeWithText("选择日期").assertIsDisplayed()
-            compose.onNodeWithText("选择时间").assertIsDisplayed()
+            compose.onNodeWithTag("manual-date").assertIsDisplayed()
+            compose.onNodeWithTag("manual-time").assertIsDisplayed()
+            compose.onNodeWithTag("manual-photo-picker").assertIsDisplayed()
+            compose.onNodeWithContentDescription("打开阿噜小算盘").assertIsDisplayed()
             capture("manual-time-light")
             compose.onNodeWithContentDescription("返回").performClick()
             awaitText("对话记账")
@@ -163,24 +355,32 @@ class UiSmokeScreenshotTest {
 
             openSampleBill()
             awaitText("保存修改")
-            compose.onNodeWithText("账单名称").assertIsDisplayed()
+            compose.onNodeWithContentDescription("细则").assertIsDisplayed()
             capture("bill-detail-light", dialog = true)
-            compose.onNodeWithText("关闭").performClick()
+            compose.onNode(hasText("关闭") and hasAnyAncestor(hasAnyDescendant(hasText("这一笔小账"))))
+                .performSemanticsAction(SemanticsActions.OnClick) { it() }
 
             compose.onNodeWithText("统计").performClick()
-            awaitText("收支统计")
-            compose.onAllNodes(hasScrollToIndexAction()).onFirst().performScrollToIndex(3)
-            awaitText("吃饭", substring = true)
-            compose.onAllNodesWithText("吃饭", substring = true).onFirst().performClick()
-            awaitText("牛肉面")
-            compose.onAllNodesWithText("牛肉面").onFirst().performClick()
+            awaitText("每日收支")
+            val statisticsList = currentStatisticsList()
+            statisticsList.performScrollToIndex(2)
+            awaitText("吃饭")
+            visibleClickableText("吃饭").performClick()
+            visibleClickableText("吃饭").performClick()
+            awaitText("吃饭的小账单")
+            visibleClickableText("牛肉面").performClick()
             awaitText("保存修改")
-            compose.onNodeWithText("关闭").performClick()
-            compose.onAllNodes(hasScrollToIndexAction()).onFirst().performScrollToIndex(0)
+            compose.onNode(hasText("关闭") and hasAnyAncestor(hasAnyDescendant(hasText("这一笔小账"))))
+                .performSemanticsAction(SemanticsActions.OnClick) { it() }
+            val remainingCategoryDialog = compose.onAllNodes(hasText("吃饭的小账单") and hasAnyAncestor(isDialog()))
+            if (remainingCategoryDialog.fetchSemanticsNodes().isNotEmpty()) visibleClickableText("关闭").performClick()
+            statisticsList.performScrollToIndex(0)
+            awaitText("每日收支")
+            compose.onAllNodesWithText("保存修改").fetchSemanticsNodes().let { assertTrue(it.isEmpty()) }
             capture("statistics-light")
 
-            compose.onNodeWithContentDescription("设置").performClick()
-            awaitText("保存设置")
+            visibleDescription("设置").performClick()
+            awaitText("你的称呼")
             capture("settings-light")
             compose.onNodeWithText("关于").performClick()
             scrollSettingsTo("阿噜使用手册")
@@ -192,7 +392,7 @@ class UiSmokeScreenshotTest {
             compose.onNodeWithText("阿噜使用手册 ♡").assertDoesNotExist()
             compose.onNodeWithContentDescription("返回").performClick()
             compose.onNodeWithText("账本").performClick()
-            compose.onAllNodes(hasScrollToIndexAction()).onFirst().performScrollToIndex(0)
+            compose.onNodeWithTag("home-outer").performScrollToIndex(0)
 
             runBlocking {
                 app.container.userPrefs.setThemeMode(UserPrefs.THEME_DARK)
@@ -202,18 +402,20 @@ class UiSmokeScreenshotTest {
             compose.mainClock.advanceTimeBy(500)
             val darkBackground = capture("home-dark")
             assertNotEquals("Theme preference must change the rendered background", lightBackground, darkBackground)
-            compose.onNodeWithContentDescription("设置").performClick()
-            awaitText("保存设置")
+            visibleDescription("设置").performClick()
+            awaitText("你的称呼")
             capture("settings-dark")
             compose.onNodeWithContentDescription("返回").performClick()
+            compose.onNodeWithText("账本").performClick()
+            compose.onNodeWithTag("home-outer").performScrollToIndex(0)
             awaitText("对话记账")
             compose.onNodeWithText("对话记账").performClick()
             awaitText("历史记录验收")
             capture("chat-dark")
             compose.onNodeWithContentDescription("返回").performClick()
             awaitText("账本")
-            compose.onNodeWithContentDescription("设置").performClick()
-            awaitText("保存设置")
+            visibleDescription("设置").performClick()
+            awaitText("你的称呼")
             val cup = runBlocking {
                 app.container.userPrefs.setWaterEnabled(true)
                 app.container.userPrefs.markWaterDue(System.currentTimeMillis(), "水杯准备好啦，一起喝一口，阿噜！")
@@ -247,8 +449,8 @@ class UiSmokeScreenshotTest {
             }
             assertTrue(runBlocking { !app.container.userPrefs.pendingWater.first().isPending })
             capture("water-completed")
-            compose.onNodeWithContentDescription("设置").performClick()
-            awaitText("保存设置")
+            visibleDescription("设置").performClick()
+            awaitText("你的称呼")
             compose.onNodeWithText("关于").performClick()
             scrollSettingsTo("检查更新")
             compose.waitForIdle()
@@ -306,7 +508,7 @@ class UiSmokeScreenshotTest {
                     detail = "补记午饭", timestamp = System.currentTimeMillis())))))
         }
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
-            scenario.onActivity { activity = it }
+            scenario.onActivity { bindActivity(it) }
             awaitText("对话记账")
             compose.onNodeWithText("对话记账").performClick()
             awaitText("展开 · 编辑草稿")
@@ -389,7 +591,7 @@ class UiSmokeScreenshotTest {
                     summary = "喝水提醒：开启\n提醒间隔：60 → 15 分钟"))))
         }
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
-            scenario.onActivity { activity = it }
+            scenario.onActivity { bindActivity(it) }
             awaitText("对话记账")
             compose.onNodeWithText("对话记账").performClick()
             awaitText("确认调整")
@@ -443,11 +645,12 @@ class UiSmokeScreenshotTest {
             override fun <T : ViewModel> create(modelClass: Class<T>): T =
                 ChatViewModel(ai, container.categoryRepository, PersonaEngine(QuipLibrary.get(app)), history) as T
         })[ChatViewModel::class.java]
+        rememberFixtureViewModel(model)
         val visible = androidx.compose.runtime.mutableStateOf(true)
         try {
             ActivityScenario.launch(MainActivity::class.java).use { scenario ->
                 scenario.onActivity {
-                    activity = it
+                    bindActivity(it)
                     it.setContent {
                         GuluTheme {
                             if (visible.value) ChatScreen(vm = model, onBack = { visible.value = false })
@@ -505,10 +708,10 @@ class UiSmokeScreenshotTest {
         }
         repeat(2) {
             ActivityScenario.launch(MainActivity::class.java).use { scenario ->
-                scenario.onActivity { activity = it }
+                scenario.onActivity { bindActivity(it) }
                 awaitText("对话记账")
                 assertTrue(app.container.startupCompleted)
-                compose.onNodeWithContentDescription("设置").assertIsDisplayed()
+                visibleDescription("设置").assertIsDisplayed()
                 compose.runOnIdle { activity.setContent {} }
             }
         }
@@ -530,7 +733,7 @@ class UiSmokeScreenshotTest {
         }
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             scenario.onActivity {
-                activity = it
+                bindActivity(it)
                 it.setContent {
                     GuluTheme {
                         val state = notices.state.collectAsStateWithLifecycle().value
@@ -569,7 +772,7 @@ class UiSmokeScreenshotTest {
             app.container.announcements.initialize()
         }
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
-            scenario.onActivity { activity = it }
+            scenario.onActivity { bindActivity(it) }
             awaitText("对话记账")
             compose.onNodeWithTag("main-mailbox").performClick()
             awaitTag("announcement-empty")
@@ -594,7 +797,7 @@ class UiSmokeScreenshotTest {
         }
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             scenario.onActivity {
-                activity = it
+                bindActivity(it)
                 it.setContent { GuluTheme {
                     androidx.compose.foundation.layout.Column(androidx.compose.ui.Modifier.fillMaxSize()) {
                         com.jiligulu.app.ui.stats.charts.CashFlowBarChart(
@@ -604,7 +807,8 @@ class UiSmokeScreenshotTest {
                     }
                 } }
             }
-            awaitText("♡ 24日 · ¥28.8")
+            awaitText("今天")
+            compose.onNodeWithContentDescription("24日，28.8元，已选中").assertIsDisplayed()
             capture("statistics-soft-bars")
             compose.runOnIdle { activity.setContent { GuluTheme { com.jiligulu.app.ui.settings.SettingsScreen(onBack = {}) } } }
             awaitText("你的称呼")
@@ -625,7 +829,7 @@ class UiSmokeScreenshotTest {
             c.userPrefs.setAnnouncementSource(""); c.announcements.initialize()
         }
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
-            scenario.onActivity { activity = it; it.setContent { GuluTheme {
+            scenario.onActivity { bindActivity(it); it.setContent { GuluTheme {
                 com.jiligulu.app.ui.main.MainScreen({}, {}, {})
             } } }
             awaitTag("home-outer")
@@ -670,10 +874,11 @@ class UiSmokeScreenshotTest {
         val store = ViewModelStore()
         val stats = com.jiligulu.app.ui.stats.StatsViewModel(c.billRepository, c.categoryRepository, c.budgetRepository)
         store.put("stats-preview", stats)
+        rememberFixtureViewModel(stats)
         val active = androidx.compose.runtime.mutableStateOf(true)
         try {
             ActivityScenario.launch(MainActivity::class.java).use { scenario ->
-                scenario.onActivity { activity = it; it.setContent { GuluTheme { com.jiligulu.app.ui.stats.StatsScreen(stats, active.value) } } }
+                scenario.onActivity { bindActivity(it); it.setContent { GuluTheme { com.jiligulu.app.ui.stats.StatsScreen(stats, active.value) } } }
                 awaitText("每日收支")
                 awaitText("吃饭")
                 compose.waitUntil(8000) { shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(16)); stats.dayDonut.value.slices.size == 7 }
@@ -710,29 +915,27 @@ class UiSmokeScreenshotTest {
         val home = com.jiligulu.app.ui.home.HomeViewModel(c.billRepository, c.categoryRepository)
         val stats = com.jiligulu.app.ui.stats.StatsViewModel(c.billRepository, c.categoryRepository, c.budgetRepository)
         store.put("home-preview", home); store.put("stats-preview", stats)
+        rememberFixtureViewModel(home); rememberFixtureViewModel(stats)
         try {
             ActivityScenario.launch(MainActivity::class.java).use { scenario ->
-                scenario.onActivity { activity = it; it.setContent { GuluTheme { com.jiligulu.app.ui.home.HomeScreen({}, {}, home) } } }
+                scenario.onActivity { bindActivity(it); it.setContent { GuluTheme { com.jiligulu.app.ui.home.HomeScreen({}, {}, home) } } }
                 awaitText("今天-11")
                 // Leave the ledger partially below its pin position: horizontal navigation must not collapse the overview.
                 compose.onNodeWithTag("home-outer").performScrollToIndex(com.jiligulu.app.ui.home.HOME_LEDGER_ITEM_INDEX - 1)
                 compose.mainClock.advanceTimeBy(300)
                 compose.waitForIdle()
-                compose.waitForIdle()
-            compose.mainClock.advanceTimeBy(350)
-            compose.waitForIdle()
-            val before = compose.onNodeWithTag("home-ledger-heading").fetchSemanticsNode().boundsInRoot.top
-                compose.onNodeWithTag("home-day-pager").performTouchInput {
+                val before = compose.onNodeWithTag("home-ledger-heading").fetchSemanticsNode().boundsInRoot.top
+                whileFingerHeld("home-day-pager", gesture = {
                     down(Offset(width * .15f, height * .6f))
                     moveTo(Offset(width * .25f, height * .6f), delayMillis = 70)
                     moveTo(Offset(width * .48f, height * .6f), delayMillis = 100)
                     moveTo(Offset(width * .78f, height * .6f), delayMillis = 160)
+                }) {
+                    assertEquals(today, home.selectedDay.value)
+                    capture("home-finger-held-pages")
+                    File("build/reports/ui/pager-held-semantics.txt").writeText(compose.onNodeWithTag("home-day-pager").printToString(5))
+                    compose.onNodeWithText("昨天唯一账单").assertIsDisplayed()
                 }
-                assertEquals(today, home.selectedDay.value)
-                capture("home-finger-held-pages")
-                File("build/reports/ui/pager-held-semantics.txt").writeText(compose.onNodeWithTag("home-day-pager").printToString(5))
-                compose.onNodeWithText("昨天唯一账单").assertIsDisplayed()
-                compose.onNodeWithTag("home-day-pager").performTouchInput { up() }
                 compose.waitUntil(8000) { shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(16)); home.selectedDay.value == yesterday }
                 assertEquals(before, compose.onNodeWithTag("home-ledger-heading").fetchSemanticsNode().boundsInRoot.top, 2f)
                 compose.runOnIdle { home.showToday() }
@@ -741,19 +944,22 @@ class UiSmokeScreenshotTest {
                 assertEquals(today, home.selectedDay.value)
                 compose.waitUntil(8000) { shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(16)); compose.onAllNodesWithTag("home-day-bills").fetchSemanticsNodes().size == 1 }
                 compose.onNodeWithTag("home-outer").performScrollToIndex(com.jiligulu.app.ui.home.HOME_LEDGER_ITEM_INDEX)
-                compose.onNodeWithTag("home-day-bills").performScrollToIndex(11)
+                compose.onNodeWithTag("home-day-bills").performScrollToIndex(0)
                 compose.mainClock.advanceTimeBy(300)
                 compose.waitForIdle()
                 val pinned = compose.onNodeWithTag("home-ledger-heading").fetchSemanticsNode().boundsInRoot.top
-                compose.onNodeWithTag("home-day-bills").performTouchInput {
+                val billsTop = compose.onNodeWithTag("home-day-bills").fetchSemanticsNode().boundsInRoot.top
+                whileFingerHeld("home-day-bills", gesture = {
                     down(Offset(width * .5f, height * .2f))
                     moveTo(Offset(width * .5f, height * .4f), delayMillis = 70)
                     moveTo(Offset(width * .5f, height * .75f), delayMillis = 140)
+                }) {
+                    compose.mainClock.advanceTimeBy(32)
+                    // The spring belongs to the list; moving its heading leaves an empty strip.
+                    assertEquals(pinned, compose.onNodeWithTag("home-ledger-heading").fetchSemanticsNode().boundsInRoot.top, 2f)
+                    assertTrue(compose.onNodeWithTag("home-day-bills").fetchSemanticsNode().boundsInRoot.top > billsTop + 4)
+                    capture("home-first-pull-stretch")
                 }
-                compose.mainClock.advanceTimeBy(32)
-                assertTrue(compose.onNodeWithTag("home-ledger-heading").fetchSemanticsNode().boundsInRoot.top > pinned + 4)
-                capture("home-first-pull-stretch")
-                compose.onNodeWithTag("home-day-bills").performTouchInput { up() }
                 compose.mainClock.advanceTimeBy(1200)
                 assertEquals(pinned, compose.onNodeWithTag("home-ledger-heading").fetchSemanticsNode().boundsInRoot.top, 2f)
                 scenario.moveToState(androidx.lifecycle.Lifecycle.State.CREATED)
@@ -768,21 +974,27 @@ class UiSmokeScreenshotTest {
                 assertTrue(compose.onNodeWithTag("home-ledger-heading").fetchSemanticsNode().boundsInRoot.top > pinned + 10)
                 compose.runOnIdle { activity.setContent { GuluTheme { com.jiligulu.app.ui.stats.StatsScreen(stats) } } }
                 awaitText("每日收支")
-                compose.onAllNodes(hasScrollToIndexAction()).onFirst().performScrollToIndex(3)
+                currentStatisticsList().performScrollToIndex(2)
                 awaitTag("statistics-day-swipe")
-                compose.onNodeWithTag("statistics-day-swipe").performTouchInput {
+                whileFingerHeld("statistics-day-swipe", gesture = {
                     down(Offset(width * .15f, height * .35f))
                     moveTo(Offset(width * .25f, height * .35f), delayMillis = 70)
                     moveTo(Offset(width * .48f, height * .35f), delayMillis = 100)
                     moveTo(Offset(width * .78f, height * .35f), delayMillis = 160)
+                }) {
+                    assertEquals(today, stats.selectedDay.value)
+                    capture("statistics-release-swipe")
                 }
-                assertEquals(today, stats.selectedDay.value)
-                capture("statistics-release-swipe")
-                compose.onNodeWithTag("statistics-day-swipe").performTouchInput { up() }
                 compose.waitUntil(8000) { shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(16)); stats.selectedDay.value == yesterday }
                 compose.runOnIdle { activity.setContent {} }
             }
-        } finally { store.clear() }
+        } finally {
+            if (::activity.isInitialized && !activity.isDestroyed) {
+                InstrumentationRegistry.getInstrumentation().runOnMainSync { activity.setContent {} }
+            }
+            store.clear()
+            Snapshot.sendApplyNotifications()
+        }
     }
 
     @Test(timeout = 45_000)
@@ -793,7 +1005,7 @@ class UiSmokeScreenshotTest {
             c.userPrefs.setAnnouncementSource("");c.announcements.initialize()
         }
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
-            scenario.onActivity { activity=it;it.setContent { GuluTheme { com.jiligulu.app.ui.stickers.StickerDrawer({}, {}) } } }
+            scenario.onActivity { bindActivity(it);it.setContent { GuluTheme { com.jiligulu.app.ui.stickers.StickerDrawer({}, {}) } } }
             awaitText("阿噜的贴纸墙");awaitText("早餐")
             compose.mainClock.advanceTimeBy(500);compose.waitForIdle()
             capture("sticker-drawer",dialog=true)
@@ -819,7 +1031,7 @@ class UiSmokeScreenshotTest {
             c.littleWorld.saveFutureNote(com.jiligulu.app.data.littleworld.FutureNote(id = "ui-future-note", title = "旅行前给自己的一句话", body = "到海边的时候，记得慢慢走，吹一会儿风。", dueAt = System.currentTimeMillis() + 2 * 86_400_000L))
         }
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
-            scenario.onActivity { activity = it }
+            scenario.onActivity { bindActivity(it) }
             fun render(content: @androidx.compose.runtime.Composable () -> Unit) {
                 compose.runOnIdle { activity.setContent { GuluTheme(darkTheme = false) { content() } } }
             }
@@ -827,21 +1039,45 @@ class UiSmokeScreenshotTest {
             render { com.jiligulu.app.ui.littleworld.LittleWorldScreen({}, {}, {}, {}) }
             awaitText("今日小签")
             capture("little-world-home")
-            compose.onNodeWithText("抽一张，看看今天的小温柔 ✨").performClick()
-            awaitText("今天就这一张，明天再来呀")
-            capture("little-world-fortune")
+            compose.onNodeWithText("今日小签").performClick()
+            awaitText("翻翻收藏")
+            val collectionPosition = compose.onNodeWithText("翻翻收藏").getUnclippedBoundsInRoot()
+            val todayFortune = com.jiligulu.app.ui.littleworld.DailyFortunes.forDate(java.time.LocalDate.now())
+            val wasSaved = runBlocking { todayFortune.id in c.littleWorld.snapshot().favoriteFortunes }
+            compose.onNodeWithText(if (wasSaved) "已收藏" else "收藏").performClick()
+            try {
+                compose.waitUntil(8_000) {
+                    shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(16))
+                    runBlocking { (todayFortune.id in c.littleWorld.snapshot().favoriteFortunes) != wasSaved }
+                }
+            } catch (failure: Throwable) {
+                val actual = runBlocking { c.littleWorld.snapshot().favoriteFortunes }
+                val tree = runCatching { allRootsSemantics() }.getOrElse { "Semantics unavailable: $it" }
+                throw AssertionError("Bookmark did not toggle id=${todayFortune.id}, before=$wasSaved, after=$actual\n$tree", failure)
+            }
+            awaitText(if (wasSaved) "收藏" else "已收藏")
+            assertEquals(collectionPosition, compose.onNodeWithText("翻翻收藏").getUnclippedBoundsInRoot())
+            capture("little-world-fortune", dialog = true)
+            compose.onNodeWithText("知道啦").performClick()
 
             render { com.jiligulu.app.ui.littleworld.WishBookScreen({}, {}) }
             awaitText("去海边的小旅行", substring = true)
+            visibleClickLabel("查看去海边的小旅行").performClick()
             awaitText("已装满 30%")
-            capture("wishbook-active")
-            compose.onNodeWithText("放进一颗小星星 ✨").performClick()
-            awaitText("这次攒了多少")
-            compose.onNodeWithText("这次攒了多少").performTextReplacement("10")
+            capture("wishbook-active", dialog = true)
+            compose.onNodeWithText("放颗星星").performClick()
+            awaitText("给「去海边的小旅行」放颗星星")
+            compose.onNodeWithContentDescription("这次攒").performTextReplacement("10")
             compose.onNodeWithText("装进瓶子").performClick()
+            compose.waitUntil(8000) {
+                shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(16))
+                compose.onAllNodesWithText("给「去海边的小旅行」放颗星星").fetchSemanticsNodes().isEmpty()
+            }
+            visibleClickLabel("查看去海边的小旅行").performClick()
             awaitText("已装满 31%")
             assertEquals(31_000L, runBlocking { c.littleWorld.snapshot().wishes.first { it.id == activeId }.savedFen })
-            compose.onNodeWithText("纪念 1").performClick()
+            compose.onNodeWithText("收起来").performClick()
+            compose.onNodeWithText("纪念").performClick()
             awaitText("终于买到小相机", substring = true)
             capture("wishbook-completed")
 
@@ -852,21 +1088,25 @@ class UiSmokeScreenshotTest {
             capture("sticker-drawer", dialog = true)
 
             render { com.jiligulu.app.ui.futurenotes.FutureNotesScreen({}) }
+            awaitText("在路上")
+            compose.onNodeWithText("在路上").performClick()
             awaitText("旅行前给自己的一句话")
-            capture("future-notes-list")
-            compose.onNodeWithText("读一读").performClick()
-            awaitText("💌 旅行前给自己的一句话")
+            capture("future-notes-list", dialog = true)
+            compose.onNodeWithText("旅行前给自己的一句话").performClick()
+            awaitText("到海边的时候，记得慢慢走，吹一会儿风。")
             capture("future-note-letter", dialog = true)
-            compose.onNodeWithText("继续等它到达").performClick()
-            compose.onNodeWithContentDescription("写一张便签").performClick()
-            awaitText("写给未来的你 💌")
-            compose.onNodeWithText("信笺标题").performTextReplacement("UI 保存的小信")
-            compose.onNodeWithText("想对那时候的自己说…").performTextReplacement("今天也记得给自己留一点甜。")
+            compose.onNodeWithText("等它到达").performClick()
+            compose.onNodeWithText("收起来").performClick()
+            compose.onNodeWithText("写一封信").performClick()
+            awaitText("写给未来的你")
+            compose.onNodeWithContentDescription("标题").performTextReplacement("UI 保存的小信")
+            compose.onNodeWithContentDescription("正文").performTextReplacement("今天也记得给自己留一点甜。")
             compose.onNodeWithText("寄出去").performClick()
             compose.waitUntil(8000) {
                 shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(16))
-                compose.onAllNodesWithText("写给未来的你 💌").fetchSemanticsNodes().isEmpty()
+                compose.onAllNodesWithText("写给未来的你").fetchSemanticsNodes().isEmpty()
             }
+            compose.onNodeWithText("在路上").performClick()
             awaitText("UI 保存的小信")
             assertTrue(runBlocking { c.littleWorld.snapshot().futureNotes.any { it.title == "UI 保存的小信" && !it.notificationEnabled } })
             compose.runOnIdle { activity.setContent {} }
@@ -878,11 +1118,12 @@ class UiSmokeScreenshotTest {
         try {
         compose.waitUntil(10_000) {
             shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(16))
+            rememberLiveActivityModels()
             compose.onAllNodesWithTag(tag).fetchSemanticsNodes().isNotEmpty() == present
         }
         compose.waitForIdle()
         } catch (failure: Throwable) {
-            File("build/reports/ui/failed-tag.txt").writeText("$tag present=$present\n" + compose.onRoot().printToString())
+            File("build/reports/ui/failed-tag.txt").apply { parentFile?.mkdirs() }.writeText("$tag present=$present\n" + runCatching { allRootsSemantics() }.getOrElse { "Semantics unavailable: $it" })
             throw failure
         }
     }
@@ -894,12 +1135,13 @@ class UiSmokeScreenshotTest {
                 // Compose test clock. Advance that paused Looper too, so a late I/O completion
                 // can publish its next frame instead of leaving the first loading composition.
                 shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(16))
+                rememberLiveActivityModels()
                 compose.onAllNodesWithTag("startup-animation").fetchSemanticsNodes().isEmpty() &&
                     compose.onAllNodesWithText(text, substring = substring).fetchSemanticsNodes().isNotEmpty()
             }
         } catch (failure: Throwable) {
-            runCatching { capture("failure-screen") }
-            val tree = runCatching { compose.onRoot().printToString() }.getOrElse { "Unable to read semantics: $it" }
+            runCatching { capture("failure-screen", dialog = ShadowDialog.getLatestDialog()?.isShowing == true) }
+            val tree = runCatching { allRootsSemantics() }.getOrElse { "Unable to read semantics: $it" }
             val flowState = runCatching { runBlocking {
                 withTimeout(2_000) {
                     val app = activity.application as JiliguluApp
@@ -909,7 +1151,8 @@ class UiSmokeScreenshotTest {
             } }.getOrElse { "Preference read failed: $it" }
             File("build/reports/ui/failure-semantics.txt").apply { parentFile?.mkdirs() }
                 .writeText("Waiting for '$text'\n$flowState\n$tree\n$failure\n" +
-                    org.robolectric.shadows.ShadowLog.getLogsForTag("ConversationHistory").joinToString("\n") { it.throwable?.stackTraceToString().orEmpty() })
+                    org.robolectric.shadows.ShadowLog.getLogsForTag("ConversationHistory").joinToString("\n") { it.throwable?.stackTraceToString().orEmpty() } +
+                    "\nWorldState sanitized debug:\n" + org.robolectric.shadows.ShadowLog.getLogsForTag("WorldState").joinToString("\n") { it.msg })
             throw AssertionError("Waiting for '$text': $flowState\n$tree", failure)
         }
         compose.waitForIdle()

@@ -17,15 +17,18 @@ internal class GlassOverlayHost(private val context:Context,private val manager:
     private var dialog:Dialog?=null
     private var standalone:View?=null
     private var materialSide=0
+    private var blurListener:java.util.function.Consumer<Boolean>?=null
     private fun background(window:android.view.Window,side:Int) {
         if(materialSide==side) return
-        val shape=GradientDrawable().apply { setColor(Color.argb(2,255,255,255));cornerRadius=side*.28f }
-        window.setBackgroundDrawable(InsetDrawable(shape,(side*.08f).roundToInt()))
-        if(Build.VERSION.SDK_INT>=31) window.setBackgroundBlurRadius((side*.12f).roundToInt())
+        val supported=Build.VERSION.SDK_INT>=31 && manager.isCrossWindowBlurEnabled
+        val shape=GradientDrawable().apply { setColor(Color.argb(if(supported) 8 else 34,248,245,255));cornerRadius=side*.24f }
+        window.setBackgroundDrawable(InsetDrawable(shape,(side*.04f).roundToInt()))
+        if(Build.VERSION.SDK_INT>=31) window.setBackgroundBlurRadius(if(supported) (side*.30f).roundToInt() else 0)
         materialSide=side
     }
 
     fun attach(view:View,params:WindowManager.LayoutParams) {
+        params.flags=params.flags or WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
         if(Build.VERSION.SDK_INT>=31) {
             val candidate=Dialog(context,R.style.Theme_Jiligulu_GlassOverlay)
             candidate.setCancelable(false)
@@ -38,8 +41,14 @@ internal class GlassOverlayHost(private val context:Context,private val manager:
                 window.decorView.setPadding(0,0,0,0)
                 androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window,false)
                 window.attributes=params
+                window.addFlags(WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED)
                 background(window,params.width)
                 candidate.show(); dialog=candidate
+                val listener=java.util.function.Consumer<Boolean> {
+                    materialSide=0; background(window,window.attributes.width);view.invalidate()
+                }
+                blurListener=listener
+                runCatching { manager.addCrossWindowBlurEnabledListener(listener) }
                 return
             } catch (_:Exception) {
                 runCatching { candidate.dismiss() }
@@ -50,6 +59,7 @@ internal class GlassOverlayHost(private val context:Context,private val manager:
     }
 
     fun update(params:WindowManager.LayoutParams) {
+        params.flags=params.flags or WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
         val window=dialog?.window
         if(window!=null) {
             window.attributes=params
@@ -62,5 +72,8 @@ internal class GlassOverlayHost(private val context:Context,private val manager:
         standalone?.visibility=if(show) View.VISIBLE else View.INVISIBLE
     }
 
-    fun detach() { dialog?.dismiss();dialog=null;standalone?.let {manager.removeView(it)};standalone=null }
+    fun detach() {
+        if(Build.VERSION.SDK_INT>=31) blurListener?.let {runCatching {manager.removeCrossWindowBlurEnabledListener(it)}}
+        blurListener=null;dialog?.dismiss();dialog=null;standalone?.let {manager.removeView(it)};standalone=null;materialSide=0
+    }
 }

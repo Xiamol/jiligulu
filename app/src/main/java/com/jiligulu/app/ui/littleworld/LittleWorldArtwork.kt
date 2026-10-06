@@ -35,7 +35,9 @@ internal object LittleWorldArtwork {
     fun image(resources: Resources, id: Int): ImageBitmap = cache.computeIfAbsent(id) {
         BitmapFactory.decodeResource(resources,id,BitmapFactory.Options().apply {
             inSampleSize=if(id==R.drawable.world_scene_atlas_anime || id==R.drawable.world_interactive_room_v3 ||
-                id==R.drawable.wish_shelf_ocean_palace_v4 || id==R.drawable.world_destination_portraits_v3 || id==R.drawable.world_secret_room_portrait_v3) 1 else 2
+                id==R.drawable.wish_shelf_ocean_palace_v4 || id==R.drawable.world_destination_portraits_v3 ||
+                id==R.drawable.world_destination_portraits_v4_empty || id==R.drawable.world_secret_room_portrait_v3 ||
+                id==R.drawable.world_secret_room_portrait_v4_night) 1 else 2
             inScaled=false
         }).asImageBitmap()
     }

@@ -8,12 +8,15 @@ import com.jiligulu.app.domain.category.CategoryEngine
 import com.jiligulu.app.domain.color.GoldenAnglePalette
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 
 class CategoryRepository(private val categoryDao: CategoryDao) {
 
-    val categories: Flow<List<CategoryEntity>> = categoryDao.observeAll()
+    val categories: Flow<List<CategoryEntity>> = categoryDao.observeAll().map { list ->
+        list.sortedBy { if (it.deletable) 0 else 1 }
+    }
 
-    suspend fun getAll(): List<CategoryEntity> = categoryDao.observeAll().first()
+    suspend fun getAll(): List<CategoryEntity> = categories.first()
 
     /**
      * 新建分类（AI 自动建类 / 用户手动建类共用）。

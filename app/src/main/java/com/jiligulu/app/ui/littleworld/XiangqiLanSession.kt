@@ -42,6 +42,8 @@ data class XiangqiLanUiState(
     val sessionActive: Boolean = false,
     val revision: Int = 0,
     val remoteSelection: GridCell? = null,
+    val pendingUndoRequest: XiangqiSide? = null,
+    val canUndo: Boolean = false,
 )
 
 /** One foreground-only, two-player TCP room. The host is the sole board authority. */
@@ -125,7 +127,7 @@ class XiangqiLanSession {
         synchronized(lock) {
             val room = session ?: return
             val current = mutableState.value
-            if (!current.connected || current.awaitingAck) return
+            if (!current.connected || current.awaitingAck || current.pendingUndoRequest != null) return
             if (current.game.turnSide != current.localSide) {
                 mutableState.value = current.copy(error = "请等待对方走棋")
                 return
@@ -140,6 +142,7 @@ class XiangqiLanSession {
             } else {
                 mutableState.value = current.copy(
                     awaitingAck = true,
+                    canUndo = false,
                     remoteSelection = null,
                     error = null,
                     status = "等待房主确认落子…",
@@ -157,7 +160,7 @@ class XiangqiLanSession {
             val room = session ?: return
             val current = mutableState.value
             val side = current.localSide ?: return
-            if (!current.connected || current.awaitingAck ||
+            if (!current.connected || current.awaitingAck || current.pendingUndoRequest != null ||
                 !XiangqiSelectionRules.canSelect(current.game, side, cell)) return
             if (!room.selectionHints.offer(XiangqiLanMessage.Select(current.revision, cell))) return
             if (room.selectionJob != null) return
@@ -168,7 +171,7 @@ class XiangqiLanSession {
                     if (session !== room) return@synchronized
                     val hint = room.selectionHints.take() ?: return@synchronized
                     val latest = mutableState.value
-                    if (latest.connected && !latest.awaitingAck && latest.revision == hint.revision &&
+                    if (latest.connected && !latest.awaitingAck && latest.pendingUndoRequest == null && latest.revision == hint.revision &&
                         latest.localSide?.let { XiangqiSelectionRules.canSelect(latest.game, it, hint.cell) } == true) {
                         // Cosmetic traffic never fills the reliable game queue or fails a room.
                         room.selectionOutgoing.trySend(XiangqiLanProtocol.encode(hint))
@@ -182,6 +185,75 @@ class XiangqiLanSession {
         room.selectionJob?.cancel(); room.selectionJob = null
         room.selectionHints.clear()
         room.selectionOutgoing.tryReceive()
+    }
+
+    fun requestUndo() {
+        synchronized(lock) {
+            val room = session ?: return
+            val current = mutableState.value
+            val side = current.localSide ?: return
+            if (!current.connected || current.awaitingAck || current.pendingUndoRequest != null) return
+            val request = room.undo.beginLocal(current.revision, current.game, side) ?: return
+            showUndoRequest(room, request)
+            enqueue(room, XiangqiLanMessage.UndoRequest(request))
+        }
+    }
+
+    fun respondToUndo(accept: Boolean) {
+        synchronized(lock) {
+            val room = session ?: return
+            val current = mutableState.value
+            val side = current.localSide ?: return
+            val request = room.undo.pending ?: return
+            if (!current.connected || request.requester == side || request.revision != current.revision) return
+            if (accept && !room.undo.consentLocally(current.revision, current.game, side)) return
+            if (side == XiangqiSide.RED) {
+                if (accept) commitHostUndo(room, request, side)
+                else cancelUndo(room, request, XiangqiUndoResolution.REJECTED, notify = true)
+            } else {
+                mutableState.value = current.copy(status = "等待房主同步悔棋结果…")
+                enqueue(room, XiangqiLanMessage.UndoResponse(request.revision, request.id, request.requester, accept))
+            }
+        }
+    }
+
+    private fun showUndoRequest(room: Session, request: XiangqiUndoRequest) {
+        clearSelectionHints(room)
+        mutableState.value = mutableState.value.copy(pendingUndoRequest = request.requester, canUndo = false,
+            remoteSelection = null, error = null, status = if (request.requester == mutableState.value.localSide)
+                "等待伙伴同意悔棋…" else "伙伴想退回一步，等你回复")
+        room.undoJob?.cancel()
+        room.undoJob = room.scope.launch {
+            delay(if (mutableState.value.localSide == XiangqiSide.RED) 20_000 else 25_000)
+            synchronized(lock) {
+                if (session === room && room.undo.pending == request) {
+                    cancelUndo(room, request, XiangqiUndoResolution.TIMEOUT,
+                        notify = mutableState.value.localSide == XiangqiSide.RED)
+                }
+            }
+        }
+    }
+
+    private fun cancelUndo(room: Session, request: XiangqiUndoRequest, resolution: XiangqiUndoResolution, notify: Boolean) {
+        if (!room.undo.cancelIfMatches(request)) return
+        room.undoJob?.cancel(); room.undoJob = null
+        val current = mutableState.value
+        mutableState.value = current.copy(pendingUndoRequest = null,
+            canUndo = current.connected && !current.awaitingAck && room.undo.canUndo,
+            status = connectedStatus(current.game, current.localSide ?: XiangqiSide.RED), error = resolution.hint)
+        if (notify) enqueue(room, XiangqiLanMessage.UndoResult(request, resolution))
+    }
+
+    private fun commitHostUndo(room: Session, request: XiangqiUndoRequest, responder: XiangqiSide) {
+        val current = mutableState.value
+        val target = room.undo.commitHost(request, responder, current.revision, current.game) ?: return
+        room.undoJob?.cancel(); room.undoJob = null
+        clearSelectionHints(room)
+        val next = current.copy(game = target, revision = current.revision + 1, pendingUndoRequest = null,
+            canUndo = room.undo.canUndo, remoteSelection = null, awaitingAck = false, error = null,
+            status = connectedStatus(target, XiangqiSide.RED))
+        mutableState.value = next
+        enqueue(room, XiangqiLanMessage.UndoSnapshot(request, XiangqiLanMessage.Snapshot(next.revision, target)))
     }
 
     /** Only the host may replace the board; the revision keeps in-flight guest moves stale. */
@@ -211,6 +283,8 @@ class XiangqiLanSession {
                 awaitingAck = false,
                 sessionActive = false,
                 remoteSelection = null,
+                pendingUndoRequest = null,
+                canUndo = false,
                 status = "连接已关闭",
                 error = null,
             )
@@ -336,6 +410,8 @@ class XiangqiLanSession {
             fail(room, "对局过长，请重新创建房间")
             return
         }
+        room.undo.pending?.let { cancelUndo(room, it, XiangqiUndoResolution.CANCELLED, notify = true) }
+        if (!room.undo.recordAdvance(current.game, game)) throw LanProtocolException()
         clearSelectionHints(room)
         val next = current.copy(
             game = game,
@@ -343,6 +419,8 @@ class XiangqiLanSession {
             error = null,
             status = connectedStatus(game, XiangqiSide.RED),
             remoteSelection = null,
+            pendingUndoRequest = null,
+            canUndo = room.undo.canUndo,
         )
         mutableState.value = next
         enqueue(room, XiangqiLanMessage.Snapshot(next.revision, game))
@@ -366,6 +444,7 @@ class XiangqiLanSession {
                 val rejection = when {
                     message.revision != current.revision -> XiangqiLanRejection.STALE
                     current.game.outcome != XiangqiOutcome.PLAYING -> XiangqiLanRejection.FINISHED
+                    current.pendingUndoRequest != null -> XiangqiLanRejection.UNDO_PENDING
                     current.game.turnSide != XiangqiSide.BLACK -> XiangqiLanRejection.TURN
                     else -> null
                 }
@@ -378,6 +457,26 @@ class XiangqiLanSession {
                 else publishHostGame(room, game)
             }
             is XiangqiLanMessage.Select -> receiveSelection(message)
+            is XiangqiLanMessage.UndoRequest -> {
+                if (!current.connected || message.request.requester != XiangqiSide.BLACK) throw LanProtocolException()
+                when (room.undo.receiveOffer(message.request, current.revision, current.game, XiangqiSide.RED, host = true)) {
+                    XiangqiUndoOffer.ACCEPTED -> showUndoRequest(room, message.request)
+                    XiangqiUndoOffer.DUPLICATE -> Unit
+                    else -> enqueue(room, XiangqiLanMessage.UndoResult(message.request, when {
+                        message.request.revision != current.revision -> XiangqiUndoResolution.STALE
+                        room.undo.pending != null -> XiangqiUndoResolution.BUSY
+                        !room.undo.canUndo -> XiangqiUndoResolution.EMPTY
+                        else -> XiangqiUndoResolution.STALE
+                    }))
+                }
+            }
+            is XiangqiLanMessage.UndoResponse -> {
+                if (!current.connected) throw LanProtocolException()
+                val request = room.undo.pending ?: return
+                if (request.revision != message.revision || request.id != message.id || request.requester != message.requester || request.requester != XiangqiSide.RED) return
+                if (message.accept) commitHostUndo(room, request, XiangqiSide.BLACK)
+                else cancelUndo(room, request, XiangqiUndoResolution.REJECTED, notify = true)
+            }
             else -> throw LanProtocolException()
         }
     }
@@ -392,19 +491,10 @@ class XiangqiLanSession {
         val current = mutableState.value
         when (message) {
             is XiangqiLanMessage.Snapshot -> {
-                if (!current.connected) {
-                    if (message.revision != 0 || message.game != XiangqiEngine.newGame()) {
-                        throw LanProtocolException()
-                    }
-                } else {
-                    val valid = when {
-                        message.revision == current.revision -> message.game == current.game
-                        current.revision < Int.MAX_VALUE && message.revision == current.revision + 1 ->
-                            message.game == XiangqiEngine.newGame() ||
-                                message.game.lastMove?.let { XiangqiEngine.play(current.game, it) == message.game } == true
-                        else -> false
-                    }
-                    if (!valid) throw LanProtocolException()
+                if (!XiangqiSnapshotRules.accepts(current.revision, current.game, current.connected, message)) throw LanProtocolException()
+                if (message.revision != current.revision) {
+                    room.undoJob?.cancel(); room.undoJob = null
+                    if (!room.undo.recordAdvance(current.game, message.game)) throw LanProtocolException()
                 }
                 room.ackStarted.set(0)
                 if (message.revision != current.revision || message.game != current.game) clearSelectionHints(room)
@@ -418,6 +508,8 @@ class XiangqiLanSession {
                     status = connectedStatus(message.game, XiangqiSide.BLACK),
                     remoteSelection = if (message.revision == current.revision && message.game == current.game)
                         current.remoteSelection else null,
+                    pendingUndoRequest = room.undo.pending?.requester,
+                    canUndo = room.undo.canUndo,
                 )
             }
             is XiangqiLanMessage.Reject -> {
@@ -428,16 +520,40 @@ class XiangqiLanSession {
                     error = message.reason.hint,
                     status = connectedStatus(current.game, XiangqiSide.BLACK),
                     remoteSelection = null,
+                    canUndo = room.undo.canUndo,
                 )
             }
             is XiangqiLanMessage.Select -> receiveSelection(message)
+            is XiangqiLanMessage.UndoRequest -> {
+                if (!current.connected || message.request.requester != XiangqiSide.RED) throw LanProtocolException()
+                when (room.undo.receiveOffer(message.request, current.revision, current.game, XiangqiSide.BLACK, host = false)) {
+                    XiangqiUndoOffer.ACCEPTED -> showUndoRequest(room, message.request)
+                    XiangqiUndoOffer.DUPLICATE, XiangqiUndoOffer.STALE -> Unit
+                    else -> throw LanProtocolException()
+                }
+            }
+            is XiangqiLanMessage.UndoResult -> {
+                if (!current.connected) throw LanProtocolException()
+                cancelUndo(room, message.request, message.resolution, notify = false)
+            }
+            is XiangqiLanMessage.UndoSnapshot -> {
+                if (!XiangqiSnapshotRules.acceptsUndo(current.revision, current.game, current.connected,
+                        XiangqiSide.BLACK, room.undo, message) ||
+                    !room.undo.commitGuestUndo(XiangqiSide.BLACK, current.revision, current.game, message)) throw LanProtocolException()
+                room.undoJob?.cancel(); room.undoJob = null
+                room.ackStarted.set(0)
+                clearSelectionHints(room)
+                mutableState.value = current.copy(game = message.snapshot.game, revision = message.snapshot.revision,
+                    awaitingAck = false, pendingUndoRequest = null, canUndo = room.undo.canUndo,
+                    remoteSelection = null, error = null, status = connectedStatus(message.snapshot.game, XiangqiSide.BLACK))
+            }
             else -> throw LanProtocolException()
         }
     }
 
     private fun receiveSelection(message: XiangqiLanMessage.Select) {
         val current = mutableState.value
-        if (current.connected && XiangqiSelectionRules.accepts(current.revision, current.game, current.localSide, message) &&
+        if (current.connected && current.pendingUndoRequest == null && XiangqiSelectionRules.accepts(current.revision, current.game, current.localSide, message) &&
             current.remoteSelection != message.cell) mutableState.value = current.copy(remoteSelection = message.cell)
     }
 
@@ -463,6 +579,8 @@ class XiangqiLanSession {
                 awaitingAck = false,
                 sessionActive = false,
                 remoteSelection = null,
+                pendingUndoRequest = null,
+                canUndo = false,
                 status = "连接已结束",
                 error = error,
             )
@@ -470,6 +588,7 @@ class XiangqiLanSession {
     }
 
     private fun dispose(room: Session) {
+        room.undoJob?.cancel(); room.undoJob = null
         clearSelectionHints(room)
         runCatching { room.socket?.close() }
         runCatching { room.server?.close() }
@@ -487,6 +606,8 @@ class XiangqiLanSession {
         val ackStarted = AtomicLong(0)
         val selectionHints = XiangqiSelectionHints()
         var selectionJob: Job? = null
+        val undo = XiangqiUndoHistory()
+        var undoJob: Job? = null
         var socket: Socket? = null
         var server: ServerSocket? = null
     }
@@ -535,6 +656,7 @@ internal enum class XiangqiLanRejection(val hint: String) {
     TURN("请等待对方走棋"),
     ILLEGAL("这一步不符合象棋规则"),
     FINISHED("对局已结束，请等待房主重开"),
+    UNDO_PENDING("请先完成悔棋协商"),
 }
 
 internal sealed interface XiangqiLanMessage {
@@ -545,6 +667,10 @@ internal sealed interface XiangqiLanMessage {
     data class Select(val revision: Int, val cell: GridCell?) : XiangqiLanMessage
     data class Snapshot(val revision: Int, val game: XiangqiState) : XiangqiLanMessage
     data class Reject(val reason: XiangqiLanRejection) : XiangqiLanMessage
+    data class UndoRequest(val request: XiangqiUndoRequest) : XiangqiLanMessage
+    data class UndoResponse(val revision: Int, val id: Int, val requester: XiangqiSide, val accept: Boolean) : XiangqiLanMessage
+    data class UndoResult(val request: XiangqiUndoRequest, val resolution: XiangqiUndoResolution) : XiangqiLanMessage
+    data class UndoSnapshot(val request: XiangqiUndoRequest, val snapshot: Snapshot) : XiangqiLanMessage
 }
 
 /** Shared board/move encoding for LAN and the online transport; transport never changes game rules. */
@@ -575,6 +701,12 @@ internal object XiangqiLanProtocol {
         is XiangqiLanMessage.Move -> "$VERSION|MOVE|${message.revision}|${index(message.move.from)}|${index(message.move.to)}"
         is XiangqiLanMessage.Select -> "$VERSION|SELECT|${message.revision}|${message.cell?.let(::index) ?: -1}"
         is XiangqiLanMessage.Reject -> "$VERSION|REJECT|${message.reason.name}"
+        is XiangqiLanMessage.UndoRequest -> with(message.request) { "$VERSION|UNDO_REQUEST|$revision|$id|${requester.name}" }
+        is XiangqiLanMessage.UndoResponse -> "$VERSION|UNDO_RESPONSE|${message.revision}|${message.id}|${message.requester.name}|${if(message.accept) 1 else 0}"
+        is XiangqiLanMessage.UndoResult -> with(message.request) { "$VERSION|UNDO_RESULT|$revision|$id|${requester.name}|${message.resolution.name}" }
+        is XiangqiLanMessage.UndoSnapshot -> with(message.request) {
+            "$VERSION|UNDO_STATE|$revision|$id|${requester.name}|" + encode(message.snapshot).split('|').drop(2).joinToString("|")
+        }
         is XiangqiLanMessage.Snapshot -> with(message.game) {
             "$VERSION|STATE|${message.revision}|${turnSide.name}|${outcome.name}|$ply|" +
                 "${lastMove?.from?.let(::index) ?: -1}|${lastMove?.to?.let(::index) ?: -1}|" +
@@ -607,6 +739,26 @@ internal object XiangqiLanProtocol {
                 "REJECT" -> {
                     require(parts.size == 3)
                     XiangqiLanMessage.Reject(XiangqiLanRejection.valueOf(parts[2]))
+                }
+                "UNDO_REQUEST" -> {
+                    require(parts.size == 5)
+                    XiangqiLanMessage.UndoRequest(undoRequest(parts))
+                }
+                "UNDO_RESPONSE" -> {
+                    require(parts.size == 6)
+                    XiangqiLanMessage.UndoResponse(integer(parts[2], 0..Int.MAX_VALUE),
+                        integer(parts[3], 1..Int.MAX_VALUE), XiangqiSide.valueOf(parts[4]), integer(parts[5], 0..1) == 1)
+                }
+                "UNDO_RESULT" -> {
+                    require(parts.size == 6)
+                    XiangqiLanMessage.UndoResult(undoRequest(parts), XiangqiUndoResolution.valueOf(parts[5]))
+                }
+                "UNDO_STATE" -> {
+                    require(parts.size == 12)
+                    val request = undoRequest(parts)
+                    val snapshot = decode("$VERSION|STATE|" + parts.drop(5).joinToString("|")) as XiangqiLanMessage.Snapshot
+                    require(request.revision < Int.MAX_VALUE && snapshot.revision == request.revision + 1)
+                    XiangqiLanMessage.UndoSnapshot(request, snapshot)
                 }
                 "STATE" -> {
                     require(parts.size == 9)
@@ -663,6 +815,10 @@ internal object XiangqiLanProtocol {
         require(value.all { it in '0'..'9' || it == '-' } && value != "-")
         return value.toInt().also { require(it in range) }
     }
+
+    private fun undoRequest(parts: List<String>): XiangqiUndoRequest = XiangqiUndoRequest(
+        integer(parts[2], 0..Int.MAX_VALUE), integer(parts[3], 1..Int.MAX_VALUE), XiangqiSide.valueOf(parts[4]),
+    )
 
     private fun index(cell: GridCell): Int {
         require(cell.x in 0..8 && cell.y in 0..9)

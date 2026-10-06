@@ -30,10 +30,15 @@ import java.util.UUID
     val createdAt: Long = System.currentTimeMillis())
 @Serializable data class MemoryCard(val id: String = UUID.randomUUID().toString(), val title: String,
     val caption: String = "", val imagePath: String, val createdAt: Long = System.currentTimeMillis())
+@Serializable data class SecretPaper(val id: String = UUID.randomUUID().toString(), val title: String = "给阿噜的小纸条",
+    val body: String, val createdAt: Long = System.currentTimeMillis())
+@Serializable data class TrainTicket(val dayEpoch: Long, val createdAt: Long = System.currentTimeMillis())
 @Serializable data class LittleWorldState(val stickers: List<Sticker> = defaultStickers(),
     val wishes: List<Wish> = emptyList(), val waiting: List<WaitingWish> = emptyList(),
     val futureNotes: List<FutureNote> = emptyList(), val cards: List<MemoryCard> = emptyList(),
-    val favoriteFortunes: Set<Int> = emptySet(), val timeMachineEnabled: Boolean = true)
+    val favoriteFortunes: Set<Int> = emptySet(), val timeMachineEnabled: Boolean = true,
+    val favoriteSecretPapers: List<SecretPaper> = emptyList(), val writtenSecretPapers: List<SecretPaper> = emptyList(),
+    val trainTickets: List<TrainTicket> = emptyList())
 
 fun defaultStickers(): List<Sticker> = listOf(
     Triple("早餐", "🍳", 800L), Triple("地铁", "🚇", 300L), Triple("咖啡", "☕", 1200L),
@@ -45,8 +50,9 @@ fun defaultStickers(): List<Sticker> = listOf(
 private val Context.littleWorldStore by preferencesDataStore(name = "little_world")
 
 /** User collections are independent of ledger totals; updates are atomic and survive upgrades. */
-class LittleWorldRepository(context: Context) {
-    private val store = context.applicationContext.littleWorldStore
+class LittleWorldRepository(context: Context,
+    private val store: androidx.datastore.core.DataStore<androidx.datastore.preferences.core.Preferences> =
+        context.applicationContext.littleWorldStore) {
     private val key = stringPreferencesKey("state_v1")
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     val state: Flow<LittleWorldState> = store.data.map { decode(it[key]) }
@@ -126,4 +132,22 @@ class LittleWorldRepository(context: Context) {
     suspend fun deleteCard(id: String) = update { it.copy(cards = it.cards.filterNot { c -> c.id == id }) }
     suspend fun toggleFortune(id: Int) = update { it.copy(favoriteFortunes = if (id in it.favoriteFortunes) it.favoriteFortunes - id else it.favoriteFortunes + id) }
     suspend fun setTimeMachine(enabled: Boolean) = update { it.copy(timeMachineEnabled = enabled) }
+    suspend fun toggleSecretPaper(paper: SecretPaper) {
+        require(paper.id.isNotBlank() && paper.body.trim().length in 1..1500)
+        update { state -> state.copy(favoriteSecretPapers = if(state.favoriteSecretPapers.any { it.id == paper.id })
+            state.favoriteSecretPapers.filterNot { it.id == paper.id } else state.favoriteSecretPapers + paper) }
+    }
+    suspend fun saveSecretPaper(paper: SecretPaper) {
+        require(paper.id.isNotBlank() && paper.title.trim().length in 1..40 && paper.body.trim().length in 1..1500)
+        val saved = paper.copy(title = paper.title.trim(), body = paper.body.trim())
+        update { state -> state.copy(writtenSecretPapers = state.writtenSecretPapers.filterNot { it.id == saved.id } + saved) }
+    }
+    suspend fun deleteSecretPaper(id: String) = update { state -> state.copy(
+        writtenSecretPapers = state.writtenSecretPapers.filterNot { it.id == id },
+        favoriteSecretPapers = state.favoriteSecretPapers.filterNot { it.id == id }) }
+    suspend fun saveTrainTicket(dayEpoch: Long) {
+        require(dayEpoch in java.time.LocalDate.of(1900, 1, 1).toEpochDay()..java.time.LocalDate.now().toEpochDay())
+        update { state -> if(state.trainTickets.any { it.dayEpoch == dayEpoch }) state
+            else state.copy(trainTickets = state.trainTickets + TrainTicket(dayEpoch)) }
+    }
 }

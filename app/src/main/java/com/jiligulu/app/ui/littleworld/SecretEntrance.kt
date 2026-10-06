@@ -28,6 +28,20 @@ import kotlin.math.sin
 
 enum class SecretEntrance { PULL, LOGO }
 
+/** Keep the final curtain until the destination takes over; reset on leaving or backgrounding. */
+@Composable
+fun SecretEntranceLifecycle(onLeave: () -> Unit) {
+    val owner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    val leave by rememberUpdatedState(onLeave)
+    DisposableEffect(owner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP) leave()
+        }
+        owner.lifecycle.addObserver(observer)
+        onDispose { owner.lifecycle.removeObserver(observer) }
+    }
+}
+
 /** Finite transition above the current page. The caller navigates only after onFinished. */
 @Composable
 fun SecretEntranceOverlay(source: SecretEntrance, onFinished: () -> Unit, modifier: Modifier = Modifier) {
