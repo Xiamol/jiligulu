@@ -2,6 +2,7 @@ package com.jiligulu.app.ui.littleworld
 
 import android.graphics.Paint
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -56,6 +57,7 @@ import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.roundToInt
 import kotlin.math.sin
+import kotlinx.coroutines.delay
 
 enum class XiangqiPlayMode { CPU, ONLINE, LAN, HOTSEAT }
 
@@ -156,7 +158,10 @@ internal fun ColumnScope.SecretXiangqiGame(state: XiangqiState, mode: XiangqiPla
             else -> "轮到${playerName}落子"
         }
     }
-    val canMove = !helpBusy && state.outcome == XiangqiOutcome.PLAYING && when (mode) {
+    // 需求③：棋子还在路上时，本地再点棋盘不算一步——拦住重复落子。
+    // 状态更新在动画的 LaunchedEffect 里（drawscope 拿不到回调，所以提到上一层）。
+    var boardAnimating by remember { mutableStateOf(false) }
+    val canMove = !helpBusy && !boardAnimating && state.outcome == XiangqiOutcome.PLAYING && when (mode) {
         XiangqiPlayMode.CPU -> !paused && state.turnSide == humanSide
         XiangqiPlayMode.HOTSEAT -> !paused
         XiangqiPlayMode.LAN, XiangqiPlayMode.ONLINE -> lan.connected && !lan.awaitingAck && lan.pendingUndoRequest == null && state.turnSide == lan.localSide
@@ -165,7 +170,8 @@ internal fun ColumnScope.SecretXiangqiGame(state: XiangqiState, mode: XiangqiPla
     XiangqiBoard(state, boardWidth, canMove,
         flipped = mode==XiangqiPlayMode.CPU && humanSide==XiangqiSide.BLACK || networkMode && lan.localSide == XiangqiSide.BLACK, onMove = onMove,
         remoteSelection = remoteSelection, onSelectionChanged = onSelectionChanged, assistedSelection = assistedSelection,
-        restorationToken = restorationToken)
+        restorationToken = restorationToken,
+        onAnimatingChange = { boardAnimating = it })
     if(finish!=null) {
         GameFinishPlate(finish,onRestart,onExit,networkMode,lan.roomEnded,lan.resultSecondsLeft,lan.myRematchRequested,
             Modifier.width(boardWidth).padding(top=10.dp).onGloballyPositioned{onControlsBottom(it.boundsInRoot().bottom)})
@@ -261,7 +267,8 @@ internal fun GameIconTool(icon: ImageVector, label: String, onClick: () -> Unit,
 @Composable
 private fun XiangqiBoard(state: XiangqiState, width: Dp, canMove: Boolean, flipped: Boolean,
     onMove: (XiangqiMove) -> Unit, remoteSelection: GridCell?, onSelectionChanged: (GridCell?) -> Unit,
-    assistedSelection: GridCell?, restorationToken: Int) {
+    assistedSelection: GridCell?, restorationToken: Int,
+    onAnimatingChange: (Boolean) -> Unit = {}, onStepSettled: (mover: Int, captured: Boolean) -> Unit = { _, _ -> }) {
     val context = LocalContext.current
     val typeface = remember(context) { context.resources.getFont(R.font.zcool_kuaile) }
     val wood = remember { Brush.linearGradient(listOf(Color(0xFFF2DFB9), Color(0xFFE5C79A))) }
@@ -292,6 +299,14 @@ private fun XiangqiBoard(state: XiangqiState, width: Dp, canMove: Boolean, flipp
     val winPulse = remember { Animatable(0f) }
     val finishProof = remember(state) { XiangqiMateClassifier.classify(state) }
     var animationInitialized by remember(restorationToken) { mutableStateOf(false) }
+    // 展示层自己留上一帧：被吃棋子只能从这里取，引擎的 state 里已经没有它了。
+    var snapshot by remember(restorationToken) { mutableStateOf(XiangqiViewSnapshot(state.board, state.lastMove)) }
+    var playing by remember { mutableStateOf<XiangqiStepAnim?>(null) }
+    var trailAlpha by remember { mutableStateOf(1f) }
+    val travelProgress = remember { Animatable(1f) }
+    val landingFlash = remember { Animatable(0f) }
+    val latestBusy by rememberUpdatedState(onAnimatingChange)
+    val latestSettled by rememberUpdatedState(onStepSettled)
     LaunchedEffect(state.ply, state.outcome, restorationToken) {
         val animate = animationInitialized
         animationInitialized = true
@@ -302,6 +317,29 @@ private fun XiangqiBoard(state: XiangqiState, width: Dp, canMove: Boolean, flipp
         } else if (animate && XiangqiEngine.isInCheck(state, state.turnSide)) {
             checkPulse.snapTo(1f); checkPulse.animateTo(0f, tween(900))
         }
+        // 走子演出：首帧、读档、棋盘没变（悔棋/纠正）→ 不演，避免重播旧棋
+        val next = XiangqiViewSnapshot(state.board, state.lastMove)
+        val step = if (animate) XiangqiMoveAnimator.stepFrom(snapshot, next) else null
+        snapshot = next
+        if (step != null) {
+            playing = step
+            latestBusy(true)
+            travelProgress.snapTo(0f)
+            travelProgress.animateTo(1f, tween(step.durationMillis, easing = FastOutSlowInEasing))
+            // 被吃子留在原地缩没，不要跟着移动中的棋子一起走
+            if (step.captured != 0) delay(XiangqiMoveAnimator.CAPTURE_FADE_MS.toLong())
+            playing = null
+            landingFlash.snapTo(1f)
+            landingFlash.animateTo(0f, tween(XiangqiMoveAnimator.LANDING_FLASH_MS))
+            latestSettled(step.mover, step.captured != 0)
+            latestBusy(false)
+        }
+    }
+    // 轨迹不是永久高亮：清晰留一会儿，之后留一道很淡的记号
+    LaunchedEffect(state.ply) {
+        trailAlpha = 1f
+        delay(XiangqiMoveAnimator.TRAIL_HOLD_MS.toLong())
+        trailAlpha = 0.28f
     }
     Canvas(Modifier.size(width, width * 1.13f).shadow(3.dp, RoundedCornerShape(13.dp), clip = false)
         .clip(RoundedCornerShape(13.dp)).background(wood).drawWithCache {
@@ -366,10 +404,21 @@ private fun XiangqiBoard(state: XiangqiState, width: Dp, canMove: Boolean, flipp
         textPaint.color = android.graphics.Color.rgb(115, 87, 59)
         drawContext.canvas.nativeCanvas.drawText("楚 河", padding + 2 * stepX, padding + 4.5f * stepY + textPaint.textSize * .35f, textPaint)
         drawContext.canvas.nativeCanvas.drawText("汉 界", padding + 6 * stepX, padding + 4.5f * stepY + textPaint.textSize * .35f, textPaint)
+        // 需求③：轨迹清晰留 TRAIL_HOLD_MS，之后只留一道很淡的记号——
+        // 既不永久高亮抢注意力，也不突然消失让人找不到刚才那一步。
         state.lastMove?.let { move ->
-            drawLine(Color(0xFFC1A57E).copy(alpha = .4f), position(move.from), position(move.to), 2.dp.toPx())
-            drawCircle(Color(0xFFC8A968).copy(alpha = .65f), stepX * .18f, position(move.from), style = Stroke(1.5.dp.toPx()))
-            drawCircle(Color(0xFFC8A968), stepX * .47f, position(move.to), style = Stroke(2.dp.toPx()))
+            if (playing == null) {
+                val a = trailAlpha
+                drawLine(Color(0xFFC1A57E).copy(alpha = .4f * a), position(move.from), position(move.to), 2.dp.toPx())
+                drawCircle(Color(0xFFC8A968).copy(alpha = .65f * a), stepX * .18f, position(move.from), style = Stroke(1.5.dp.toPx()))
+                drawCircle(Color(0xFFC8A968).copy(alpha = a), stepX * .47f, position(move.to), style = Stroke(2.dp.toPx()))
+            }
+        }
+        // 落稳那一刻在落点闪一下，提示"刚才那一步落在这儿"
+        if (landingFlash.value > 0f && state.lastMove != null) {
+            val f = landingFlash.value
+            drawCircle(Color(0xFFC8A968).copy(alpha = f * .85f),
+                stepX * (.47f + (1f - f) * .22f), position(state.lastMove.to), style = Stroke(2.dp.toPx()))
         }
         legal.forEach { move ->
             val capture = state.pieceAt(move.to.x, move.to.y) != 0
@@ -380,27 +429,50 @@ private fun XiangqiBoard(state: XiangqiState, width: Dp, canMove: Boolean, flipp
                 drawCircle(Color(0xFF789783).copy(alpha = .9f), stepX * .12f, position(move.to))
             }
         }
+        fun fade(c: Color, mul: Float) = c.copy(alpha = c.alpha * mul)
+
+        /**
+         * 画一枚棋子。抽成函数是必须的：**移动中的那一枚必须和落定的棋子长得一模一样**，
+         * 否则动画结束的瞬间会像"换了个棋子"。`at` / `scale` / `alpha` 让它能同时服务
+         * 静态棋子、移动中的棋子和正在缩没的被吃子。
+         */
+        fun drawPiece(cell: GridCell, piece: Int, at: Offset? = null,
+            scale: Float = 1f, alpha: Float = 1f, highlight: Boolean = false) {
+            val center = at ?: position(cell)
+            val red = piece > 0
+            drawCircle(fade(Color(0xFF7B5841), alpha * .2f), stepX * .435f * scale, center + Offset(0f, 2.dp.toPx()))
+            drawCircle(Brush.radialGradient(listOf(fade(Color(0xFFFFFAEA), alpha), fade(Color(0xFFEAD0A3), alpha)),
+                center = center - Offset(stepX * .14f, stepX * .18f), radius = stepX * .75f),
+                stepX * .425f * scale, center)
+            drawCircle(fade(if (red) Color(0xFFB76D58) else Color(0xFF6C5A50), alpha),
+                stepX * .37f * scale, center, style = Stroke(1.dp.toPx()))
+            // 需求③：移动中的棋子提亮一圈，隔着半个棋盘也能一眼看见对方走了哪枚
+            if (highlight) drawCircle(fade(Color(0xFF9F87B0), alpha * .5f), stepX * .49f * scale, center,
+                style = Stroke(2.dp.toPx()))
+            textPaint.color = if (red) android.graphics.Color.rgb(166, 65, 56) else android.graphics.Color.rgb(68, 58, 58)
+            textPaint.alpha = (255 * alpha).toInt().coerceIn(0, 255)
+            textPaint.textSize = stepX * .63f * scale
+            val glyph = when (abs(piece)) {
+                1 -> if (red) "帅" else "将"
+                2 -> if (red) "仕" else "士"
+                3 -> if (red) "相" else "象"
+                4 -> "马"
+                5 -> "车"
+                6 -> if (red) "炮" else "砲"
+                else -> if (red) "兵" else "卒"
+            }
+            drawContext.canvas.nativeCanvas.drawText(glyph, center.x, center.y - (textPaint.ascent() + textPaint.descent()) / 2, textPaint)
+            textPaint.alpha = 255
+        }
+
+        val anim = playing
         state.board.forEachIndexed { index, piece ->
             if (piece != 0) {
-                val center = position(GridCell(index % 9, index / 9))
-                val red = piece > 0
-                drawCircle(Color(0xFF7B5841).copy(alpha = .2f), stepX * .435f, center + Offset(0f, 2.dp.toPx()))
-                drawCircle(Brush.radialGradient(listOf(Color(0xFFFFFAEA), Color(0xFFEAD0A3)),
-                    center = center - Offset(stepX * .14f, stepX * .18f), radius = stepX * .75f),
-                    stepX * .425f, center)
-                drawCircle(if (red) Color(0xFFB76D58) else Color(0xFF6C5A50), stepX * .37f, center, style = Stroke(1.dp.toPx()))
-                textPaint.color = if (red) android.graphics.Color.rgb(166, 65, 56) else android.graphics.Color.rgb(68, 58, 58)
-                textPaint.textSize = stepX * .63f
-                val glyph = when (abs(piece)) {
-                    1 -> if (red) "帅" else "将"
-                    2 -> if (red) "仕" else "士"
-                    3 -> if (red) "相" else "象"
-                    4 -> "马"
-                    5 -> "车"
-                    6 -> if (red) "炮" else "砲"
-                    else -> if (red) "兵" else "卒"
-                }
-                drawContext.canvas.nativeCanvas.drawText(glyph, center.x, center.y - (textPaint.ascent() + textPaint.descent()) / 2, textPaint)
+                val cell = GridCell(index % 9, index / 9)
+                // 动画期间，落点上的静态棋子先让位——否则会和新落下的那枚重影
+                if (anim != null && cell == anim.to) return@forEachIndexed
+                val center = position(cell)
+                drawPiece(cell, piece, highlight = anim != null && cell == anim.from)
                 if (index == displaySelection) {
                     drawCircle(Color(0xFF9F87B0).copy(alpha = .2f), stepX * .49f, center)
                     drawCircle(Color(0xFF8E70A2), stepX * .46f, center, style = Stroke(2.5.dp.toPx()))
@@ -412,6 +484,38 @@ private fun XiangqiBoard(state: XiangqiState, width: Dp, canMove: Boolean, flipp
                     }
                 }
             }
+
+        // 演出中的那一步：移动中的棋子、被吃子的缩没、起点空心标记与克制的行进箭头
+        if (anim != null) {
+            val raw = travelProgress.value
+            val t = XiangqiMoveAnimator.travel(raw)
+            val from = position(anim.from)
+            val to = position(anim.to)
+            val moving = Offset(from.x + (to.x - from.x) * t, from.y + (to.y - from.y) * t)
+            // 起点空心标记：让人看见"它是从哪儿出发的"
+            drawCircle(fade(Color(0xFF8E70A2), .55f), stepX * .3f, from, style = Stroke(1.5.dp.toPx()))
+            if (t > .04f) {
+                val delta = moving - from
+                val len = kotlin.math.hypot(delta.x, delta.y)
+                if (len > stepX * .3f) {
+                    drawLine(fade(Color(0xFF8E70A2), .38f), from, moving, 1.5.dp.toPx(),
+                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(4.dp.toPx(), 4.dp.toPx())))
+                    val ux = delta.x / len; val uy = delta.y / len
+                    val wing = stepX * .13f
+                    val perpX = -uy * wing * .6f; val perpY = ux * wing * .6f
+                    drawLine(fade(Color(0xFF8E70A2), .5f), moving,
+                        moving - Offset(ux * wing - perpX, uy * wing - perpY), 1.5.dp.toPx())
+                    drawLine(fade(Color(0xFF8E70A2), .5f), moving,
+                        moving - Offset(ux * wing + perpX, uy * wing + perpY), 1.5.dp.toPx())
+                }
+            }
+            drawPiece(anim.to, anim.mover, at = moving, highlight = true)
+            // 被吃子一直停在落点上，直到移动的棋子撞上它才缩没
+            if (anim.captured != 0) {
+                val f = XiangqiMoveAnimator.captureFade(raw)
+                if (f > 0f) drawPiece(anim.to, anim.captured, at = to, scale = 1f - f * .45f, alpha = 1f - f)
+            }
+        }
         }
         remoteSelection?.takeIf { it.x in 0..8 && it.y in 0..9 }?.let { cell ->
             drawCircle(Color(0xFF688F88), stepX * .48f, position(cell),
