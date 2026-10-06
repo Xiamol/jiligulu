@@ -56,7 +56,7 @@ object XiangqiMateClassifier {
                     .all { position.pieceAt(it.x, it.y) * loser.sign > 0 }
             if (ownBlocked) {
                 return XiangqiFinishProof(winner, XiangqiFinishFamily.SMOTHERED_CANNON,
-                    "闷宫将死", "将帅被己方棋子堵在宫底，遭炮将军且无合法应手。", checking)
+                    "闷杀", "将帅被己方棋子堵在宫底，遭炮将军且无合法应手。", checking)
             }
         }
         return XiangqiFinishProof(winner, XiangqiFinishFamily.CHECKMATE,

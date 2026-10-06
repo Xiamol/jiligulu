@@ -1,7 +1,12 @@
 package com.jiligulu.app.ui.littleworld
 
 internal enum class FinishMood { WIN, LOSE, DRAW, SHARED }
-internal data class GameFinishPresentation(val headline: String, val detail: String, val mood: FinishMood)
+internal data class GameFinishPresentation(
+    val headline: String,
+    val detail: String,
+    val mood: FinishMood,
+    val watermark: String? = null,
+)
 
 /**
  * 结算字印文案。
@@ -12,8 +17,9 @@ internal data class GameFinishPresentation(val headline: String, val detail: Str
 internal fun xiangqiSealText(proof: XiangqiFinishProof?, outcome: XiangqiOutcome): String = when (proof?.family) {
     XiangqiFinishFamily.CHECKMATE -> "将死"
     XiangqiFinishFamily.DOUBLE_CANNON -> "重炮"
-    XiangqiFinishFamily.SMOTHERED_CANNON -> "闷宫"
+    XiangqiFinishFamily.SMOTHERED_CANNON -> "闷杀"
     XiangqiFinishFamily.STALEMATE -> "困毙"
+    XiangqiFinishFamily.GENERAL_CAPTURE -> "擒将"
     else -> if (outcome == XiangqiOutcome.RED_WON) "红方胜" else "黑方胜"
 }
 
@@ -31,10 +37,13 @@ internal object GameFinishPresenter {
         if (game.outcome == XiangqiOutcome.PLAYING) return null
         val winner = if (game.outcome == XiangqiOutcome.RED_WON) XiangqiSide.RED else XiangqiSide.BLACK
         val proof = XiangqiMateClassifier.classify(game)
-        val detail = proof?.let { "${it.displayName} · ${it.displayDetail}" } ?: "${if (winner == XiangqiSide.RED) "红方" else "黑方"}取得这一局"
-        return if (humanSide == null) GameFinishPresentation(if (winner == XiangqiSide.RED) "红方胜出" else "黑方胜出", detail, FinishMood.SHARED)
-        else if (humanSide == winner) GameFinishPresentation("你赢啦", detail, FinishMood.WIN)
-        else GameFinishPresentation("这局输了", detail, FinishMood.LOSE)
+        val loserName = if (winner == XiangqiSide.RED) "黑方" else "红方"
+        val detail = proof?.let { "${it.displayName} · ${it.displayDetail.replace("对方", loserName)}" }
+            ?: "${if (winner == XiangqiSide.RED) "红方" else "黑方"}取得这一局"
+        val watermark = proof?.let { xiangqiSealText(it, game.outcome) }
+        return if (humanSide == null) GameFinishPresentation(if (winner == XiangqiSide.RED) "红方胜出" else "黑方胜出", detail, FinishMood.SHARED, watermark)
+        else if (humanSide == winner) GameFinishPresentation("你赢啦", detail, FinishMood.WIN, watermark)
+        else GameFinishPresentation("这局输了", detail, FinishMood.LOSE, watermark)
     }
 
     /** The real completed line, including an overline. No five-in-a-row is invented from outcome text. */

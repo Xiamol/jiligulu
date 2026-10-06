@@ -197,7 +197,7 @@ internal fun GameFinishOverlay(
 
 @Composable
 private fun InkFinishWatermark(result: GameFinishPresentation, modifier: Modifier = Modifier) {
-    val word = when (result.mood) {
+    val word = result.watermark ?: when (result.mood) {
         FinishMood.LOSE -> "败北"
         FinishMood.DRAW -> "和局"
         FinishMood.WIN, FinishMood.SHARED -> "胜利"
@@ -220,9 +220,9 @@ private fun InkFinishWatermark(result: GameFinishPresentation, modifier: Modifie
             }
         }
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(word, fontFamily = GuluBrandFont, fontSize = 70.sp, letterSpacing = 9.sp,
+            Text(word, fontFamily = GuluBrandFont, fontSize = if (word.length > 2) 48.sp else 70.sp, letterSpacing = 9.sp,
                 color = ink.copy(alpha = .88f), textAlign = TextAlign.Center)
-            if (result.mood == FinishMood.SHARED) Text(result.headline, fontSize = 13.sp,
+            if (result.watermark != null || result.mood == FinishMood.SHARED) Text(result.headline, fontSize = 13.sp,
                 color = ink.copy(alpha = .76f), textAlign = TextAlign.Center)
         }
     }
