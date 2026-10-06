@@ -1,66 +1,59 @@
-# 叽里咕噜
+# 叽里咕噜 · 阿噜的小生活家 🪻
 
-Android 本地记账应用，Kotlin + Jetpack Compose + Room。当前版本 `0.6.2`（versionCode 12），奶油手账与糯云团桌宠。
+一只会陪你记账、收好回忆的糯云团。聊天记一笔，夹一张生活照片，再去阿噜的小窝坐坐。
 
-[已发布安装包](https://github.com/Xiamol/jiligulu/releases/latest) · [架构审计](docs/AUDIT_2026_09_23.md) · [在线聊天与更新修复](docs/CHAT_PROTOCOL_2026_09_23.md) · [远程更新配置](docs/UPDATES.md)
+**当前版本：1.0.0** · Android 8.0 及以上 · Kotlin / Jetpack Compose / Room
 
-后续接手与功能讨论先看 [当前路线图与用户决策](docs/ROADMAP.md)；旧交接中的优先级可能已被这里的最新反馈替代。
+[下载 1.0.0](https://github.com/Xiamol/jiligulu/releases/tag/v1.0.0) · [本次更新](docs/RELEASE_1_0_0.md) · [公告信箱](docs/ANNOUNCEMENTS.md)
 
-v0.6.2 新增图片与悬浮截图记账、远程公告信箱、按日翻页与统计明细优化。详见 [版本说明](docs/RELEASE_0_6_0.md) 和 [公告运营说明](docs/ANNOUNCEMENTS.md)。
+## 从小账本，长成小生活家
+
+- **账本**：对话记账、图片识别和悬浮截图，先检查草稿，再确认入账；手动记账支持自动分类、小算盘和夹照片。
+- **小窝**：整页插画场景里的愿望瓶、未来信箱、生活纪念册、今日小签与时光列车。点点房间里的物件，打开属于自己的小角落。
+- **统计**：五天柱图与整月折线切换，实际支出和日均参考线分别开关；分类圆环、可滚动图例、小窗明细和预算进度。
+
+星星形状的愿望瓶记录攒钱进度；未来信笺留给以后的自己；照片可以夹进账单、纪念册，也能制作明信片和海报。喜欢的小签与纸条可以收藏，还能写下自己的话。
+
+四款皮肤关联页面装饰与配色。阿噜会说悄悄话，也有睡眠、夜景和一些藏起来的小彩蛋，等你慢慢发现 ♡
+
+### 记账之外，坐下来玩一局
+
+象棋、15 路五子棋、穿墙贪吃蛇和好运转盘。棋类支持人机、同屏轮流、附近棋友及互联网房间；选中、可落点、悔棋协商、回合计时、走子动画和结算反馈都更清楚。附近对局需要同一局域网，互联网房间需要网络和可用的房间服务。
+
+## 看看阿噜的小窝
+
+以下是 Android 模拟器的实际界面，使用演示数据；显示会随主题、屏幕与内容变化。
+
+<img src="docs/images/v1-room.png" width="280" alt="阿噜的小窝，整页场景与物件入口" /> <img src="docs/images/v1-statistics.png" width="280" alt="收支统计与分类圆环" />
+
+## 安装与使用
+
+从 [GitHub Releases](https://github.com/Xiamol/jiligulu/releases/latest) 下载 APK。已有版本请**直接覆盖安装，不要先卸载**，保留本机账单、照片、对话与设置。1.0.0 使用 versionCode 13，沿用此前安装包签名。
+
+基本账本、小窝和本地游戏可离线使用。AI 对话及识图需要在设置中填写自己的 DeepSeek API Key，并连接网络；公开安装包不内置开发者的私人 Key，费用以服务商账单为准。用量页显示本机收到的 token、缓存情况和预估费用，不承诺固定缓存命中率。
+
+悬浮截图由你授权后使用，可调整大小并记住位置。全局折射默认关闭，开启时由 Android 请求录屏授权；微信快捷入口需要安装微信，双开设备可能先显示系统应用选择页。
+
+数据保存在本机。调用 AI 时会发送你提交的文字/图片、近期对话和必要的账本上下文；识别不会自动入账。当前没有跨设备同步或独立整库备份功能，请妥善保留本机数据。
 
 ## 构建
 
-使用 Android SDK 35、JDK 17 或 21。`local.properties` 中配置本机 `sdk.dir`，命令行的 `JAVA_HOME` 指向 JDK。Gradle Wrapper 已随项目提供并固定为 8.11.1，无需单独安装 Gradle。
-
-如需内置 AI 服务的默认 API Key，在 `local.properties` 中增加 `DEEPSEEK_API_KEY=你的Key`（该文件不入版本库）。未配置也能构建，只是 AI 功能需在应用设置页手动填写 Key。
-
-在项目根目录执行：
+需要 Android SDK 35、JDK 17 或 21。配置本机 `local.properties` 的 `sdk.dir`，使用随项目提供的 Gradle Wrapper。
 
 ```powershell
-.\gradlew.bat :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
+.\gradlew.bat :app:assembleRelease :app:testDebugUnitTest --offline -PpublicRelease=true
 ```
 
-调试 APK：`app/build/outputs/apk/debug/app-debug.apk`。
-测试报告：`app/build/reports/tests/testDebugUnitTest/index.html`。
-Lint 报告：`app/build/reports/lint-results-debug.html`。
+`-PpublicRelease=true` 强制留空构建时默认 API Key。个人本地构建可在未提交的 `local.properties` 配置 `DEEPSEEK_API_KEY`，也可安装后在设置中填写。
 
-## 代码入口
+APK：`app/build/outputs/apk/release/app-release.apk`；测试报告：`app/build/reports/tests/testDebugUnitTest/index.html`。
 
-- `JiliguluApp.kt` / `AppContainer`：应用级依赖和数据库、仓库的创建。
-- `ui/main/MainScreen.kt`：主导航、独立的顶部桌宠区域、各页可保存状态。
-- `ui/persona/GuluCompanionHeader.kt`：常驻桌宠及台词展示；包含浅色、深色 Compose Preview。
-- `ui/persona/PersonaViewModel.kt`：始终有值的文案状态、可见时的刷新计时、点击互动。
-- `ui/startup`：入场动画与数据准备协调，旧 Activity 的暂停不能取消新 Activity 的加载。
-- `data/update`：公开 GitHub Releases 版本检查，未配置源时不联网。
-- `data/reminder`：AlarmManager 单一提醒源，权限不足时使用非精确闹钟；保存到期时间，开机、覆盖安装、冷启动时恢复。
-- `domain/persona/PersonaEngine.kt`：台词选择、展示间隔与提醒优先级；纯逻辑测试在 `app/src/test`。
-- `ui/components/LedgerCard.kt` / `ui/theme`：共享卡片、颜色与排版。
-- `ui/settings/SettingsViewModel.kt`：设置草稿、加载、保存和提醒调度；界面仅发用户事件。
-- `data/repository` / `data/local`：持久化操作、Room DAO、实体与 schema。
+Room schema 为 v6，保留 v1–v6 迁移链，升级不清库。发布时增加 versionCode，保持 applicationId 和签名一致。[数据升级](docs/DATABASE_UPGRADES.md) · [更新源](docs/UPDATES.md)
 
-## 界面验收
+## 源码与第三方资源
 
-1. 进入账本：标题、桌宠和台词同时显示；滚动账单时顶部保持位置。
-2. 普通状态停留约 10 秒：只更换台词；待喝水时保留拿杯姿态，直到点击并完成喝水动作。
-3. 连续点桌宠：每次立即换句；有其他候选台词时不连续重复。
-4. 账本与统计切换后返回：保持各自滚动位置；打开设置再返回也保持状态。
-5. 设置已有免打扰时间后重新打开：显示已保存值；分别检查浅色与深色主题。
-6. 手动记账打开键盘：表单可滚动，保存操作始终可达；保存中禁止重复提交。
-7. 检查小屏、大字体、长金额及长分类名。统计页在窄屏或大字体下将图表与图例上下排列。
+源码已公开在本仓库。界面、字体、美术及第三方组件的许可分别适用，不将代码公开等同于所有素材均可任意商用。
 
-## 当前数据行为
+Pikafish 组件及对应源码、作者和许可证随包保留，见 [打包说明](third_party/pikafish/PACKAGING.txt)。配套权重有独立的[非商业用途许可](third_party/pikafish/NNUE-License.md)。字体许可在 `app/src/main/assets/licenses`。
 
-- 账本和统计使用同一个账单详情面板，可改金额、名称和日期时间。手动新增也支持补记。
-- 对话未明确时间时默认确认入账的此刻；明确“昨天中午”等时间则按发送时的设备时区解析并显示在草稿中。模糊或无效时间需确认，不静默改成今天。
-- 聊天消息、草稿与确认卡保存在 Room。新草稿首次展开，主动收起或离开聊天再返回后折叠；确认成功才发一条结果回复。旧版 DISMISSED 草稿也可继续入账。删除的草稿保留墓碑，不能再次入账。
-- AI 改喝水设置、彻底清空回收站需点击确认卡。检查更新卡跳转设置并发起真实检查；模型文字不会直接改变设置。
-- 多轮 AI 请求将 assistant 原文封装为确定的 JSON reply，与强制 JSON 输出格式保持一致；不改写数据库中的聊天历史。本轮末尾附加输出协议，避免重新混入纯文本示例。请保留此约定及对应真实接口复现工具。
-- 自动更新在首次进入和从后台返回时实际检查，成功后统一记录完成时间；失败保留上次成功时间，不再按 6 小时跳过。
-- 设置支持《阿噜使用手册》与清空历史对话。清空保留账单、分类、预算、回收站账单和未入账草稿；正在回复时拒绝清空。
-- 批量确认和草稿状态同事务，失败回滚，重复确认不重复入账。
-- Room schema 为 v6，v1 至 v6 的迁移链保留账单、分类、预算与对话，详见 [升级说明](docs/DATABASE_UPGRADES.md)。
-- 正文和品牌字体内置，许可证包含在 assets/licenses 中；角色资源位于 res/drawable-nodpi。
-
-账单、对话与设置保存在本机；调用 AI 时，会发送消息、近期对话及部分账本上下文。独立备份、跨设备同步与 SVG 真正渲染仍不在本轮实现范围。
-
-当前为本地开发版本；打包结果与真机交互、视觉验收分别记录，不用构建成功代替设备验证。
+阿噜会继续陪你慢慢记，把普通的一天也收好。

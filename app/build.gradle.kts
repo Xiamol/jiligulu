@@ -11,6 +11,8 @@ plugins {
 // 内置 API Key 从 local.properties 读取（该文件已被 .gitignore 排除，不会进仓库）。
 // 也可用环境变量 DEEPSEEK_API_KEY 覆盖，方便 CI。两者都缺省时注入空串。
 val deepSeekApiKey: String = run {
+    // Public artifacts must not contain the developer's private credential.
+    if (providers.gradleProperty("publicRelease").orNull == "true") return@run ""
     val fromEnv = System.getenv("DEEPSEEK_API_KEY").orEmpty()
     val raw = if (fromEnv.isNotBlank()) fromEnv else {
         val propsFile = rootProject.file("local.properties")
@@ -33,8 +35,8 @@ android {
         applicationId = "com.jiligulu.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 12
-        versionName = "0.6.2"
+        versionCode = 13
+        versionName = "1.0.0"
 
         // 注入到 BuildConfig.DEEPSEEK_API_KEY，由 AiConfig.DEFAULT_API_KEY 读取
         buildConfigField("String", "DEEPSEEK_API_KEY", "\"$deepSeekApiKey\"")
