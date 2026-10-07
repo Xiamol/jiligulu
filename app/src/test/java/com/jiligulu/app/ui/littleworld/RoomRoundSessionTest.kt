@@ -294,10 +294,9 @@ class RoomRoundSessionTest {
 
     @Test fun backgroundPresencePausesTheOpponentWithoutErasingOrLosingTheRound() {
         val (host, guest, channel) = gomoku(1)
-        host.submitMove(GridCell(7,7)); drain()
         guest.setForeground(false); drain()
         assertTrue(host.state.value.remoteBackground); assertTrue(guest.state.value.localBackground)
-        host.submitMove(GridCell(8,8)); drain(); assertEquals(1, host.state.value.revision)
+        host.submitMove(GridCell(7,7)); drain(); assertEquals(0, host.state.value.revision)
         channel.host.hold = true; channel.guest.hold = true
         shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(125))
         assertTrue(host.state.value.connected); assertTrue(guest.state.value.connected)
@@ -305,6 +304,7 @@ class RoomRoundSessionTest {
         channel.host.hold = false; channel.guest.hold = false
         guest.setForeground(true); drain()
         assertFalse(host.state.value.remoteBackground)
+        host.submitMove(GridCell(7,7)); drain()
         guest.submitMove(GridCell(8,8)); drain()
         assertEquals(2, host.state.value.revision); assertEquals(host.state.value.game, guest.state.value.game)
     }
