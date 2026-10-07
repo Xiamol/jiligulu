@@ -7,6 +7,17 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class CompanionMemoryPolicyTest {
+    @Test fun ordinaryChineseSelfDisclosuresCanUpdateLifeStages() {
+        assertEquals("21岁", remember("我今年二十一岁哦", "age", "21").single().value)
+        assertEquals("18岁", remember("我现在十八岁", "age", "18").single().value)
+        assertEquals("女", remember("我是个女生呀", "gender", "女性").single().value)
+        assertEquals("已毕业", remember("我已经毕业了", "study", "已毕业").single().value)
+    }
+    @Test fun aClippedAgeOrGenderCannotComeFromSomeoneElsesRelationship() {
+        assertTrue(remember("我是女生的哥哥", "gender", "女", "我是女生").isEmpty())
+        assertTrue(remember("我今年21岁的妹妹", "age", "21", "我今年21岁").isEmpty())
+        assertTrue(remember("如果我已经毕业了呢", "study", "已毕业", "我已经毕业了").isEmpty())
+    }
     private fun remember(input: String, kind: String, value: String, evidence: String = input) =
         CompanionMemoryPolicy.accepted(input, listOf(AiMemoryUpdate(kind, value, evidence)), 123)
 

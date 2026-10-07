@@ -1,0 +1,176 @@
+package com.jiligulu.app.ui.littleworld
+
+import android.content.Context
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.LocalContext
+import com.jiligulu.app.R
+import com.jiligulu.app.core.audio.UiSound
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import java.time.LocalDate
+import java.time.Instant
+import java.time.ZoneId
+import java.time.Duration
+import kotlin.random.Random
+
+@Composable
+internal fun ColumnScope.FortuneWheelGame(boardSize: Dp, foreground: Boolean,
+    onOpenFuture: () -> Unit, onOpenMemories: () -> Unit, onOpenPaper: () -> Unit) {
+    val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences("gulu_daily_luck", Context.MODE_PRIVATE) }
+    var date by remember { mutableStateOf(LocalDate.now()) }
+    var luckPage by rememberSaveable { mutableStateOf(false) }
+    var sign by rememberSaveable { mutableStateOf(prefs.getString("sign", DailyLuckEngine.signs.first()).orEmpty()) }
+    var rewrittenDay by remember { mutableStateOf(prefs.getString("rewritten_day", "").orEmpty()) }
+    var signPicker by remember { mutableStateOf(false) }
+    var stamp by remember { mutableStateOf(false) }
+    var resultText by rememberSaveable { mutableStateOf(prefs.getString("last_task", "").orEmpty()) }
+    var savedAngle by rememberSaveable { mutableFloatStateOf(0f) }
+    val angle = remember { Animatable(savedAngle) }
+    var spinning by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val luck = remember(date, sign, rewrittenDay) { DailyLuckEngine.forDate(date, sign, rewrittenDay == date.toString()) }
+    val task = FortuneWheelTasks.groups.flatten().firstOrNull { it.text == resultText }
+    LaunchedEffect(foreground) {
+        while (foreground) {
+            val zone = ZoneId.systemDefault()
+            val now = Instant.now()
+            date = now.atZone(zone).toLocalDate()
+            val midnight = date.plusDays(1).atStartOfDay(zone).toInstant()
+            delay((Duration.between(now, midnight).toMillis() + 50).coerceAtLeast(1_000))
+        }
+    }
+    LaunchedEffect(stamp) { if (stamp) { delay(1550); stamp = false } }
+    LaunchedEffect(spinning, foreground) {
+        if (spinning && foreground) {
+            var last = (angle.value / 60f).toInt()
+            snapshotFlow { (angle.value / 60f).toInt() }.collect { next ->
+                if (next != last) { UiSound.wheelTick(context); last = next }
+            }
+        }
+    }
+    LaunchedEffect(foreground) {
+        if (!foreground && spinning) { angle.stop(); savedAngle = angle.value % 360; spinning = false }
+    }
+    if (signPicker) SecretWoodDialog("挑一颗小星座", { signPicker = false }, confirmLabel = "随缘也好", compactWidth = 286.dp) {
+        DailyLuckEngine.signs.chunked(3).forEach { choices ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                choices.forEach { value ->
+                    TextButton(onClick = { UiSound.select(context); sign = value; prefs.edit().putString("sign", value).apply(); signPicker = false },
+                        modifier = Modifier.weight(1f), colors = ButtonDefaults.textButtonColors(contentColor = SecretWoodInk)) {
+                        Text(value, fontSize = 13.sp, maxLines = 1)
+                    }
+                }
+                repeat(3 - choices.size) { Spacer(Modifier.weight(1f)) }
+            }
+        }
+    }
+    BoxWithConstraints(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+        val compact = maxHeight < 520.dp
+        Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+                listOf(false to "转一转", true to "今日运势").forEach { (page, title) ->
+                    TextButton(onClick = { UiSound.select(context); luckPage = page },
+                        colors = ButtonDefaults.textButtonColors(contentColor = if (luckPage == page) Color(0xFF8B74A4) else Color(0xFF9A929A))) {
+                        Text(title, style = if (luckPage == page) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodyMedium)
+                    }
+                }
+            }
+            Spacer(Modifier.height(if (compact) 12.dp else 24.dp))
+            if (!luckPage) {
+                SecretPrizeWheel(angle.value, minOf(boardSize, if (compact) 270.dp else 310.dp), enabled = foreground && !spinning) {
+                    if (!spinning && foreground) {
+                        UiSound.select(context); spinning = true
+                        scope.launch {
+                            try {
+                                val winner = Random.nextInt(FortuneWheelTasks.groups.size)
+                                val stop = 360f - (winner * 60f + 30f)
+                                angle.animateTo(angle.value + 1800f + (stop - angle.value % 360f + 360f) % 360f,
+                                    tween(1900, easing = FastOutSlowInEasing))
+                                savedAngle = angle.value % 360f
+                                resultText = FortuneWheelTasks.groups[winner].random().text
+                                prefs.edit().putString("last_task", resultText).apply()
+                            } finally { spinning = false }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(18.dp))
+                Box(Modifier.fillMaxWidth().height(42.dp), contentAlignment = Alignment.Center) {
+                    Text(if (spinning) "好运正在绕一圈…" else resultText.ifBlank { "点点转盘，收一件小快乐" },
+                        style = MaterialTheme.typography.bodyMedium, color = SecretWoodInk,
+                        textAlign = TextAlign.Center, maxLines = 2)
+                }
+                Box(Modifier.height(46.dp), contentAlignment = Alignment.Center) {
+                    when (task?.destination) {
+                        "future" -> TextButton(onClick = onOpenFuture) { Text("去寄一封") }
+                        "memories" -> TextButton(onClick = onOpenMemories) { Text("翻翻纪念册") }
+                        "paper" -> TextButton(onClick = onOpenPaper) { Text("听句悄悄话") }
+                    }
+                }
+            } else {
+                Row(Modifier.widthIn(max = 290.dp).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Text("${date.monthValue}月${date.dayOfMonth}日 · 趣味小黄历", style = MaterialTheme.typography.bodySmall, color = Color(0xFF9A929A))
+                    TextButton(onClick = { signPicker = true }) { Text(sign, fontSize = 13.sp) }
+                }
+                Text(luck.title, Modifier.padding(vertical = 8.dp), fontFamily = com.jiligulu.app.ui.theme.GuluBrandFont,
+                    fontSize = 28.sp, color = Color(0xFF8B74A4))
+                LuckStars("心情", luck.mood); LuckStars("灵感", luck.inspiration); LuckStars("相遇", luck.company)
+                Spacer(Modifier.height(14.dp))
+                Column(Modifier.widthIn(max = 282.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    LuckAdvice("宜", luck.goodFor, Color(0xFF819D89))
+                    LuckAdvice("放下", luck.letGo, Color(0xFFAA9598))
+                    LuckAdvice("幸运色", luck.luckyColor, Color(0xFF9183A7))
+                }
+                Box(Modifier.fillMaxWidth().height(72.dp), contentAlignment = Alignment.Center) {
+                    Text(luck.message, Modifier.widthIn(max = 272.dp), style = MaterialTheme.typography.bodySmall,
+                        color = Color(0xFF9A929A), textAlign = TextAlign.Center)
+                }
+                TextButton(onClick = {
+                    UiSound.pet(context); rewrittenDay = date.toString()
+                    prefs.edit().putString("rewritten_day", rewrittenDay).apply(); stamp = true
+                }, enabled = rewrittenDay != date.toString()) {
+                    Text(if (rewrittenDay == date.toString()) "阿噜盖过章啦 ♡" else "让阿噜逆天改命")
+                }
+            }
+        }
+        if (stamp) Column(Modifier.matchParentSize().background(Color(0xFFFAF7F0).copy(alpha = .93f)),
+            verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
+            Image(painterResource(R.drawable.gulu_luck_stamp), null, Modifier.size(172.dp))
+            Text("逆天改命 · 阿噜盖章", fontFamily = com.jiligulu.app.ui.theme.GuluBrandFont,
+                fontSize = 23.sp, color = Color(0xFF8B74A4))
+        }
+    }
+}
+
+@Composable private fun LuckStars(label: String, count: Int) {
+    Row(Modifier.width(228.dp).height(31.dp), verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(label, style = MaterialTheme.typography.bodyMedium, color = SecretWoodInk)
+        Text("★".repeat(count) + "☆".repeat(5 - count), color = Color(0xFFB6A2CB), fontSize = 20.sp, letterSpacing = 4.sp)
+    }
+}
+
+@Composable private fun LuckAdvice(label: String, text: String, color: Color) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(label, Modifier.width(54.dp), style = MaterialTheme.typography.labelMedium, color = color)
+        Text(text, style = MaterialTheme.typography.bodyMedium, color = SecretWoodInk)
+    }
+}

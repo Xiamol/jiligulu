@@ -7,6 +7,13 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class PersonaEngineTest {
+    @Test fun `a name at the beginning never leaves a leading comma`() {
+        val engine = engine()
+        assertEquals("路陌大人，今天慢慢来。", engine.render("{n}，今天慢慢来。", "路陌大人"))
+        assertEquals("今天慢慢来。", engine.render("{n}，今天慢慢来。", ""))
+        assertEquals("你好，路陌大人。", engine.render("你好{n}。", "路陌大人"))
+        assertEquals("记上了，路陌大人今天也来啦。", engine.render("记上了，{n}今天也来啦。", "路陌大人"))
+    }
     private fun engine(vararg entries: QuipEntry) = PersonaEngine(QuipLibrary(entries.toList()))
 
     @Test

@@ -89,6 +89,8 @@ class PersonaEngine(private val library: QuipLibrary) {
     fun render(template: String, nicknameWithSuffix: String): String {
         val n = if (nicknameWithSuffix.isBlank()) "" else "，$nicknameWithSuffix"
         return template.replace("{n}", n)
+            .replace(Regex("，{2,}"), "，")
+            .trimStart(' ', '\n', '\r', '，', ',', '、', '；', ';', '：', ':')
     }
 
     // ---------- 事件 API ----------

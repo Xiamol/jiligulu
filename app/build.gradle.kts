@@ -35,8 +35,8 @@ android {
         applicationId = "com.jiligulu.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 14
-        versionName = "1.0.1"
+        versionCode = 15
+        versionName = "1.0.2"
 
         // 注入到 BuildConfig.DEEPSEEK_API_KEY，由 AiConfig.DEFAULT_API_KEY 读取
         buildConfigField("String", "DEEPSEEK_API_KEY", "\"$deepSeekApiKey\"")

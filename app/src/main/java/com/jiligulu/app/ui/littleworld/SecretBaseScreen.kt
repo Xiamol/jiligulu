@@ -143,15 +143,12 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
     var editChessProfile by remember { mutableStateOf(false) }
     var hubXiangqi by rememberSaveable { mutableStateOf(true) }
     var activity by rememberSaveable { mutableStateOf<SecretActivity?>(null) }
+    var paperFromWheel by rememberSaveable { mutableStateOf(false) }
     var choosingOpponent by rememberSaveable { mutableStateOf(false) }
     val fullGame = activity == SecretActivity.SNAKE || activity == SecretActivity.GOMOKU ||
         activity == SecretActivity.XIANGQI || activity == SecretActivity.WHEEL || activity == SecretActivity.BOARD
     SceneSystemBars(lightIcons = !fullGame)
-    var prize by rememberSaveable { mutableStateOf<String?>(null) }
-    var spinning by remember { mutableStateOf(false) }
-    val rotation = remember { Animatable(0f) }
     val scope = rememberCoroutineScope()
-    var spinJob by remember { mutableStateOf<Job?>(null) }
     var snake by rememberSaveable(stateSaver = snakeStateSaver) { mutableStateOf(SnakeEngine.newGame()) }
     var snakeRunning by remember { mutableStateOf(false) }
     var snakeStarted by rememberSaveable { mutableStateOf(false) }
@@ -483,8 +480,6 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
         snakeRunning = false
         gomokuPaused = true
         xiangqiPaused = true
-        spinJob?.cancel()
-        spinning = false
         checkpointGomoku(); checkpointXiangqi(); checkpointSnake()
     }
     fun closeNetworkRooms() {
@@ -561,16 +556,19 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
         if (activeRoomConnected()) { cancelHelp(); leaveRoomAction = action } else action()
     }
     fun pauseToys() { pauseLocalToys(); closeNetworkRooms() }
-    fun closeToy() { pauseToys(); cancelModeLoad(); leaveRoomAction = null; activity = null; choosingOpponent=false; clockSetupVisible = false; resumeAfterClockSetup = false }
+    fun closeToy() { pauseToys(); cancelModeLoad(); leaveRoomAction = null; paperFromWheel = false
+        activity = null; choosingOpponent=false; clockSetupVisible = false; resumeAfterClockSetup = false }
     fun returnChessHub() {
         pauseToys(); cancelModeLoad(); leaveRoomAction = null; choosingOpponent = false
-        clockSetupVisible = false; resumeAfterClockSetup = false; activity = SecretActivity.BOARD; gameControlsBottom = 0f
+        clockSetupVisible = false; resumeAfterClockSetup = false; paperFromWheel = false
+        activity = SecretActivity.BOARD; gameControlsBottom = 0f
     }
     fun backFromToy() {
         if (activity == SecretActivity.GOMOKU || activity == SecretActivity.XIANGQI) returnChessHub() else closeToy()
     }
     fun openToy(value: SecretActivity) {
         if (!archiveReady || gameLoading) return
+        paperFromWheel = false
         if(value==SecretActivity.PAPER) UiSound.paper(context) else UiSound.navigate(context)
         pauseToys()
         gameControlsBottom = 0f
@@ -667,7 +665,7 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
             }
         }
         lifecycle.addObserver(observer)
-        onDispose { lifecycle.removeObserver(observer); pauseLocalToys(); cancelModeLoad(); spinJob?.cancel(); closeNetworkRooms() }
+        onDispose { lifecycle.removeObserver(observer); pauseLocalToys(); cancelModeLoad(); closeNetworkRooms() }
     }
     LaunchedEffect(sleeping) { if (sleeping) closeToy() }
     val visibleNetwork = if (xiangqiMode == XiangqiPlayMode.ONLINE) online else lan
@@ -719,13 +717,6 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
         }
     }
     LaunchedEffect(bubbleToken) { if (secretBubble != null) { delay(3000); secretBubble = null } }
-    LaunchedEffect(spinning,foreground) {
-        if(spinning&&foreground) {
-            var detent=(rotation.value/60f).toInt()
-            while(isActive&&spinning&&foreground) {delay(18);val next=(rotation.value/60f).toInt()
-                if(next!=detent){UiSound.wheelTick(context);detent=next}}
-        }
-    }
     LaunchedEffect(gomoku, xiangqi, online.game, lan.game, gomokuOnline.game, gomokuLan.game,
         online.connected, lan.connected, online.awaitingAck, lan.awaitingAck, online.pendingUndoRequest, lan.pendingUndoRequest,
         gomokuOnline.pendingUndoRequest, gomokuLan.pendingUndoRequest) {
@@ -798,12 +789,25 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
     LaunchedEffect(roomInvite, archiveReady, foreground, sleeping) {
         val invite = roomInvite ?: return@LaunchedEffect
         if (!archiveReady || !foreground) return@LaunchedEffect
+        val currentGame = when {
+            activity == SecretActivity.XIANGQI && xiangqiMode == XiangqiPlayMode.ONLINE -> "xiangqi"
+            activity == SecretActivity.GOMOKU && gomokuMode == GomokuPlayMode.ONLINE -> "gomoku"
+            else -> null
+        }
+        val currentCode = if (currentGame == "xiangqi") online.hostAddress else gomokuOnline.hostAddress
+        val currentActive = if (currentGame == "xiangqi") online.sessionActive && !online.roomEnded && !online.peerLeft
+            else currentGame == "gomoku" && gomokuOnline.sessionActive && !gomokuOnline.roomEnded && !gomokuOnline.peerLeft
+        if (invite.matchesLiveRoom(currentGame, currentCode, currentActive)) {
+            onRoomInviteConsumed()
+            return@LaunchedEffect
+        }
         if (sleeping) {
             night = false; gamePreferences.edit().putBoolean("secret_night", false).apply()
             prefs.setSecretPetSleeping(false)
             return@LaunchedEffect
         }
         val join = {
+            paperFromWheel = false
             hubXiangqi = invite.game == "xiangqi"
             choosingOpponent = false
             activity = if (hubXiangqi) SecretActivity.XIANGQI else SecretActivity.GOMOKU
@@ -878,8 +882,8 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
                     onMove = { x, y -> if (!helpBusy) playGomokuMove(GridCell(x, y)) },
                     onToggle = { cancelHelp(); gomokuStarted = true; gomokuPaused = !gomokuPaused; checkpointGomoku() },
                     onRestart = { cancelHelp(); when (gomokuMode) {
-                        GomokuPlayMode.ONLINE -> if(gomokuOnline.roomEnded){choosingOpponent=true;closeNetworkRooms()}else gomokuOnlineSession.requestRematch()
-                        GomokuPlayMode.NEARBY -> if(gomokuLan.roomEnded){choosingOpponent=true;closeNetworkRooms()}else gomokuLanSession.requestRematch()
+                        GomokuPlayMode.ONLINE -> if(gomokuOnline.roomEnded){returnChessHub()}else gomokuOnlineSession.requestRematch()
+                        GomokuPlayMode.NEARBY -> if(gomokuLan.roomEnded){returnChessHub()}else gomokuLanSession.requestRematch()
                         else -> { gomokuHumanPlayer=3-gomokuHumanPlayer;gomokuColorAssigned=true;gomokuRestoreToken++;gomokuHistory = emptyList(); gomoku = GomokuEngine.newGame(); gomokuStarted = true; gomokuPaused = false; checkpointGomoku() }
                     } },
                     mode = gomokuMode, onMode = { value -> leaveNetworkSafely { changeGomokuMode(value) } }, room = visibleGomokuRoom, nearby = nearbyGomoku,
@@ -937,8 +941,8 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
                     onToggle = { cancelXiangqiSounds(); cancelHelp(); freezeThinkingClock(); if (!xiangqiStarted) { xiangqiPaused = true; resumeAfterClockSetup = false; clockSetupVisible = true }
                         else xiangqiPaused = !xiangqiPaused
                         checkpointXiangqi() },
-                    onRestart = { cancelXiangqiSounds(); cancelHelp(); if (xiangqiMode == XiangqiPlayMode.LAN) {if(lan.roomEnded){choosingOpponent=true;closeNetworkRooms()}else lanSession.requestRematch()}
-                        else if (xiangqiMode == XiangqiPlayMode.ONLINE) {if(online.roomEnded){choosingOpponent=true;closeNetworkRooms()}else onlineSession.requestRematch()}
+                    onRestart = { cancelXiangqiSounds(); cancelHelp(); if (xiangqiMode == XiangqiPlayMode.LAN) {if(lan.roomEnded){returnChessHub()}else lanSession.requestRematch()}
+                        else if (xiangqiMode == XiangqiPlayMode.ONLINE) {if(online.roomEnded){returnChessHub()}else onlineSession.requestRematch()}
                         else { xiangqiHumanSide=xiangqiHumanSide.opponent;xiangqiColorAssigned=true;xiangqiRestoreToken++;xiangqiHistory = emptyList(); xiangqi = XiangqiEngine.newGame(); xiangqiClock = XiangqiThinkingClock.reset(xiangqi, thinkingSeconds)
                             clockTickAt = 0L; clockEpoch++; xiangqiStarted = false; xiangqiPaused = true; resumeAfterClockSetup = false; clockSetupVisible = true; checkpointXiangqi() } },
                     humanSide=xiangqiHumanSide,onExit={leaveNetworkSafely(::returnChessHub)},
@@ -984,48 +988,16 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
                     onMoveSettled = { epoch, position, _ -> settleXiangqiSound(epoch, position) },
                     onPresentationSkipped = ::skipXiangqiPresentation)
                 SecretActivity.PAPER -> Unit // A fixed-size paper desk owns its own dialog below.
-                SecretActivity.WHEEL -> {
-                    Column(Modifier.fillMaxWidth().weight(1f), horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center) {
-                    Text("留一件小事给今天", style = MaterialTheme.typography.bodyMedium, color = Color(0xFF948692))
-                    Spacer(Modifier.height(22.dp))
-                    SecretPrizeWheel(rotation.value, minOf(boardSize, 320.dp), enabled = !spinning && foreground) {
-                        if (!spinning && foreground) {
-                            UiSound.select(context)
-                            spinning = true; prize = null
-                            spinJob = scope.launch {
-                            try {
-                                val winner = Random.nextInt(wheelGroups.size)
-                                val stop = 360f - (winner * 60f + 30f)
-                                rotation.animateTo(rotation.value + 1800f + (stop - rotation.value % 360f + 360f) % 360f,
-                                    tween(1900, easing = FastOutSlowInEasing))
-                                rotation.snapTo(rotation.value % 360f); prize = wheelGroups[winner].second.random()
-                            } finally { spinning = false }
-                            }
-                        }
-                    }
-                    Spacer(Modifier.height(20.dp))
-                    Text(prize?.let { "$it ♡" } ?: if (spinning) "好运正在绕一圈…" else "轻点转盘，看看今天的小任务",
-                        modifier = Modifier.height(28.dp), color = Color(0xFF79697F),
-                        style = if (prize != null) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodySmall)
-                    Box(Modifier.height(48.dp), contentAlignment = Alignment.Center) {
-                    prize?.let { result ->
-                        when (result) {
-                            "写封未来信" -> TextButton(onClick = { closeToy(); onOpenNotes() },colors=ButtonDefaults.textButtonColors(contentColor=SecretWoodInk)) { Text("去寄一封") }
-                            "看一张照片" -> TextButton(onClick = { closeToy(); onOpenMemories() },colors=ButtonDefaults.textButtonColors(contentColor=SecretWoodInk)) { Text("翻翻纪念册") }
-                            "听一句悄悄话" -> TextButton(onClick = { openToy(SecretActivity.PAPER) },colors=ButtonDefaults.textButtonColors(contentColor=SecretWoodInk)) { Text("去听悄悄话") }
-                        }
-                    }
-                    }
-                    Spacer(Modifier.height(32.dp))
-                    }
-                }
+                SecretActivity.WHEEL -> FortuneWheelGame(boardSize, foreground,
+                    onOpenFuture = onOpenNotes, onOpenMemories = onOpenMemories,
+                    onOpenPaper = { UiSound.paper(context); paperFromWheel = true })
             }
         }
         val showXiangqiClock = toy == SecretActivity.XIANGQI && !choosingOpponent &&
             (xiangqiMode == XiangqiPlayMode.CPU || xiangqiMode == XiangqiPlayMode.HOTSEAT ||
                 visibleNetwork.connected || visibleNetwork.reconnecting)
         if (fullGame) SecretGamePage(title, { leaveNetworkSafely(::backFromToy) },
+            backLabel = if (toy == SecretActivity.XIANGQI || toy == SecretActivity.GOMOKU) "返回棋友会" else "返回秘密基地",
             boardAspect = if (toy == SecretActivity.XIANGQI) 1.13f else 1f,
             reservedHeight = when (toy) {
                 SecretActivity.SNAKE -> 320
@@ -1065,6 +1037,11 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
         else if (toy == SecretActivity.PAPER) SecretPapersDialog(secretNotes, ::closeToy)
         else SecretToyDialog(title, ::closeToy, reservedHeight = 265, content = toyContent)
         }
+        // The paper is a child of the wheel, not a replacement destination. Keeping the
+        // wheel composed preserves its angle, picked task and tab when the paper closes.
+        if (!sleeping && activity == SecretActivity.WHEEL && paperFromWheel) {
+            SecretPapersDialog(secretNotes, { paperFromWheel = false })
+        }
         if (clockSetupVisible && activity == SecretActivity.XIANGQI &&
             xiangqiMode != XiangqiPlayMode.ONLINE && xiangqiMode != XiangqiPlayMode.LAN) {
             XiangqiThinkingTimeDialog(thinkingSeconds, starting = !xiangqiStarted,
@@ -1097,6 +1074,7 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
 /** Games own the whole destination; the room and its hit targets are removed while playing. */
 @Composable
 private fun SecretGamePage(title: String, onBack: () -> Unit, boardAspect: Float, reservedHeight: Int,
+    backLabel: String = "返回秘密基地",
     headerTrailing: @Composable () -> Unit = {},
     centeredHeader: Boolean = false,
     gameDecor: Boolean = false, decorEnabled: Boolean = false, decorResetKey: Any? = null,
@@ -1115,7 +1093,7 @@ private fun SecretGamePage(title: String, onBack: () -> Unit, boardAspect: Float
             horizontalAlignment = Alignment.CenterHorizontally) {
             Row(Modifier.fillMaxWidth().height(56.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = { UiSound.navigate(context); onBack() }, modifier = Modifier.size(44.dp)) {
-                    Icon(Icons.AutoMirrored.Outlined.ArrowBack, "返回秘密基地", tint = Color(0xFF665762))
+                    Icon(Icons.AutoMirrored.Outlined.ArrowBack, backLabel, tint = Color(0xFF665762))
                 }
                 Text(title, style = MaterialTheme.typography.titleLarge, color = Color(0xFF514A55))
                 Spacer(Modifier.weight(1f))
@@ -1174,7 +1152,7 @@ private fun SecretToyDialog(title: String, onDismiss: () -> Unit, reservedHeight
 }
 
 @Composable
-private fun SecretPrizeWheel(angle: Float, diameter: androidx.compose.ui.unit.Dp,
+internal fun SecretPrizeWheel(angle: Float, diameter: androidx.compose.ui.unit.Dp,
     enabled: Boolean, onSpin: () -> Unit) {
     val context = LocalContext.current
     val font = remember(context) { context.resources.getFont(R.font.zcool_kuaile) }
@@ -1189,7 +1167,7 @@ private fun SecretPrizeWheel(angle: Float, diameter: androidx.compose.ui.unit.Dp
     }
     Box(Modifier.size(diameter).testTag("secret-prize-wheel")
         .semantics { contentDescription = if (enabled) "好运转盘，轻点转盘转一下" else "好运转盘正在旋转" }
-        .clickable(enabled = enabled, role = Role.Button, onClick = onSpin), contentAlignment = Alignment.Center) {
+        .sceneClickable(enabled = enabled, role = Role.Button, onClick = onSpin), contentAlignment = Alignment.Center) {
         Canvas(Modifier.fillMaxSize().padding(10.dp).graphicsLayer { rotationZ=angle }) {
             val radius=size.minDimension*.47f
             val paperRadius=radius*.94f
@@ -1332,25 +1310,25 @@ private fun SecretRoomStage(sleeping: Boolean, toysEnabled: Boolean, onPet: () -
             .offset(left + sceneWidth * x, top + sceneHeight * y).size(sceneWidth * w, sceneHeight * h)
         @Composable fun toy(label: String, x: Float, y: Float, w: Float, h: Float,
             tagX: Float, tagY: Float, tagW: Float, tagH: Float, action: () -> Unit) {
-            Box(hotspot(x, y, w, h).clickable(enabled = !sleeping && toysEnabled, role = Role.Button, onClickLabel = label, onClick = action)
+            Box(hotspot(x, y, w, h).sceneClickable(enabled = !sleeping && toysEnabled, role = Role.Button, onClickLabel = label, onClick = action)
                 .semantics { contentDescription = label })
             Text(label, hotspot(tagX - tagW / 2, tagY - tagH / 2, tagW, tagH)
-                .clickable(enabled = !sleeping && toysEnabled, role = Role.Button, onClick = action)
+                .sceneClickable(enabled = !sleeping && toysEnabled, role = Role.Button, onClick = action)
                 .wrapContentSize(Alignment.Center), fontFamily = GuluBrandFont,
                 fontSize = 10.sp, color = if (night) Color(0xFFCFC1AD) else Color(0xFF66462C), maxLines = 1)
         }
         toy("好运转盘", .15f, .236f, .24f, .168f, .27f, .418f, .107f, .028f, onWheel)
         toy("贪吃蛇", .755f, .29f, .183f, .154f, .846f, .462f, .105f, .028f, onSnake)
         toy("小棋桌", .61f, .541f, .34f, .064f, .854f, .529f, .094f, .027f, onGomoku)
-        Box(hotspot(.17f, .488f, .27f, .077f).clickable(enabled = !sleeping && toysEnabled, role = Role.Button,
+        Box(hotspot(.17f, .488f, .27f, .077f).sceneClickable(enabled = !sleeping && toysEnabled, role = Role.Button,
             onClickLabel = "秘密纸条", onClick = onPaper).semantics { contentDescription = "秘密纸条" })
-        Box(hotspot(.30f, .634f, .41f, .172f).combinedClickable(role = Role.Button,
+        Box(hotspot(.30f, .634f, .41f, .172f).sceneCombinedClickable(role = Role.Button,
             onClickLabel = if (sleeping) "轻轻叫醒阿噜" else "让阿噜打个盹", onClick = onPet,
             onLongClickLabel = "听阿噜藏起来的小秘密", onLongClick = onPetSecret)
             .semantics { contentDescription = if (sleeping) "轻轻叫醒阿噜" else "让阿噜打个盹" })
-        Box(hotspot(.65f, .10f, .18f, .09f).clickable(role = Role.Button, onClickLabel = "摸摸挂着的小星星", onClick = onStar)
+        Box(hotspot(.65f, .10f, .18f, .09f).sceneClickable(role = Role.Button, onClickLabel = "摸摸挂着的小星星", onClick = onStar)
             .semantics { contentDescription = "摸摸挂着的小星星" })
-        Box(hotspot(.685f, .224f, .10f, .078f).clickable(role = Role.Button,
+        Box(hotspot(.685f, .224f, .10f, .078f).sceneClickable(role = Role.Button,
             onClickLabel = if (night) "开灯叫醒阿噜" else "关灯陪阿噜入睡", onClick = onLamp)
             .semantics { contentDescription = if (night) "开灯叫醒阿噜" else "关灯陪阿噜入睡" })
         Canvas(Modifier.matchParentSize()) {

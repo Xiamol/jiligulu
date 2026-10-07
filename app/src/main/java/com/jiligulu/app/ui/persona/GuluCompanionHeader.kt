@@ -6,6 +6,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.border
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,6 +25,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -55,7 +57,8 @@ fun GuluCompanionHeader(
     message: BubbleMessage,
     onRefresh: () -> Unit,
     onWaterClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    active: Boolean = true
 ) {
     Row(
         modifier = modifier.fillMaxWidth(),
@@ -71,6 +74,7 @@ fun GuluCompanionHeader(
                 Modifier.padding(bottom = 4.dp).size(60.dp, 9.dp)
             ) { drawOval(shadow) }
             GuluMascot(
+                active = active,
                 modifier = Modifier.size(106.dp),
                 mode = if (message.kind == BubbleMessage.Kind.WATER) MascotMode.WAITING else MascotMode.IDLE,
                 onClick = com.jiligulu.app.ui.components.uiTap(com.jiligulu.app.core.audio.UiCue.PET, if (message.kind == BubbleMessage.Kind.WATER) onWaterClick else onRefresh)
@@ -82,14 +86,16 @@ fun GuluCompanionHeader(
                 .background(MaterialTheme.colorScheme.secondaryContainer)
                 .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.08f), CompanionBubbleShape)
                 .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
                     onClickLabel = if (message.kind == BubbleMessage.Kind.WATER) "一起喝一口" else "换一句",
                     onClick = com.jiligulu.app.ui.components.uiTap(com.jiligulu.app.core.audio.UiCue.PET, if (message.kind == BubbleMessage.Kind.WATER) onWaterClick else onRefresh)
                 )
                 .padding(start = 24.dp, end = 18.dp, top = 14.dp, bottom = 14.dp)
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            if (message.kind == BubbleMessage.Kind.WATER) Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    if (message.kind == BubbleMessage.Kind.WATER) "水杯备好啦 · 点点我" else "咕噜在这里",
+                    "水杯备好啦 · 点点我",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f),
                     maxLines = 1,
@@ -97,13 +103,13 @@ fun GuluCompanionHeader(
                     modifier = Modifier.weight(1f)
                 )
                 Icon(
-                    if (message.kind == BubbleMessage.Kind.WATER) Icons.Outlined.LocalDrink else Icons.Outlined.Refresh,
+                    Icons.Outlined.LocalDrink,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.6f),
                     modifier = Modifier.size(14.dp)
                 )
             }
-            Spacer(Modifier.height(5.dp))
+            if (message.kind == BubbleMessage.Kind.WATER) Spacer(Modifier.height(5.dp))
             Crossfade(targetState = message.text, animationSpec = tween(220), label = "companionLine") { text ->
                 Text(
                     text,
