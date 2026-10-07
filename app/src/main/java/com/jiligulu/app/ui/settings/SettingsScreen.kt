@@ -117,7 +117,18 @@ fun SettingsScreen(
     var showIntervalPicker by rememberSaveable { mutableStateOf(false) }
     var showQuietStart by rememberSaveable { mutableStateOf(false) }
     var showQuietEnd by rememberSaveable { mutableStateOf(false) }
-    val settingsScroll = remember(settingsTab) { ScrollState(0) }
+    val appearanceScroll = rememberSaveable(saver = ScrollState.Saver) { ScrollState(0) }
+    val interactionScroll = rememberSaveable(saver = ScrollState.Saver) { ScrollState(0) }
+    val reminderScroll = rememberSaveable(saver = ScrollState.Saver) { ScrollState(0) }
+    val dataScroll = rememberSaveable(saver = ScrollState.Saver) { ScrollState(0) }
+    val aboutScroll = rememberSaveable(saver = ScrollState.Saver) { ScrollState(0) }
+    val settingsScroll = when (settingsTab) {
+        "互动" -> interactionScroll
+        "提醒" -> reminderScroll
+        "数据" -> dataScroll
+        "关于" -> aboutScroll
+        else -> appearanceScroll
+    }
     LaunchedEffect(checkUpdatesOnOpen, settingsTab, settingsScroll.maxValue) {
         if (checkUpdatesOnOpen && settingsTab == "关于" && settingsScroll.maxValue in 1 until Int.MAX_VALUE) {
             settingsScroll.scrollTo(settingsScroll.maxValue)
