@@ -95,7 +95,9 @@ fun CashFlowBarChart(bars: List<DayBar>, selectedDayMillis: Long?, onSelectDay: 
                 for (i in axis.intervals downTo 0) Text((if (i == axis.intervals) "¥" else "") + tick(axis.step * i), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             BoxWithConstraints(Modifier.weight(1f)) {
-                val slot = maxWidth / bars.size.coerceAtLeast(1)
+                val plotMaxWidth = maxWidth
+                val plotPixelWidth = constraints.maxWidth
+                val slot = plotMaxWidth / bars.size.coerceAtLeast(1)
                 Canvas(Modifier.fillMaxWidth().padding(top = 20.dp).height(154.dp)) {
                     repeat(axis.intervals + 1) { index ->
                         val y = size.height * index / axis.intervals
@@ -135,9 +137,9 @@ fun CashFlowBarChart(bars: List<DayBar>, selectedDayMillis: Long?, onSelectDay: 
                     }
                 }
                 if (compressedMonth) {
-                    val labelWidth = 24.dp.coerceAtMost(maxWidth)
+                    val labelWidth = 24.dp.coerceAtMost(plotMaxWidth)
                     val labelWidthPx = with(density) { labelWidth.roundToPx() }
-                    val plotWidthPx = constraints.maxWidth
+                    val plotWidthPx = plotPixelWidth
                     Box(Modifier.fillMaxWidth().height(28.dp).padding(top = 4.dp)) {
                         bars.forEachIndexed { index, bar ->
                             if (bar.day !in monthTicks) return@forEachIndexed
