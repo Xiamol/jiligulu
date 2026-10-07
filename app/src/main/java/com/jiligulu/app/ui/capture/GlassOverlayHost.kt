@@ -56,7 +56,9 @@ internal class GlassOverlayHost(private val context: Context, private val manage
             // AOSP DecorView uses the background's corner radius, not its inset outline rectangle.
             // An InsetDrawable also adds decor padding, leaving blur outside the drawn glass shell.
             window.setBackgroundDrawable(GradientDrawable().apply {
-                setColor(Color.argb(if (enabled) 8 else 34, 248, 245, 255))
+                // Optical shaders own the full icon. A separate native Gaussian blur
+                // must not silently stand in for its centre, or change with OS blur policy.
+                setColor(Color.argb(8, 248, 245, 255))
                 cornerRadius = GlassBubbleGeometry.cornerRadius(width, height)
             })
             window.decorView.setPadding(0, 0, 0, 0)
@@ -65,7 +67,7 @@ internal class GlassOverlayHost(private val context: Context, private val manage
             materialBlurEnabled = enabled
         }
         if (Build.VERSION.SDK_INT >= 31 && applyBlur && window.decorView.isAttachedToWindow) {
-            window.setBackgroundBlurRadius(if (enabled) (min(width, height) * .30f).roundToInt() else 0)
+            window.setBackgroundBlurRadius(0)
         }
     }
 
@@ -95,7 +97,6 @@ internal class GlassOverlayHost(private val context: Context, private val manage
                         if (dialog === created && window.decorView.isAttachedToWindow) {
                             runCatching { background(window, manager.isCrossWindowBlurEnabled) }
                                 .onFailure { failure("apply-attached-blur", it) }
-                            registerBlurListener(created, view)
                             window.decorView.postOnAnimation {
                                 if (dialog === created) diagnose(window, "attached")
                             }
@@ -200,7 +201,7 @@ internal class GlassOverlayHost(private val context: Context, private val manage
         val state = "mode=platform sdk=${Build.VERSION.SDK_INT} $theme enabled=$enabled " +
             "attached=${decor.isAttachedToWindow} hw=${decor.isHardwareAccelerated} " +
             "size=${decor.width}x${decor.height} content=${materialWidth}x${materialHeight} " +
-            "requestedRadius=${if (enabled) (min(materialWidth, materialHeight) * .30f).roundToInt() else 0} " +
+            "requestedRadius=0 " +
             "corner=${GlassBubbleGeometry.cornerRadius(materialWidth, materialHeight)} " +
             "background=${drawableKinds(decor.background)}"
         if (state != lastDiagnostic) { lastDiagnostic = state; Log.i(TAG, "$phase $state") }

@@ -199,6 +199,17 @@ class GlassFloatingBubbleView @JvmOverloads constructor(
     fun refreshBackdropAfterMove() {
         if(android.os.Build.VERSION.SDK_INT<33 || !isAttachedToWindow) return
         GlobalGlassBackdrop.refreshTarget()
+        // Keep optics under the finger using current coordinates, before waiting for a
+        // new PixelCopy/MediaProjection frame. Out-of-crop data is never bound at old x/y.
+        if(AppGlassBackdrop.available()) {
+            val cached=AppGlassBackdrop.cachedFor(this)
+            if(cached!=null) bindOwnBackdrop(cached.bitmap,cached.offsetX,cached.offsetY)
+            else {backdrop=null;backdropPaint.shader=null;invalidate()}
+        } else {
+            usingGlobalBackdrop=true
+            backdropPaint.shader=runCatching {GlobalGlassBackdrop.shaderFor(this,lightX,lightY)}.getOrNull()
+            invalidate()
+        }
         removeCallbacks(backdropRefreshTask)
         postOnAnimation(backdropRefreshTask)
     }
@@ -214,16 +225,19 @@ class GlassFloatingBubbleView @JvmOverloads constructor(
         usingGlobalBackdrop=false
         AppGlassBackdrop.copyBehind(this) {bitmap,x,y ->
             if(!AppGlassBackdrop.available()) {refreshBackdrop();return@copyBehind}
-            backdrop=bitmap
-            if(bitmap==null) backdropPaint.shader=null
-            else runCatching {
+            if(bitmap==null) {backdrop=null;backdropPaint.shader=null;invalidate()}
+            else bindOwnBackdrop(bitmap,x,y)
+        }
+    }
+    private fun bindOwnBackdrop(bitmap:Bitmap,x:Float,y:Float) {
+        backdrop=bitmap;usingGlobalBackdrop=false
+        runCatching {
                 val next=lens ?: GlassLensShader().also {lens=it;android.util.Log.d("GlassLens","Own-window refraction initialized")}
                 backdropX=x;backdropY=y
                 next.bind(bitmap,x,y,width,height,lightX,lightY)
                 backdropPaint.shader=next.shader
             }.onFailure {backdropPaint.shader=null;backdrop=null;android.util.Log.w("GlassLens","Shader unavailable",it)}
             invalidate()
-        }
     }
 
     fun clearBackdrop() {backdrop=null;backdropPaint.shader=null;usingGlobalBackdrop=false;invalidate()}

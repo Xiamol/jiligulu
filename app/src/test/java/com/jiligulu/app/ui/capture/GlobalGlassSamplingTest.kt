@@ -5,19 +5,44 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class GlobalGlassSamplingTest {
-    @Test fun hiddenTargetsAndHeldDragsHaveNoSamplingTimer() {
-        assertNull(GlobalGlassSampling.settleDelayMillis(false, false, 1000, 2000))
-        assertNull(GlobalGlassSampling.settleDelayMillis(false, true, 1000, 2000))
-        assertNull(GlobalGlassSampling.settleDelayMillis(true, true, 1000, 2000))
+    @Test fun latestFrameCadenceHonorsAllTargetsAndChangingRateAppliesImmediately() {
+        for(fps in listOf(15,30,60,120)) {
+            val cadence=GlassFrameCadence()
+            val accepted=(0L until 1_000_000_000L step 1_000_000L).count { cadence.accepts(it,fps) }
+            assertTrue("target=$fps actual=$accepted", accepted in fps..fps+1)
+        }
+        val cadence=GlassFrameCadence()
+        assertTrue(cadence.accepts(0,15));assertFalse(cadence.accepts(1_000_000,15))
+        assertTrue(cadence.accepts(1_000_000,120))
+        cadence.reset();assertTrue(cadence.accepts(1_000_000,30))
     }
 
-    @Test fun aReleasedOrRestoredTargetWaitsOnlyItsRemainingSettleDeadline() {
-        assertEquals(300L, GlobalGlassSampling.settleDelayMillis(true, false, 1000, 1000))
-        assertEquals(180L, GlobalGlassSampling.settleDelayMillis(true, false, 1000, 1120))
-        assertEquals(0L, GlobalGlassSampling.settleDelayMillis(true, false, 1000, 1300))
-        assertEquals(0L, GlobalGlassSampling.settleDelayMillis(true, false, 1000, 1600))
-        // Restoring a new target starts a fresh deadline; a backwards clock cannot busy-loop.
-        assertEquals(300L, GlobalGlassSampling.settleDelayMillis(true, false, 2000, 1500))
+    @Test fun movingOverlayMasksCapturedAndLaterCoordinatesWithoutWaitingForRelease() {
+        val history=GlassMotionHistory()
+        history.record(GlassRect(10,10,30,30),1_000_000_000)
+        val snapshot=history.record(GlassRect(25,10,45,30),1_010_000_000)
+        val target=requireNotNull(snapshot.forFrame(1_005_000_000))
+        assertEquals(GlassRect(25,10,45,30),target.bubble)
+        assertEquals(GlassRect(10,10,45,30),target.unsafeBounds)
+        history.clear()
+        val restored=requireNotNull(history.record(GlassRect(70,70,90,90),2_000_000_000).forFrame(0))
+        assertEquals(GlassRect(70,70,90,90),restored.unsafeBounds)
+    }
+
+    @Test fun sameSizeDraggedRoiKeepsBufferDimensionsEvenAtScreenEdges() {
+        val sizes=(0..936).map {x ->
+            val region=requireNotNull(GlobalGlassSampling.region(1080,2400,576,1280,GlassRect(x,2,x+144,146)))
+            region.roi.width to region.roi.height
+        }.toSet()
+        assertEquals(1,sizes.size)
+    }
+
+    @Test fun anOutdatedFrameCannotUseMotionHistoryThatWasAlreadyTruncated() {
+        val history=GlassMotionHistory()
+        var snapshot=history.record(GlassRect(0,0,20,20),1)
+        for(i in 1..100) snapshot=history.record(GlassRect(i,0,i+20,20),i*1_000_000L)
+        assertNull(snapshot.forFrame(1))
+        assertNotNull(snapshot.forFrame(100_000_000))
     }
 
     @Test fun identicalGlobalRingsDoNotRequestAnotherUploadButChangedPixelsDo() {
@@ -49,7 +74,6 @@ class GlobalGlassSamplingTest {
         assertEquals(576 to 1280, GlobalGlassSampling.captureSize(1080, 2400))
         assertEquals(1280 to 576, GlobalGlassSampling.captureSize(2400, 1080))
         assertEquals(720 to 1280, GlobalGlassSampling.captureSize(720, 1280))
-        assertTrue(GlobalGlassSampling.FRAME_INTERVAL_MS >= 1000L / 12)
     }
 
     @Test fun everyPixelOfTheFloatingWindowIncludingTransparentCornersIsExcluded() {

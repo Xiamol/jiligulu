@@ -21,6 +21,8 @@ import android.widget.Toast
 import androidx.core.content.ContextCompat
 import com.jiligulu.app.JiliguluApp
 import com.jiligulu.app.MainActivity
+import com.jiligulu.app.data.prefs.GlobalGlassPrefs
+import com.jiligulu.app.data.prefs.GlobalGlassFrameRate
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -39,10 +41,7 @@ class ScreenCaptureService : Service() {
     @Volatile private var generation = 0
     @Volatile private var closed = false
     @Volatile private var capturing = false
-    @Volatile private var awaitingGlassFrame = false
     @Volatile private var processingFrame = false
-    @Volatile private var ringRequest: GlassSampleRegion? = null
-    @Volatile private var requestedAtNanos = 0L
     private var readerMode = ReaderMode.NONE
     private var started = false
     private var globalRequested = false // NEVER initialized from the saved preference
@@ -56,9 +55,12 @@ class ScreenCaptureService : Service() {
     private var ringPixels = IntArray(0) // worker-thread buffer; one frame in flight
     private var lastNotification = ""
     private var receiverRegistered = false
-    private var requestAt = 0L
     private var processedFrames = 0
     private var processingNanos = 0L
+    @Volatile private var samplingActive = false
+    @Volatile private var sampleRate = GlobalGlassFrameRate.DEFAULT
+    private val frameCadence = GlassFrameCadence() // worker-thread only
+    private val frameHistory = GlassPixelHistory() // worker-thread dedupe; never compare large arrays on Main
     private val glassTick = Runnable { sampleGlass() }
     private val screenReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -125,6 +127,13 @@ class ScreenCaptureService : Service() {
                     if (!desired && globalRequested) setGlobalRequested(false)
                 }
             }
+            scope.launch {
+                GlobalGlassPrefs(this@ScreenCaptureService).frameRate.collect { rate ->
+                    sampleRate = rate
+                    GlobalGlassBackdrop.setTargetFps(rate.fps)
+                    if (globalRequested) refreshEnvironment()
+                }
+            }
             if (intent.getBooleanExtra(EXTRA_GLOBAL_GLASS, false)) {
                 setGlobalRequested(true); FloatingCaptureService.restore()
             } else if (intent.getBooleanExtra("prepareOnly", false)) FloatingCaptureService.restore()
@@ -146,12 +155,13 @@ class ScreenCaptureService : Service() {
         if (closed || projection == null || display == null || enabled && Build.VERSION.SDK_INT < 33) return false
         globalRequested = enabled
         if (enabled) {
-            GlobalGlassBackdrop.session(true, GlobalGlassPhase.STARTING, "本次共享已授权，等待浮球稳定")
+            GlobalGlassBackdrop.session(true, GlobalGlassPhase.STARTING, "本次共享已授权，等待可见浮球")
             refreshEnvironment()
         } else {
+            samplingActive = false
             handler.removeCallbacks(glassTick)
             if (!capturing) detachReader()
-            GlobalGlassBackdrop.session(false, GlobalGlassPhase.OFF, "全局边缘折射已停止")
+            GlobalGlassBackdrop.session(false, GlobalGlassPhase.OFF, "全局光学已停止")
             GlobalGlassBackdrop.release()
             updateNotification("阿噜截屏已就绪", "全局折射已关闭 · 仅点击时截图 · 关闭可结束共享")
         }
@@ -162,13 +172,9 @@ class ScreenCaptureService : Service() {
         handler.removeCallbacks(glassTick)
         if (!closed && globalRequested) handler.post(glassTick)
     }
-    private fun nextGlass(delay: Long = GlobalGlassSampling.FRAME_INTERVAL_MS) {
-        handler.removeCallbacks(glassTick)
-        if (!closed && globalRequested) handler.postDelayed(glassTick, delay)
-    }
     private fun pauseGlass(reason: String, release: Boolean = false) {
+        samplingActive = false
         handler.removeCallbacks(glassTick)
-        awaitingGlassFrame = false; ringRequest = null
         if (!capturing) {
             runCatching { display?.surface = null }
             // Invalidate queued callbacks as well as detaching the surface: a late pre-lock/
@@ -184,7 +190,7 @@ class ScreenCaptureService : Service() {
 
     private fun sampleGlass() {
         if (closed || !globalRequested || Build.VERSION.SDK_INT < 33) return
-        if (GlobalGlassBackdrop.rendererUnavailable) { pauseGlass("设备当前无法使用折射，保留基础系统模糊", release = true); return }
+        if (GlobalGlassBackdrop.rendererUnavailable) { pauseGlass("设备当前无法使用光学，保留基础透明玻璃", release = true); return }
         if (capturing) { pauseGlass("正在处理你主动拍下的截图"); return }
         if (!screenUsable()) { pauseGlass("屏幕锁定或关闭，采样暂停", release = true); return }
         if (!projectionVisible) { pauseGlass("共享画面不可见，采样暂停", release = true); return }
@@ -192,30 +198,20 @@ class ScreenCaptureService : Service() {
         // Activity/dialog resume/pause already calls refreshEnvironment. Polling every
         // 250 ms here needlessly woke the main thread even while the app was motionless.
         if (AppGlassBackdrop.available()) { pauseGlass("应用内使用本应用背景，整屏采样暂停"); return }
-        val target = GlobalGlassBackdrop.settledTarget()
+        val target = GlobalGlassBackdrop.currentTarget()
         if (target == null) {
-            pauseGlass("浮球移动或隐藏，稳定后继续")
-            // A hidden/missing bubble and a held drag have no sampling work. Attach,
-            // visibility, geometry and release events restart this authorized session.
-            // Only an existing, released target needs one remaining settle deadline.
-            GlobalGlassBackdrop.millisUntilSettled()?.let { nextGlass(it.coerceAtLeast(1L)) }
-            return
-        }
-        if (awaitingGlassFrame) {
-            if (SystemClock.uptimeMillis() - requestAt > 1_500) {
-                pauseGlass("尚未收到可采样画面"); nextGlass(250)
-            } else nextGlass()
+            pauseGlass("浮球已隐藏或不可见，采样暂停")
             return
         }
         runCatching {
             val (w, h) = GlobalGlassSampling.captureSize(width, height)
             ensureReader(ReaderMode.GLASS, w, h)
-            ringRequest = GlobalGlassSampling.region(width, height, w, h, target)
-            if (ringRequest == null) { pauseGlass("浮球已离开可采样区域"); nextGlass(250); return }
-            requestedAtNanos = System.nanoTime(); requestAt = SystemClock.uptimeMillis(); awaitingGlassFrame = true
-            display!!.surface = reader!!.surface
-            updateNotification("阿噜全局边缘折射运行中", "最高12帧/秒 · 仅内存、不保存上传 · 关闭结束共享")
-            nextGlass()
+            samplingActive = true
+            // One persistent surface. ImageReader supplies only its latest image; the
+            // worker's cadence decides whether that frame needs processing.
+            val surface = reader!!.surface
+            if (display!!.surface !== surface) display!!.surface = surface
+            updateNotification("阿噜全局光学运行中", "目标${sampleRate.fps}帧/秒 · 中心近似重建 · 仅内存、不保存上传")
         }.onFailure { pauseGlass("采样暂不可用，请停止共享后重新授权", release = true) }
     }
 
@@ -249,14 +245,18 @@ class ScreenCaptureService : Service() {
         val next = ImageReader.newInstance(w, h, PixelFormat.RGBA_8888, 2)
         reader = next; readerMode = mode; readerWidth = w; readerHeight = h
         val epoch = generation
+        val sourceWidth = width
+        val sourceHeight = height
         next.setOnImageAvailableListener({ source ->
             val image = runCatching { source.acquireLatestImage() }.getOrNull() ?: return@setOnImageAvailableListener
             if (closed || source !== reader || epoch != generation || processingFrame) { image.close(); return@setOnImageAvailableListener }
             if (mode == ReaderMode.GLASS) {
-                val region = ringRequest
-                if (!awaitingGlassFrame || region == null || image.timestamp > 0 && image.timestamp < requestedAtNanos) {
+                if (!samplingActive || !globalRequested || !frameCadence.accepts(System.nanoTime(), sampleRate.fps)) {
                     image.close(); return@setOnImageAvailableListener
                 }
+                val target = GlobalGlassBackdrop.samplingTarget(image.timestamp)
+                val region = target?.let { GlobalGlassSampling.region(sourceWidth, sourceHeight, w, h, it.bubble, it.unsafeBounds) }
+                if (region == null) { image.close(); return@setOnImageAvailableListener }
                 processingFrame = true
                 val before = System.nanoTime()
                 try {
@@ -264,23 +264,23 @@ class ScreenCaptureService : Service() {
                     if (ringPixels.size != needed) ringPixels = IntArray(needed)
                     val plane = image.planes[0]
                     val usable = GlobalGlassSampling.copyRing(plane.buffer, plane.rowStride, plane.pixelStride, region, ringPixels)
+                    val changed = frameHistory.changed(region, ringPixels)
                     image.close()
                     val pixels = ringPixels
                     handler.post {
-                        if (!closed && epoch == generation && globalRequested && !capturing && screenUsable()) {
-                            display?.surface = null // no capture surface between 12fps requests
+                        if (!closed && epoch == generation && globalRequested && samplingActive && !capturing) {
                             processedFrames++; processingNanos += System.nanoTime() - before
-                            if (usable) GlobalGlassBackdrop.publish(region, pixels, true)
-                            else GlobalGlassBackdrop.session(true, GlobalGlassPhase.PAUSED, "画面受保护或没有可见内容，使用系统模糊")
+                            if (usable) {
+                                if (changed || !GlobalGlassBackdrop.keepFresh(region)) GlobalGlassBackdrop.publish(region, pixels, true)
+                            } else GlobalGlassBackdrop.session(true, GlobalGlassPhase.PAUSED, "画面受保护或没有可信采样，使用基础透明玻璃")
                             if (processedFrames == 1 || processedFrames % 120 == 0) android.util.Log.i("GlobalGlass",
                                 "frames=$processedFrames roi=${region.roi.width}x${region.roi.height} capture=${w}x$h avgProcessMs=${processingNanos / processedFrames / 1_000_000}")
-                            processingFrame = false; awaitingGlassFrame = false
-                            nextGlass()
                         }
+                        if (epoch == generation) processingFrame = false
                     }
                 } catch (_: Exception) {
                     runCatching { image.close() }
-                    handler.post { if (epoch == generation) { pauseGlass("采样画面不可用", release = true); nextGlass(250) } }
+                    handler.post { if (epoch == generation) pauseGlass("采样画面不可用", release = true) }
                 }
             } else {
                 if (!capturing) { image.close(); return@setOnImageAvailableListener }
@@ -321,11 +321,11 @@ class ScreenCaptureService : Service() {
         }
     }
     private fun detachReader() {
-        generation++; awaitingGlassFrame = false; processingFrame = false; ringRequest = null
+        generation++; processingFrame = false
         runCatching { display?.surface = null }
         val previous = reader; reader = null; readerMode = ReaderMode.NONE
         previous?.setOnImageAvailableListener(null, null)
-        worker.post { previous?.close(); ringPixels.fill(0); ringPixels = IntArray(0) }
+        worker.post { previous?.close(); ringPixels.fill(0); ringPixels = IntArray(0); frameCadence.reset(); frameHistory.clear() }
     }
     private fun updateNotification(title: String, detail: String) {
         val text = "$title|$detail"
@@ -336,6 +336,7 @@ class ScreenCaptureService : Service() {
     }
     private fun shutdownSampling() {
         globalRequested = false
+        samplingActive = false
         handler.removeCallbacks(glassTick)
         GlobalGlassBackdrop.session(false, GlobalGlassPhase.OFF, "共享已停止，需要重新授权")
         GlobalGlassBackdrop.release()
