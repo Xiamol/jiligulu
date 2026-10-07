@@ -31,6 +31,7 @@ data class LedgerLookup(
             require(start == null || end == null || end > start) { "日期范围还不明确" }
             fun terms(values: List<String>): List<String> {
                 require(values.size <= 12) { "检索条件太多，请分开查询" }
+                require(values.all { value -> value.none(Char::isISOControl) }) { "检索条件不明确" }
                 return values.map(String::trim).filter(String::isNotEmpty).distinct().also { list ->
                     require(list.all { it.length <= 80 && it.none(Char::isISOControl) }) { "检索条件不明确" }
                 }

@@ -110,5 +110,6 @@ class PendingReclassificationTest {
         CategoryPresetUpdater(CategoryAdminRepository(upgrade), prefs).ensure()
         assertNull("A later startup must not recreate an intentionally deleted new preset", upgrade.categoryDao().findByName("旅行"))
         prefs.edit().clear().commit()
+        Unit
     }
 }

@@ -185,9 +185,9 @@ class R9PromptAssetByteRegressionTest {
         val system = bytesOf("prompts/parse_bill_system.txt")
         val context = bytesOf("prompts/parse_bill_context.txt")
 
-        // 9282 = App 操作确认卡契约的固定 LF 字节数
-        // （禁止幻觉声称「已清空回收站 / 已改好设置」——用户实际遇到的假承诺）。
-        assertEquals("system 资源字节数必须与仓库 LF 版一致（CRLF 检出会让每个 \\r 多占一字节）", 9282, system.size)
+        // 11411 = 操作确认卡 + 只读历史账本检索契约的固定 LF 字节数。
+        // 新契约是静态规则，绝不混入本轮日期、账单或用户昵称。
+        assertEquals("system 资源字节数必须与仓库 LF 版一致（CRLF 检出会让每个 \\r 多占一字节）", 11411, system.size)
         assertEquals("context 资源字节数必须与仓库 LF 版一致（包含当前提醒设置占位符）", 329, context.size)
 
         assertEquals("system 不得含 CR", 0, system.count { it == '\r'.code.toByte() })
