@@ -179,7 +179,7 @@ fun OnboardingScreen(onDone: () -> Unit, active: Boolean = true, preview: Boolea
                     Text(if (saving) "记住啦，稍等一下…" else if (preview) "继续看动画" else "就这样称呼吧")
                 }
             }
-            Text(if (preview) "这是动画预览，不会改动你的称呼和账本" else "打字声跟随媒体音量，静音模式不播放", style = MaterialTheme.typography.labelSmall,
+            Text(if (preview) "这是动画预览，不会改动你的称呼和账本" else "打字声跟随媒体音量，媒体静音时不播放", style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }

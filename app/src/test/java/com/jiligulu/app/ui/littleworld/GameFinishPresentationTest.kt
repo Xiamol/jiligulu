@@ -4,6 +4,16 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class GameFinishPresentationTest {
+    @Test fun agreedChessDrawNeverAnnouncesAWinnerOrInventsAMate() {
+        val game = XiangqiEngine.newGame().copy(outcome = XiangqiOutcome.DRAW)
+        for (viewer in listOf(null, XiangqiSide.RED, XiangqiSide.BLACK)) {
+            val shown = GameFinishPresenter.xiangqi(game, viewer)
+            assertEquals(FinishMood.DRAW, shown?.mood)
+            assertEquals("和棋", shown?.watermark)
+        }
+        assertNull(XiangqiMateClassifier.classify(game))
+        assertEquals("和棋", xiangqiSealText(null, XiangqiOutcome.DRAW))
+    }
     @Test fun theSameWhiteWinShowsVictoryToWhiteAndDefeatToBlack() {
         val game=GomokuState(outcome=GomokuOutcome.CPU_WON)
         assertEquals(FinishMood.WIN,GameFinishPresenter.gomoku(game,2)?.mood)
@@ -148,6 +158,7 @@ class GameFinishPresentationTest {
             XiangqiOutcome.PLAYING -> XiangqiOutcome.PLAYING
             XiangqiOutcome.RED_WON -> XiangqiOutcome.BLACK_WON
             XiangqiOutcome.BLACK_WON -> XiangqiOutcome.RED_WON
+            XiangqiOutcome.DRAW -> XiangqiOutcome.DRAW
         }, lastMove = game.lastMove?.let(::reverseMove),
     )
 }

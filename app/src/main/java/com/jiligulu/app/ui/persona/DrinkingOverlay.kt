@@ -50,9 +50,9 @@ fun DrinkingOverlay(visible: Boolean, onFinished: () -> Unit, onCancel: () -> Un
         delay(350)
         phase = MascotMode.DRINKING
         // 喝水音效：进入举杯阶段时播放「咕噜咕噜」
-        val player = try {
+        val player = if (!com.jiligulu.app.core.audio.UiSound.audible(context)) null else try {
             MediaPlayer.create(context, R.raw.water_glug)?.apply {
-                setVolume(1.0f, 1.0f)
+                setVolume(.55f, .55f)
                 start()
             }
         } catch (_: Exception) { null }

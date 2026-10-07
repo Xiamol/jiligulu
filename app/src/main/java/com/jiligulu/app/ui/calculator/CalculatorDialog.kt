@@ -214,7 +214,7 @@ fun CalculatorDialog(initial: String = "", onDismiss: () -> Unit, onUse: (String
                         )
                         if (!keyboardMode) Box(Modifier.matchParentSize()
                             .testTag("calculator-edit-expression")
-                            .clickable(role = Role.Button, onClickLabel = "用键盘编辑算式") { keyboardMode = true })
+                            .clickable(role = Role.Button, onClickLabel = "用键盘编辑算式") { UiSound.select(soundContext); keyboardMode = true })
                         }
                     }
                     Surface(Modifier.fillMaxWidth().height(if (tiny) 28.dp else if (compact) 44.dp else 54.dp),

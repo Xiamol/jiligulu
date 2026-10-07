@@ -119,8 +119,8 @@ internal fun ColumnScope.FortuneWheelGame(boardSize: Dp, foreground: Boolean,
                 }
                 Box(Modifier.height(46.dp), contentAlignment = Alignment.Center) {
                     when (task?.destination) {
-                        "future" -> TextButton(onClick = onOpenFuture) { Text("去寄一封") }
-                        "memories" -> TextButton(onClick = onOpenMemories) { Text("翻翻纪念册") }
+                        "future" -> TextButton(onClick = { UiSound.envelope(context); onOpenFuture() }) { Text("去寄一封") }
+                        "memories" -> TextButton(onClick = { UiSound.pageTurn(context); onOpenMemories() }) { Text("翻翻纪念册") }
                         "paper" -> TextButton(onClick = onOpenPaper) { Text("听句悄悄话") }
                     }
                 }
@@ -128,7 +128,7 @@ internal fun ColumnScope.FortuneWheelGame(boardSize: Dp, foreground: Boolean,
                 Row(Modifier.widthIn(max = 290.dp).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically) {
                     Text("${date.monthValue}月${date.dayOfMonth}日 · 趣味小黄历", style = MaterialTheme.typography.bodySmall, color = Color(0xFF9A929A))
-                    TextButton(onClick = { signPicker = true }) { Text(sign, fontSize = 13.sp) }
+                    TextButton(onClick = { UiSound.select(context); signPicker = true }) { Text(sign, fontSize = 13.sp) }
                 }
                 Text(luck.title, Modifier.padding(vertical = 8.dp), fontFamily = com.jiligulu.app.ui.theme.GuluBrandFont,
                     fontSize = 28.sp, color = Color(0xFF8B74A4))

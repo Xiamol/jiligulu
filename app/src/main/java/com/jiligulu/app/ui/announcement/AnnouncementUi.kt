@@ -20,6 +20,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.jiligulu.app.data.announcement.AnnouncementRepository
 import com.jiligulu.app.data.announcement.AnnouncementState
 import com.jiligulu.app.ui.components.GuluDialog
+import com.jiligulu.app.ui.components.uiTap
+import com.jiligulu.app.core.audio.UiCue
 import com.jiligulu.app.ui.theme.GuluBrandFont
 import kotlinx.coroutines.launch
 
@@ -83,9 +85,9 @@ fun AnnouncementDialogHost(repository: AnnouncementRepository, enabled: Boolean)
         if (state.entries.size > 1) {
             val index = state.entries.indexOfFirst { it.id == entry.id }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                TextButton(enabled = index > 0 && !state.saving, onClick = { repository.open(state.entries[index - 1].id) }) { Text("上一封") }
+                TextButton(enabled = index > 0 && !state.saving, onClick = uiTap(UiCue.PAGE_TURN) { repository.open(state.entries[index - 1].id) }) { Text("上一封") }
                 Text("${index + 1} / ${state.entries.size}", style = MaterialTheme.typography.labelMedium)
-                TextButton(enabled = index < state.entries.lastIndex && !state.saving, onClick = { repository.open(state.entries[index + 1].id) }) { Text("下一封") }
+                TextButton(enabled = index < state.entries.lastIndex && !state.saving, onClick = uiTap(UiCue.PAGE_TURN) { repository.open(state.entries[index + 1].id) }) { Text("下一封") }
             }
         }
     }

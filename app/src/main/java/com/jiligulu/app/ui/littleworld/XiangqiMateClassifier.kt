@@ -18,7 +18,7 @@ data class XiangqiFinishProof(
 object XiangqiMateClassifier {
     fun classify(finalState: XiangqiState): XiangqiFinishProof? {
         val winner = when (finalState.outcome) {
-            XiangqiOutcome.PLAYING -> return null
+            XiangqiOutcome.PLAYING, XiangqiOutcome.DRAW -> return null
             XiangqiOutcome.RED_WON -> XiangqiSide.RED
             XiangqiOutcome.BLACK_WON -> XiangqiSide.BLACK
         }

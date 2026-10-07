@@ -20,7 +20,7 @@ internal fun xiangqiSealText(proof: XiangqiFinishProof?, outcome: XiangqiOutcome
     XiangqiFinishFamily.SMOTHERED_CANNON -> "闷杀"
     XiangqiFinishFamily.STALEMATE -> "困毙"
     XiangqiFinishFamily.GENERAL_CAPTURE -> "擒将"
-    else -> if (outcome == XiangqiOutcome.RED_WON) "红方胜" else "黑方胜"
+    else -> when (outcome) { XiangqiOutcome.DRAW -> "和棋"; XiangqiOutcome.RED_WON -> "红方胜"; else -> "黑方胜" }
 }
 
 internal object GameFinishPresenter {
@@ -35,6 +35,7 @@ internal object GameFinishPresenter {
 
     fun xiangqi(game: XiangqiState, humanSide: XiangqiSide?): GameFinishPresentation? {
         if (game.outcome == XiangqiOutcome.PLAYING) return null
+        if (game.outcome == XiangqiOutcome.DRAW) return GameFinishPresentation("和棋", "这一局，握握手 ♡", FinishMood.DRAW, "和棋")
         val winner = if (game.outcome == XiangqiOutcome.RED_WON) XiangqiSide.RED else XiangqiSide.BLACK
         val proof = XiangqiMateClassifier.classify(game)
         val loserName = if (winner == XiangqiSide.RED) "黑方" else "红方"

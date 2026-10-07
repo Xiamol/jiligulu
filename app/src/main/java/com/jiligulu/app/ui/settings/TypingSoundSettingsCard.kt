@@ -42,7 +42,7 @@ fun TypingSoundSettingsCard(onPreview: () -> Unit) {
                 catch (_: Exception) { error = "还没保存成功，请再试一下。" }
             } })
         }
-        Text("内置轻键音，跟随媒体音量；静音模式不播放。", style = MaterialTheme.typography.bodySmall,
+        Text("内置轻键音，跟随媒体音量；媒体音量为零时不播放。", style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         Row {

@@ -16,7 +16,7 @@ import java.util.concurrent.ConcurrentHashMap
  */
 enum class UiCue(val raw: Int, val volume: Float, val minimumGap: Long = 65, val extraRaw: IntArray = intArrayOf()) {
     TOUCH(R.raw.ui_tap, .18f),
-    SELECT(R.raw.ui_select, .17f),
+    SELECT(R.raw.ui_select, .23f),
     NAVIGATE(R.raw.ui_navigate, .19f, 120),
     TOGGLE(R.raw.ui_toggle, .20f),
     PAPER(R.raw.ui_paper, .28f, 130, intArrayOf(R.raw.ui_paper_2, R.raw.ui_paper_3)),
@@ -26,7 +26,8 @@ enum class UiCue(val raw: Int, val volume: Float, val minimumGap: Long = 65, val
     CALCULATOR(R.raw.ui_calculator, .20f, 0, intArrayOf(R.raw.ui_calculator_2, R.raw.ui_calculator_3)),
     PIECE_SELECT(R.raw.ui_piece_select, .28f),
     WOOD_MOVE(R.raw.ui_wood_move, .38f, 85),
-    STONE_MOVE(R.raw.ui_stone_move, .32f, 85),
+    // One accepted placement owns one cue; rapid hotseat moves must not be throttled.
+    STONE_MOVE(R.raw.ui_stone_move, .45f, 0),
     CAPTURE(R.raw.ui_capture, .40f, 100),
     CHECK(R.raw.ui_check, .31f, 400),
     WIN(R.raw.ui_win, .29f, 800),
@@ -68,6 +69,9 @@ object UiSound {
     @Synchronized fun warmup(context: Context) { if (engine == null) engine = Engine(context.applicationContext) }
     fun enabled(context: Context) = context.applicationContext.getSharedPreferences("gulu_ui_feedback", Context.MODE_PRIVATE)
         .getBoolean("enabled", true)
+    /** Game feedback uses media volume; ringtone vibration/silence does not mute a game. */
+    fun audible(context: Context): Boolean = enabled(context) &&
+        (context.applicationContext.getSystemService(AudioManager::class.java)?.getStreamVolume(AudioManager.STREAM_MUSIC) ?: 0) > 0
     fun setEnabled(context: Context, value: Boolean) {
         context.applicationContext.getSharedPreferences("gulu_ui_feedback", Context.MODE_PRIVATE).edit().putBoolean("enabled", value).apply()
         if (!value) engine?.silence()
@@ -148,7 +152,7 @@ object UiSound {
         @Synchronized fun silence() { streams.forEach(pool::stop); touchStream=0 }
         @Synchronized fun play(cue: UiCue) {
             val manager = audio ?: return
-            if (manager.ringerMode != AudioManager.RINGER_MODE_NORMAL || manager.getStreamVolume(AudioManager.STREAM_MUSIC) == 0) return
+            if (manager.getStreamVolume(AudioManager.STREAM_MUSIC) == 0) return
             // 多变体轮换：逐次换下一个**已就绪**的样本，连按同一类声音不会像同一份采样在复读。
             // 只挑 ready 的，是因为 SoundPool 加载是异步的——拿没加载完的 id 播会静默失败。
             val usable = ids.getValue(cue).filter { ready[it] == true }

@@ -228,10 +228,10 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
         return when (xiangqiMode) {
             XiangqiPlayMode.CPU, XiangqiPlayMode.HOTSEAT -> !xiangqiPaused
             XiangqiPlayMode.ONLINE -> onlineSession.state.value.let {
-                it.connected && !it.roomEnded && it.pendingUndoRequest == null && it.rematchRequestedBy == null
+                it.connected && !it.roomEnded && it.pendingUndoRequest == null && it.pendingDrawRequest == null && it.rematchRequestedBy == null
             }
             XiangqiPlayMode.LAN -> lanSession.state.value.let {
-                it.connected && !it.roomEnded && it.pendingUndoRequest == null && it.rematchRequestedBy == null
+                it.connected && !it.roomEnded && it.pendingUndoRequest == null && it.pendingDrawRequest == null && it.rematchRequestedBy == null
             }
         }
     }
@@ -380,7 +380,7 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
             GomokuPlayMode.NEARBY, GomokuPlayMode.ONLINE -> {
                 val room = if (gomokuMode == GomokuPlayMode.ONLINE) gomokuOnlineSession.state.value else gomokuLanSession.state.value
                 room.connected && !room.awaitingAck && !room.localBackground && !room.remoteBackground && !room.reconnecting &&
-                    room.pendingUndoRequest == null && position.currentPlayer == room.localPlayer
+                room.pendingUndoRequest == null && room.pendingDrawRequest == null && position.currentPlayer == room.localPlayer
             }
         }
     }
@@ -402,7 +402,7 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
             XiangqiPlayMode.ONLINE, XiangqiPlayMode.LAN -> {
                 val room = if (xiangqiMode == XiangqiPlayMode.ONLINE) onlineSession.state.value else lanSession.state.value
                 room.connected && !room.awaitingAck && !room.localBackground && !room.remoteBackground && !room.reconnecting &&
-                    room.pendingUndoRequest == null && position.turnSide == room.localSide
+                    room.pendingUndoRequest == null && room.pendingDrawRequest == null && position.turnSide == room.localSide
             }
         }
     }
@@ -461,7 +461,7 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
             try {
                 val move = withContext(Dispatchers.Default) {
                     val computeContext = currentCoroutineContext()
-                    GomokuStrongMoveHelper.chooseMove(position) { !computeContext.isActive }
+                    GomokuStrongMoveHelper.chooseMove(position, timeBudgetMillis = 5_000) { !computeContext.isActive }
                 } ?: return@launch
                 delay(500)
                 if (helpGeneration == generation && eligibleGomokuTurn() && currentGomokuPosition() == position) {
@@ -689,6 +689,18 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
         lastNetworkRound = visibleNetwork.round
     }
     val visibleGomokuRoom = if (gomokuMode == GomokuPlayMode.ONLINE) gomokuOnline else gomokuLan
+    // Agreed draws have no landing animation. Only a fresh foreground agreement speaks.
+    var seenAgreedChessDraw by remember(activity, xiangqiMode, foreground, visibleNetwork.round) {
+        mutableStateOf(visibleNetwork.agreedDraw)
+    }
+    LaunchedEffect(visibleNetwork.agreedDraw, activity, xiangqiMode, foreground, visibleNetwork.round) {
+        val fresh = !seenAgreedChessDraw && visibleNetwork.agreedDraw
+        seenAgreedChessDraw = visibleNetwork.agreedDraw
+        if (fresh && foreground && !sleeping && activity == SecretActivity.XIANGQI &&
+            (xiangqiMode == XiangqiPlayMode.ONLINE || xiangqiMode == XiangqiPlayMode.LAN)) {
+            UiSound.draw(context)
+        }
+    }
     var lastNetworkGomoku by remember(activity, gomokuMode, foreground, visibleGomokuRoom.round) { mutableStateOf(visibleGomokuRoom.game) }
     LaunchedEffect(visibleGomokuRoom.revision, visibleGomokuRoom.round, activity, gomokuMode, foreground) {
         val next = visibleGomokuRoom.game
@@ -703,8 +715,8 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
         lastNetworkGomoku = next
     }
     val liveGo=currentGomokuPosition()
-    var seenGoOutcome by remember(activity,gomokuMode,gomokuRestoreToken){mutableStateOf(liveGo.outcome)}
-    LaunchedEffect(liveGo.outcome,activity,gomokuMode,gomokuRestoreToken,foreground) {
+    var seenGoOutcome by remember(activity,gomokuMode,gomokuRestoreToken,foreground,visibleGomokuRoom.round){mutableStateOf(liveGo.outcome)}
+    LaunchedEffect(liveGo.outcome,activity,gomokuMode,gomokuRestoreToken,foreground,visibleGomokuRoom.round) {
         val fresh=seenGoOutcome==GomokuOutcome.PLAYING&&liveGo.outcome!=GomokuOutcome.PLAYING
         seenGoOutcome=liveGo.outcome
         if(fresh&&foreground&&activity==SecretActivity.GOMOKU&&!choosingOpponent&&archiveReady&&!gameLoading) {
@@ -719,7 +731,8 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
     LaunchedEffect(bubbleToken) { if (secretBubble != null) { delay(3000); secretBubble = null } }
     LaunchedEffect(gomoku, xiangqi, online.game, lan.game, gomokuOnline.game, gomokuLan.game,
         online.connected, lan.connected, online.awaitingAck, lan.awaitingAck, online.pendingUndoRequest, lan.pendingUndoRequest,
-        gomokuOnline.pendingUndoRequest, gomokuLan.pendingUndoRequest) {
+        gomokuOnline.pendingUndoRequest, gomokuLan.pendingUndoRequest, online.pendingDrawRequest, lan.pendingDrawRequest,
+        gomokuOnline.pendingDrawRequest, gomokuLan.pendingDrawRequest) {
         if (helpBusy && ((helpGomokuPosition != null && (helpGomokuPosition != currentGomokuPosition() || !eligibleGomokuTurn())) ||
             (helpXiangqiPosition != null && (helpXiangqiPosition != currentXiangqiPosition() || !eligibleXiangqiTurn())))) cancelHelp()
     }
@@ -730,6 +743,8 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
             delay(420)
             val move = withContext(Dispatchers.Default) { val computeContext=currentCoroutineContext()
                 XiangqiEngine.chooseCpuMove(position){!computeContext.isActive} }
+            // Do not let a fast reply cancel the just-landed move's check sound.
+            xiangqiSoundFollowup?.join()
             if (archiveReady && !gameLoading && !choosingOpponent && activity == SecretActivity.XIANGQI && foreground && !sleeping && !xiangqiPaused &&
                 xiangqiMode == XiangqiPlayMode.CPU && position.turnSide!=xiangqiHumanSide && xiangqi == position && move != null) commitXiangqi(XiangqiEngine.play(position, move))
         }
@@ -779,7 +794,7 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
             delay(420)
             val move = withContext(Dispatchers.Default) {
                 val computeContext = currentCoroutineContext()
-                GomokuStrongMoveHelper.chooseMove(position,timeBudgetMillis=650) { !computeContext.isActive }
+                GomokuStrongMoveHelper.chooseMove(position,timeBudgetMillis=1_200) { !computeContext.isActive }
             }
             if (archiveReady && !gameLoading && !choosingOpponent && activity == SecretActivity.GOMOKU && foreground && !sleeping && !gomokuPaused && gomokuMode == GomokuPlayMode.CPU && position.currentPlayer!=gomokuHumanPlayer && gomoku == position) {
                 move?.let { commitGomoku(GomokuEngine.play(position, it.x, it.y)) }
@@ -920,6 +935,12 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
                     onHotseatUndo = { player -> if (gomokuMode == GomokuPlayMode.HOTSEAT) undoGomoku(player) },
                     onResign = { cancelHelp(); if (gomokuMode == GomokuPlayMode.ONLINE) gomokuOnlineSession.resign()
                         else if (gomokuMode == GomokuPlayMode.NEARBY) gomokuLanSession.resign() },
+                    onDraw = { cancelHelp(); if (gomokuMode == GomokuPlayMode.ONLINE) gomokuOnlineSession.requestDraw()
+                        else if (gomokuMode == GomokuPlayMode.NEARBY) gomokuLanSession.requestDraw() },
+                    onDrawResponse = { accept -> if (gomokuMode == GomokuPlayMode.ONLINE) gomokuOnlineSession.respondToDraw(accept)
+                        else if (gomokuMode == GomokuPlayMode.NEARBY) gomokuLanSession.respondToDraw(accept) },
+                    onCancelDraw = { if (gomokuMode == GomokuPlayMode.ONLINE) gomokuOnlineSession.cancelDraw()
+                        else if (gomokuMode == GomokuPlayMode.NEARBY) gomokuLanSession.cancelDraw() },
                     helpBusy = helpBusy || gameLoading || !archiveReady, onControlsBottom = { gameControlsBottom = it })
                 SecretActivity.BOARD -> Unit
                 SecretActivity.XIANGQI -> SecretXiangqiGame(
@@ -984,6 +1005,12 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
                     } },
                     onResign = { cancelXiangqiSounds(); cancelHelp(); if (xiangqiMode == XiangqiPlayMode.ONLINE) onlineSession.resign()
                         else if (xiangqiMode == XiangqiPlayMode.LAN) lanSession.resign() },
+                    onDraw = { cancelXiangqiSounds(); cancelHelp(); if (xiangqiMode == XiangqiPlayMode.ONLINE) onlineSession.requestDraw()
+                        else if (xiangqiMode == XiangqiPlayMode.LAN) lanSession.requestDraw() },
+                    onDrawResponse = { accept -> cancelXiangqiSounds(); if (xiangqiMode == XiangqiPlayMode.ONLINE) onlineSession.respondToDraw(accept)
+                        else if (xiangqiMode == XiangqiPlayMode.LAN) lanSession.respondToDraw(accept) },
+                    onCancelDraw = { if (xiangqiMode == XiangqiPlayMode.ONLINE) onlineSession.cancelDraw()
+                        else if (xiangqiMode == XiangqiPlayMode.LAN) lanSession.cancelDraw() },
                     onModalOpened = ::cancelHelp, onControlsBottom = { gameControlsBottom = it },
                     onMoveSettled = { epoch, position, _ -> settleXiangqiSound(epoch, position) },
                     onPresentationSkipped = ::skipXiangqiPresentation)

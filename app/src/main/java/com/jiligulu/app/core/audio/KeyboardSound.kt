@@ -7,7 +7,7 @@ import android.media.SoundPool
 import com.jiligulu.app.R
 import java.util.concurrent.CopyOnWriteArrayList
 
-/** Bundled taps work without the system touch-sound setting; media volume and silent mode are respected. */
+/** The caller controls typing feedback; media volume also silences these bundled taps. */
 class KeyboardSound(context: Context) : AutoCloseable {
     private val audio = context.getSystemService(AudioManager::class.java)
     private val loaded = CopyOnWriteArrayList<Int>()
@@ -21,7 +21,7 @@ class KeyboardSound(context: Context) : AutoCloseable {
         listOf(R.raw.key_tap_1, R.raw.key_tap_2, R.raw.key_tap_3).forEach { pool.load(context, it, 1) }
     }
     fun tap() {
-        if (loaded.isEmpty() || audio?.ringerMode != AudioManager.RINGER_MODE_NORMAL) return
+        if (loaded.isEmpty() || (audio?.getStreamVolume(AudioManager.STREAM_MUSIC) ?: 0) == 0) return
         pool.play(loaded[index++ % loaded.size], 0.5f, 0.5f, 1, 0, 1f)
     }
     override fun close() { pool.release(); loaded.clear() }
