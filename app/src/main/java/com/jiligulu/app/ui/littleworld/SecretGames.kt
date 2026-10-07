@@ -183,6 +183,7 @@ private fun SnakeJoystick(enabled: Boolean, onDirection: (SnakeDirection) -> Uni
 internal fun ColumnScope.SecretGomokuGame(state: GomokuState, paused: Boolean, boardSize: Dp,
     onMove: (Int, Int) -> Unit, onToggle: () -> Unit, onRestart: () -> Unit,
     canUndo: Boolean = false, onUndo: () -> Unit = {},
+    canUndoBlack: Boolean = false, canUndoWhite: Boolean = false, onHotseatUndo: (Int) -> Unit = {},
     mode: GomokuPlayMode = GomokuPlayMode.CPU, onMode: (GomokuPlayMode) -> Unit = {},
     humanPlayer: Int = 1,
     room: GomokuRoomUiState? = null, nearby: NearbyRoomsState? = null,
@@ -313,10 +314,10 @@ internal fun ColumnScope.SecretGomokuGame(state: GomokuState, paused: Boolean, b
     Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
     Spacer(Modifier.height((boardTop - 60.dp).coerceAtLeast(0.dp)))
     Row(Modifier.width(boardSize).height(36.dp), verticalAlignment = Alignment.CenterVertically) {
-        GameSeat(if(localPlayer==1) "你" else if(mode==GomokuPlayMode.CPU) "阿噜" else if(network) "棋友" else "同伴",
+        GameSeat(if (mode == GomokuPlayMode.HOTSEAT) "黑方" else if(localPlayer==1) "你" else if(mode==GomokuPlayMode.CPU) "阿噜" else "棋友",
             Color(0xFF4C4950), active = state.currentPlayer == 1 && (network || !paused))
         Spacer(Modifier.weight(1f))
-        GameSeat(if(localPlayer==2) "你" else if(mode==GomokuPlayMode.CPU) "阿噜" else if(network) "棋友" else "同伴",
+        GameSeat(if (mode == GomokuPlayMode.HOTSEAT) "白方" else if(localPlayer==2) "你" else if(mode==GomokuPlayMode.CPU) "阿噜" else "棋友",
             Color(0xFFF9F5EA), active = state.currentPlayer == 2 && (network || !paused))
     }
     Spacer(Modifier.height(24.dp))
@@ -336,7 +337,7 @@ internal fun ColumnScope.SecretGomokuGame(state: GomokuState, paused: Boolean, b
         }
         .semantics { contentDescription = "${state.size}路五子棋棋盘，" + when (mode) {
             GomokuPlayMode.CPU -> if(humanPlayer==1) "你执黑棋，阿噜执白棋。" else "你执白棋，阿噜执黑棋。"
-            GomokuPlayMode.HOTSEAT -> "同屏双人，${if(humanPlayer==1) "你执黑棋" else "你执白棋"}，黑方先行。"
+            GomokuPlayMode.HOTSEAT -> "同屏双人，黑白双方轮流落子，黑方先行。"
             else -> if (localPlayer == 1) "你执黑棋，棋友执白棋。" else "你执白棋，棋友执黑棋。"
         } + status }
         .pointerInput(canMove, state.size) {
@@ -396,15 +397,20 @@ internal fun ColumnScope.SecretGomokuGame(state: GomokuState, paused: Boolean, b
     } else {
     Text(status, modifier = Modifier.padding(top = 14.dp), color = Color(0xFF766A7F), style = MaterialTheme.typography.bodyMedium)
     Spacer(Modifier.height(20.dp))
-    Row(Modifier.width(boardSize).padding(horizontal = 26.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+    Row(Modifier.width(boardSize).padding(horizontal = if (mode == GomokuPlayMode.HOTSEAT) 6.dp else 26.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         if (!network) GameIconTool(if (paused) Icons.Outlined.PlayCircleOutline else Icons.Outlined.PauseCircleOutline,
             if (paused) "继续" else "暂停", onToggle, Modifier.weight(1f), enabled = state.outcome == GomokuOutcome.PLAYING)
         else GameIconTool(Icons.Outlined.Flag, "认输", { resignConfirm = true }, Modifier.weight(1f),
             enabled = roomAvailable)
         if(!network) GameIconTool(Icons.Outlined.Refresh, "重开", onRestart, Modifier.weight(1f))
-        GameIconTool(Icons.AutoMirrored.Outlined.Undo, "悔棋", onUndo, Modifier.weight(1f),
-            enabled = canUndo && !helpBusy && (!network || roomAvailable),
-            cue = com.jiligulu.app.core.audio.UiCue.TOUCH)
+        if (mode == GomokuPlayMode.HOTSEAT) {
+            GameIconTool(Icons.AutoMirrored.Outlined.Undo, "悔黑", { onHotseatUndo(1) }, Modifier.weight(1f),
+                enabled = canUndoBlack && !helpBusy, tint = Color(0xFF625B67))
+            GameIconTool(Icons.AutoMirrored.Outlined.Undo, "悔白", { onHotseatUndo(2) }, Modifier.weight(1f),
+                enabled = canUndoWhite && !helpBusy, tint = Color(0xFF9C8B78))
+        } else GameIconTool(Icons.AutoMirrored.Outlined.Undo, "悔棋", onUndo, Modifier.weight(1f),
+            enabled = canUndo && !helpBusy && (!network || roomAvailable), cue = com.jiligulu.app.core.audio.UiCue.TOUCH)
         if (network) GameIconTool(Icons.Outlined.Logout, "离开", onDisconnect, Modifier.weight(1f))
     }
     Text("黑棋先行 · 连成五子获胜", Modifier.padding(top = 4.dp, bottom = 10.dp)

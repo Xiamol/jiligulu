@@ -79,6 +79,7 @@ internal fun ColumnScope.SecretXiangqiGame(state: XiangqiState, mode: XiangqiPla
     humanSide: XiangqiSide = XiangqiSide.RED,
     showRoomEntry: Boolean = false,
     canUndo: Boolean = false, onUndo: () -> Unit = {}, onUndoResponse: (Boolean) -> Unit = {},
+    canUndoRed: Boolean = false, canUndoBlack: Boolean = false, onHotseatUndo: (XiangqiSide) -> Unit = {},
     nearby: NearbyRoomsState? = null, onNearbyRetry: () -> Unit = {},
     onMatchResponse: (Boolean) -> Unit = {}, onRematchResponse: (Boolean) -> Unit = {}, onExit: () -> Unit = onDisconnect,
     onResign: () -> Unit = {},
@@ -251,7 +252,12 @@ internal fun ColumnScope.SecretXiangqiGame(state: XiangqiState, mode: XiangqiPla
         modifier = Modifier.padding(vertical = 10.dp).width(boardWidth), color = Color(0xFF766A7F),
         style = MaterialTheme.typography.bodySmall, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
         Row(Modifier.width(boardWidth).padding(horizontal = 6.dp, vertical = 4.dp)) {
-            GameIconTool(Icons.AutoMirrored.Outlined.Undo, "悔棋", onUndo, Modifier.weight(1f),
+            if (mode == XiangqiPlayMode.HOTSEAT) {
+                GameIconTool(Icons.AutoMirrored.Outlined.Undo, "悔红", { onHotseatUndo(XiangqiSide.RED) }, Modifier.weight(1f),
+                    enabled = canUndoRed && !helpBusy, tint = Color(0xFFAF766A))
+                GameIconTool(Icons.AutoMirrored.Outlined.Undo, "悔黑", { onHotseatUndo(XiangqiSide.BLACK) }, Modifier.weight(1f),
+                    enabled = canUndoBlack && !helpBusy, tint = Color(0xFF625B67))
+            } else GameIconTool(Icons.AutoMirrored.Outlined.Undo, "悔棋", onUndo, Modifier.weight(1f),
                 enabled = canUndo && !helpBusy && (!networkMode || roomAvailable),
                 cue = UiCue.TOUCH)
             if (networkMode) {
@@ -262,12 +268,14 @@ internal fun ColumnScope.SecretXiangqiGame(state: XiangqiState, mode: XiangqiPla
                 GameIconTool(if (paused) Icons.Outlined.PlayCircleOutline else Icons.Outlined.PauseCircleOutline,
                     if (paused) "继续" else "暂停", onToggle, Modifier.weight(1f), enabled = state.outcome == XiangqiOutcome.PLAYING)
                 GameIconTool(Icons.Outlined.Refresh, "重开", onRestart, Modifier.weight(1f))
-                GameIconTool(Icons.Outlined.Extension, "残局", { onModalOpened(); if (!paused) onToggle(); choosePuzzle = true }, Modifier.weight(1f))
+                if (mode == XiangqiPlayMode.CPU) GameIconTool(Icons.Outlined.Extension, "残局", {
+                    onModalOpened(); if (!paused) onToggle(); choosePuzzle = true }, Modifier.weight(1f))
             }
             GameIconTool(Icons.Outlined.HelpOutline, "规则", { onModalOpened(); if (!networkMode && !paused) onToggle(); showRules = true }, Modifier.weight(1f))
         }
     Column(Modifier.onGloballyPositioned { onControlsBottom(it.boundsInRoot().bottom) }, horizontalAlignment = Alignment.CenterHorizontally) {
     Text(if (networkMode) "你执${if(lan.localSide==XiangqiSide.RED)"红" else "黑"} · 联机不限时"
+        else if (mode == XiangqiPlayMode.HOTSEAT) "同屏对弈 · 每手 ${thinkingClock.durationMillis / 1000} 秒"
         else "你执${if(humanSide==XiangqiSide.RED)"红" else "黑"} · 每手 ${thinkingClock.durationMillis / 1000} 秒",
         Modifier.padding(top = 8.dp, bottom = 8.dp), style = MaterialTheme.typography.labelSmall, color = Color(0xFF9C8D98))
     lan.error?.takeIf { networkMode }?.let {
@@ -329,13 +337,13 @@ internal fun XiangqiThinkingTimeDialog(initialSeconds: Int, starting: Boolean, o
 
 @Composable
 internal fun GameIconTool(icon: ImageVector, label: String, onClick: () -> Unit, modifier: Modifier,
-    enabled: Boolean = true, cue: UiCue = UiCue.TOUCH) {
+    enabled: Boolean = true, cue: UiCue = UiCue.TOUCH, tint: Color = Color(0xFF87748E)) {
     val context = LocalContext.current
     Column(modifier.height(53.dp).clip(RoundedCornerShape(12.dp))
         .clickable(enabled = enabled, role = Role.Button, onClick = { UiSound.play(context, cue); onClick() }).padding(vertical = 5.dp),
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(3.dp)) {
-        Icon(icon, null, Modifier.size(22.dp), tint = Color(0xFF87748E).copy(alpha = if (enabled) 1f else .3f))
-        Text(label, fontSize = 11.sp, color = Color(0xFF87748E).copy(alpha = if (enabled) 1f else .3f))
+        Icon(icon, null, Modifier.size(22.dp), tint = tint.copy(alpha = if (enabled) 1f else .3f))
+        Text(label, fontSize = 11.sp, color = tint.copy(alpha = if (enabled) 1f else .3f))
     }
 }
 

@@ -574,9 +574,9 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
         scope.launch { withContext(NonCancellable) { prefs.setSecretPetSleeping(value) } }
     }
 
-    fun undoXiangqi() {
+    fun undoXiangqi(requester: XiangqiSide = xiangqiHumanSide) {
         cancelHelp()
-        val target = LocalChessUndo.xiangqiTarget(xiangqiHistory, xiangqiMode == XiangqiPlayMode.CPU,xiangqiHumanSide)
+        val target = LocalChessUndo.xiangqiTarget(xiangqiHistory, xiangqiMode == XiangqiPlayMode.CPU, requester)
         if (target < 0) return
         cancelXiangqiSounds()
         xiangqi = xiangqiHistory[target]
@@ -585,9 +585,9 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
         clockTickAt = 0L; clockEpoch++; checkpointXiangqi()
         if (foreground && activity == SecretActivity.XIANGQI) UiSound.undo(context)
     }
-    fun undoGomoku() {
+    fun undoGomoku(requester: Int = gomokuHumanPlayer) {
         cancelHelp()
-        val target = LocalChessUndo.gomokuTarget(gomokuHistory, gomokuHumanPlayer)
+        val target = LocalChessUndo.gomokuTarget(gomokuHistory, requester)
         if (target >= 0) {
             gomoku = gomokuHistory[target]; gomokuHistory = gomokuHistory.take(target); checkpointGomoku()
             if (foreground && activity == SecretActivity.GOMOKU) UiSound.undo(context)
@@ -856,7 +856,7 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
                     canUndo = when (gomokuMode) {
                         GomokuPlayMode.ONLINE -> gomokuOnline.canUndo
                         GomokuPlayMode.NEARBY -> gomokuLan.canUndo
-                        GomokuPlayMode.HOTSEAT -> LocalChessUndo.gomokuTarget(gomokuHistory, gomokuHumanPlayer) >= 0
+                        GomokuPlayMode.HOTSEAT -> (1..2).any { LocalChessUndo.gomokuTarget(gomokuHistory, it) >= 0 }
                         else -> LocalChessUndo.gomokuTarget(gomokuHistory,gomokuHumanPlayer) >= 0
                     },
                     onUndo = { cancelHelp(); when (gomokuMode) {
@@ -867,6 +867,9 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
                     } },
                     onUndoResponse = { accept -> if (gomokuMode == GomokuPlayMode.ONLINE) gomokuOnlineSession.respondToUndo(accept)
                         else if (gomokuMode == GomokuPlayMode.NEARBY) gomokuLanSession.respondToUndo(accept) },
+                    canUndoBlack = LocalChessUndo.gomokuTarget(gomokuHistory, 1) >= 0,
+                    canUndoWhite = LocalChessUndo.gomokuTarget(gomokuHistory, 2) >= 0,
+                    onHotseatUndo = { player -> if (gomokuMode == GomokuPlayMode.HOTSEAT) undoGomoku(player) },
                     onResign = { cancelHelp(); if (gomokuMode == GomokuPlayMode.ONLINE) gomokuOnlineSession.resign()
                         else if (gomokuMode == GomokuPlayMode.NEARBY) gomokuLanSession.resign() },
                     helpBusy = helpBusy || gameLoading || !archiveReady, onControlsBottom = { gameControlsBottom = it })
@@ -924,6 +927,7 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
                     canUndo = when (xiangqiMode) {
                         XiangqiPlayMode.ONLINE -> online.canUndo
                         XiangqiPlayMode.LAN -> lan.canUndo
+                        XiangqiPlayMode.HOTSEAT -> XiangqiSide.entries.any { LocalChessUndo.xiangqiTarget(xiangqiHistory, false, it) >= 0 }
                         else -> LocalChessUndo.xiangqiTarget(xiangqiHistory, xiangqiMode == XiangqiPlayMode.CPU,xiangqiHumanSide) >= 0
                     },
                     onUndo = { cancelXiangqiSounds(); cancelHelp(); when (xiangqiMode) {
@@ -934,6 +938,11 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
                     } },
                     onUndoResponse = { accept -> if (xiangqiMode == XiangqiPlayMode.ONLINE) onlineSession.respondToUndo(accept)
                         else if (xiangqiMode == XiangqiPlayMode.LAN) lanSession.respondToUndo(accept) },
+                    canUndoRed = LocalChessUndo.xiangqiTarget(xiangqiHistory, false, XiangqiSide.RED) >= 0,
+                    canUndoBlack = LocalChessUndo.xiangqiTarget(xiangqiHistory, false, XiangqiSide.BLACK) >= 0,
+                    onHotseatUndo = { side -> if (xiangqiMode == XiangqiPlayMode.HOTSEAT) {
+                        cancelXiangqiSounds(); freezeThinkingClock(); undoXiangqi(side)
+                    } },
                     onResign = { cancelXiangqiSounds(); cancelHelp(); if (xiangqiMode == XiangqiPlayMode.ONLINE) onlineSession.resign()
                         else if (xiangqiMode == XiangqiPlayMode.LAN) lanSession.resign() },
                     onModalOpened = ::cancelHelp, onControlsBottom = { gameControlsBottom = it },
