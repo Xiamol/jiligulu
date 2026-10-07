@@ -103,7 +103,9 @@ fun SettingsScreen(
                 fieldText,{fieldText=it;vm.clearError()},enabled=!state.isSaving,
                 visualTransformation=if(field==ProfileSettingField.API_KEY) PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None)
             if(field==ProfileSettingField.SUFFIX) Text("留空时使用「大人」",style=MaterialTheme.typography.bodySmall)
-            if(field==ProfileSettingField.API_KEY) Text("留空使用内置配置",style=MaterialTheme.typography.bodySmall)
+            if(field==ProfileSettingField.API_KEY) Text(
+                if (com.jiligulu.app.core.ai.AiConfig.DEFAULT_API_KEY.isNotBlank()) "留空使用内置配置"
+                else "此包需要填写你的 DeepSeek API Key", style=MaterialTheme.typography.bodySmall)
             state.error?.let { Text(it,color=MaterialTheme.colorScheme.error,style=MaterialTheme.typography.bodySmall) }
         }
     }
@@ -315,7 +317,9 @@ fun SettingsScreen(
 
                     if (settingsTab == "数据") SettingsSection("AI 服务", "✨") {
                         AiUsageSettings()
-                        ProfileSettingRow("自定义 API Key",if(state.apiKey.isBlank()) "使用内置配置" else "已设置 · 点击修改",editable) {
+                        ProfileSettingRow("自定义 API Key",if(state.apiKey.isBlank()) {
+                            if (com.jiligulu.app.core.ai.AiConfig.DEFAULT_API_KEY.isNotBlank()) "使用内置配置" else "未填写 · 点击设置"
+                        } else "已设置 · 点击修改",editable) {
                             edit(ProfileSettingField.API_KEY,state.apiKey)
                         }
                         Text(
