@@ -23,7 +23,12 @@ object ChatIntent {
     /** Offline parsing can only add bills; mutation/settings requests must never become additions. */
     private val ONLINE_ACTION = Regex("改|换成|换为|那笔|这笔|之前那|删|恢复|撤销|撤回|捞|还回|纠正|更正|记错|算错|清空|整理|归类|调整|开启|关闭|设置|提醒|免打扰|回收站|检查.{0,6}更新")
 
-    fun requiresOnlineAction(s: String) = ONLINE_ACTION.containsMatchIn(s)
+    private val LEDGER_QUESTION = Regex("查询|查一查|查一下|帮我查|帮我找|找找.{0,12}(账|消费|支出|收入)|统计.{0,12}(账|消费|支出|收入)|花了多少|花费多少|支出多少|收入多少|多少钱|几笔|几次|哪些账|什么账|账单.{0,12}(查|哪些|哪里)")
+
+    fun requiresOnlineAction(s: String) = ONLINE_ACTION.containsMatchIn(s) || LEDGER_QUESTION.containsMatchIn(s)
+
+    /** Query words require a connection, but never themselves authorize a mutation proposal. */
+    fun isLedgerMutationRequest(s: String) = ONLINE_ACTION.containsMatchIn(s)
 
     fun needsCandidates(s: String) = CANDIDATE.containsMatchIn(s)
 

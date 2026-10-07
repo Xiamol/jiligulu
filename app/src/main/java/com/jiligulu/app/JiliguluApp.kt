@@ -49,12 +49,15 @@ class AppContainer(private val app: Application) {
     val billRepository: BillRepository by lazy { BillRepository(database.billDao()) }
     val categoryRepository: CategoryRepository by lazy { CategoryRepository(database.categoryDao()) }
     val categoryAdminRepository: CategoryAdminRepository by lazy { CategoryAdminRepository(database) }
+    private val categoryPresetUpdater by lazy { com.jiligulu.app.data.repository.CategoryPresetUpdater(
+        categoryAdminRepository, app.getSharedPreferences("category_catalog_updates", android.content.Context.MODE_PRIVATE)) }
     val chatHistoryRepository: ChatHistoryRepository by lazy { ChatHistoryRepository(database) }
     val aiRepository: AiRepository by lazy {
         AiRepository(
             app, categoryRepository, billRepository, userPrefs,
             chatHistoryRepository, categoryAdminRepository,
-            clientFactory = { key -> com.jiligulu.app.core.ai.DeepSeekClient(key, onUsage = aiUsage::record) }
+            clientFactory = { key -> com.jiligulu.app.core.ai.DeepSeekClient(key, onUsage = aiUsage::record) },
+            ledgerLookupRepository = com.jiligulu.app.data.repository.LedgerLookupRepository(database)
         )
     }
 
@@ -71,6 +74,7 @@ class AppContainer(private val app: Application) {
     var startupCompleted: Boolean = false
 
     suspend fun preloadLedger() = coroutineScope {
+        categoryPresetUpdater.ensure()
         awaitAll(
             async { billRepository.observeCurrentMonth().first() },
             async { categoryRepository.categories.first() },

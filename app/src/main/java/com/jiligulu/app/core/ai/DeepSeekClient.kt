@@ -87,6 +87,16 @@ data class AiPendingDraft(
     @SerialName("time_expression") val timeExpression: String = ""
 )
 
+/** Read-only, bound-parameter lookup. Dates use the device's local calendar; end is exclusive. */
+@Serializable
+data class AiLedgerQuery(
+    @SerialName("start_date") val startDate: String = "",
+    @SerialName("end_date") val endDate: String = "",
+    val keywords: List<String> = emptyList(),
+    val categories: List<String> = emptyList(),
+    val type: String = ""
+)
+
 @Serializable
 data class AiParseResult(
     val bills: List<AiBillDraft> = emptyList(),
@@ -98,7 +108,11 @@ data class AiParseResult(
     /** R4：多选项卡，非空时优先于 navigate；不需要时为 []。老响应缺此字段，默认兼容。 */
     val options: List<AiOption> = emptyList(),
     /** App settings / trash operations only create a local confirmation card. */
-    @SerialName("app_action") val appAction: AiAppAction? = null
+    @SerialName("app_action") val appAction: AiAppAction? = null,
+    @SerialName("ledger_query") val ledgerQuery: AiLedgerQuery? = null,
+    /** Local provenance only. The model cannot grant itself permission to edit arbitrary IDs. */
+    @kotlinx.serialization.Transient val retrievedBillIds: Set<Long> = emptySet(),
+    @kotlinx.serialization.Transient val ledgerLookupCompleted: Boolean = false
 )
 
 /**

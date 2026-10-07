@@ -126,6 +126,7 @@ fun AddBillScreen(onBack: () -> Unit, vm: AddBillViewModel = viewModel(factory =
     val saveState by vm.saveState.collectAsStateWithLifecycle()
     val categoryPreview by vm.categoryPreview.collectAsStateWithLifecycle()
     val photoState by vm.photo.collectAsStateWithLifecycle()
+    val reclassification by vm.reclassification.collectAsStateWithLifecycle()
     val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) vm.importPhoto(uri)
     }
@@ -295,7 +296,7 @@ fun AddBillScreen(onBack: () -> Unit, vm: AddBillViewModel = viewModel(factory =
                                         onClick = { UiSound.select(context); selectedCategoryId = category.id; userPickedCategory = true; setAutomaticCategory(false) },
                                         onLongClick = {
                                             val displayName = CategoryLabels.displayName(category.name)
-                                            if (!category.deletable) tip = "「$displayName」是收纳箱，删不得哦～"
+                                            if (!category.deletable) vm.preparePendingReclassification()
                                             else scope.launch { pendingDelete = PendingCategoryDelete(category.id, displayName, vm.liveBillCount(category.id)) }
                                         })
                                 }
@@ -366,6 +367,8 @@ fun AddBillScreen(onBack: () -> Unit, vm: AddBillViewModel = viewModel(factory =
 
     if (calculatorOpen) CalculatorDialog(amountText, onDismiss = { calculatorOpen = false },
         onUse = { amountText = it; calculatorOpen = false })
+    if (reclassification.open) PendingReclassificationDialog(reclassification,
+        onDismiss = vm::closeReclassification, onConfirm = vm::confirmPendingReclassification)
 
     // ---------- 删除分类的确认框 ----------
     pendingDelete?.let { pending ->

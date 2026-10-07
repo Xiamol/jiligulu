@@ -10,6 +10,10 @@ import androidx.compose.material3.Icon
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.path
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -58,6 +62,7 @@ fun CategoryBadge(
         "交通" -> Color(0xFF69B89A)
         "零食" -> Color(0xFFEAB567)
         "饮品" -> Color(0xFFDB92B8)
+        "水果", "蔬菜" -> Color(0xFF7BAD83)
         else -> tint
     }
     val curated = remember(displayName) { curatedCategoryIcon(displayName) }
@@ -89,10 +94,39 @@ private fun curatedCategoryIcon(name: String): ImageVector? = when (name) {
     "娱乐" -> Icons.Outlined.SportsEsports
     "生活服务" -> Icons.Outlined.WorkOutline
     "宠物" -> Icons.Outlined.Pets
+    "水果" -> FruitCategoryIcon
+    "蔬菜" -> Icons.Outlined.Grass
+    "通讯" -> Icons.Outlined.PhoneAndroid
+    "运动" -> Icons.Outlined.FitnessCenter
+    "旅行" -> Icons.Outlined.Luggage
+    "礼物" -> Icons.Outlined.CardGiftcard
     "工资" -> Icons.Outlined.AccountBalanceWallet
     "生活费" -> Icons.Outlined.Savings
     "红包", "人情" -> Icons.Outlined.CardGiftcard
     "转账" -> Icons.Outlined.SwapHoriz
     com.jiligulu.app.domain.category.CategoryDefaults.VACUUM_NAME -> Icons.Outlined.Inbox
     else -> null
+}
+
+/** A small apple silhouette stays consistent instead of relying on vendor emoji rendering. */
+private val FruitCategoryIcon: ImageVector by lazy {
+    ImageVector.Builder("Fruit", 24.dp, 24.dp, 24f, 24f).apply {
+        path(fill = null, stroke = SolidColor(Color.Black), strokeLineWidth = 1.7f,
+            strokeLineCap = StrokeCap.Round, strokeLineJoin = StrokeJoin.Round) {
+            moveTo(12f, 8f)
+            curveTo(9.5f, 5.7f, 4f, 6.4f, 4f, 11.3f)
+            curveTo(4f, 16.3f, 6.6f, 21f, 9.3f, 21f)
+            curveTo(10.7f, 21f, 11.1f, 20f, 12f, 20f)
+            curveTo(12.9f, 20f, 13.3f, 21f, 14.7f, 21f)
+            curveTo(17.4f, 21f, 20f, 16.3f, 20f, 11.3f)
+            curveTo(20f, 6.4f, 14.5f, 5.7f, 12f, 8f)
+            close()
+            moveTo(12f, 6f)
+            curveTo(12f, 3.5f, 14f, 2f, 17f, 2f)
+            curveTo(17f, 4.6f, 14.7f, 6f, 12f, 6f)
+            close()
+            moveTo(12f, 8f)
+            curveTo(11.8f, 6.8f, 11.4f, 5.2f, 10.6f, 4.4f)
+        }
+    }.build()
 }

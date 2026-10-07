@@ -40,6 +40,63 @@ class CategoryAdminRepository(
         categoryDao.findByName(CategoryDefaults.VACUUM_NAME)?.id
             ?: error("内置「待定」分类不存在，数据库可能未完成迁移")
 
+    suspend fun pendingBills(): List<com.jiligulu.app.data.local.entity.BillEntity> {
+        val vacuum = vacuumId()
+        return database.ledgerLookupDao().details(androidx.sqlite.db.SimpleSQLiteQuery(
+            "SELECT * FROM bills WHERE deletedAt IS NULL AND categoryId = ? ORDER BY timestamp DESC, id DESC", arrayOf(vacuum)))
+    }
+
+    /** The only writable column is categoryId; a stale preview must never overwrite an edited bill. */
+    suspend fun applyReclassification(proposals: List<CategoryReclassification>): CategoryReclassificationResult =
+        database.withTransaction {
+            val vacuum = vacuumId()
+            var moved = 0
+            var skipped = 0
+            proposals.distinctBy { it.original.id }.forEach { proposal ->
+                val original = proposal.original
+                val current = billDao.getById(original.id)
+                if (current == null || current != original || current.deletedAt != null || current.categoryId != vacuum) {
+                    skipped++; return@forEach
+                }
+                val name = proposal.suggestion.category.trim()
+                if (name.isBlank() || name == CategoryDefaults.VACUUM_NAME || name.length > 32) {
+                    skipped++; return@forEach
+                }
+                val target = categoryDao.findByName(name)
+                if (proposal.targetCategoryId != null && (target?.id != proposal.targetCategoryId || target?.deletable != true)) {
+                    skipped++; return@forEach
+                }
+                if (target != null && !target.deletable) { skipped++; return@forEach }
+                val targetId = target?.id ?: run {
+                    val index = categoryDao.count()
+                    categoryDao.insert(com.jiligulu.app.data.local.entity.CategoryEntity(
+                        name = name, iconValue = proposal.suggestion.iconEmoji.take(16),
+                        keywords = proposal.suggestion.keywords.take(160),
+                        colorIndex = index, colorHue = com.jiligulu.app.domain.color.GoldenAnglePalette.hueFor(index),
+                        createdBy = com.jiligulu.app.data.local.entity.CreatedBy.AI))
+                }
+                // This guarded update changes no amount/date/details/attachment/raw input.
+                database.openHelper.writableDatabase.execSQL(
+                    "UPDATE bills SET categoryId = ? WHERE id = ? AND categoryId = ? AND deletedAt IS NULL",
+                    arrayOf(targetId, original.id, vacuum))
+                moved++
+            }
+            CategoryReclassificationResult(moved, skipped)
+        }
+
+    /** Only newly introduced presets are seeded on upgrade; older user deletions stay deleted. */
+    suspend fun addSupplementalPresets() = database.withTransaction {
+        CategoryDefaults.supplementalPresets.forEach { seed ->
+            if (categoryDao.findByName(seed.name) == null) {
+                val index = categoryDao.count()
+                categoryDao.insert(com.jiligulu.app.data.local.entity.CategoryEntity(name = seed.name,
+                    iconType = com.jiligulu.app.data.local.entity.IconType.BUILTIN, iconValue = seed.icon,
+                    keywords = seed.keywords, createdBy = com.jiligulu.app.data.local.entity.CreatedBy.DEFAULT,
+                    colorIndex = index, colorHue = com.jiligulu.app.domain.color.GoldenAnglePalette.hueFor(index)))
+            }
+        }
+    }
+
     /**
      * 删除 [categoryId] 并把它的**活账单**改挂到「待定」，全程一个事务。
      *
@@ -67,3 +124,11 @@ class CategoryAdminRepository(
             CategoryDeletionResult.Deleted(reassigned)
         }
 }
+
+data class CategoryReclassification(
+    val original: com.jiligulu.app.data.local.entity.BillEntity,
+    val suggestion: com.jiligulu.app.core.ai.AiBillDraft,
+    val targetCategoryId: Long? = null
+)
+
+data class CategoryReclassificationResult(val moved: Int, val skipped: Int)

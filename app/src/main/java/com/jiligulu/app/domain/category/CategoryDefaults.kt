@@ -24,6 +24,15 @@ object CategoryDefaults {
 
     data class Preset(val name: String, val icon: String, val keywords: String, val deletable: Boolean = true)
 
+    val supplementalPresets = listOf(
+        Preset("水果", "builtin_fruit", "水果,苹果,香蕉,橘子,橙子,草莓,葡萄,西瓜,芒果,蓝莓,榴莲,桃子,梨"),
+        Preset("蔬菜", "builtin_vegetable", "蔬菜,青菜,白菜,番茄,土豆,黄瓜,买菜"),
+        Preset("通讯", "builtin_phone", "话费,流量,宽带,手机费,通讯"),
+        Preset("运动", "builtin_sport", "健身,球馆,游泳,运动,瑜伽"),
+        Preset("旅行", "builtin_travel", "旅行,旅游,景点,门票,民宿,酒店"),
+        Preset("礼物", "builtin_present", "礼物,礼品,送礼,鲜花,生日礼物")
+    )
+
     /** Curated on a fresh install only; upgrades never recreate a category the user has removed. */
     val presets = listOf(
         Preset("吃饭", "builtin_food", "早餐,午餐,午饭,晚餐,晚饭,吃饭,面条,牛肉面,米饭,外卖,食堂,火锅,烧烤,炒饭"),
@@ -43,6 +52,7 @@ object CategoryDefaults {
         Preset("生活费", "builtin_living", "生活费,零花钱"),
         Preset("红包", "builtin_gift", "红包,压岁钱"),
         Preset("转账", "builtin_transfer", "转账,收款,汇款"),
+        *supplementalPresets.toTypedArray(),
         Preset(VACUUM_NAME, "builtin_pending", VACUUM_KEYWORDS, deletable = false)
     )
 

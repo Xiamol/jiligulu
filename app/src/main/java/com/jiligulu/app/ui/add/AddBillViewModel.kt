@@ -12,6 +12,9 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import com.jiligulu.app.JiliguluApp
 import com.jiligulu.app.data.local.entity.BillType
 import com.jiligulu.app.data.local.entity.CategoryEntity
+import com.jiligulu.app.data.local.entity.BillEntity
+import com.jiligulu.app.data.repository.CategoryReclassification
+import com.jiligulu.app.core.ai.PendingCategoryClassifier
 import com.jiligulu.app.data.repository.BillRepository
 import com.jiligulu.app.data.repository.CategoryAdminRepository
 import com.jiligulu.app.data.repository.CategoryDeletionResult
@@ -57,13 +60,20 @@ data class ManualCategoryPreview(
 
 data class ManualPhotoState(val path: String = "", val importing: Boolean = false, val error: String? = null)
 
+data class PendingReclassificationState(
+    val open: Boolean = false, val loading: Boolean = false, val saving: Boolean = false,
+    val total: Int = 0, val processed: Int = 0, val proposals: List<CategoryReclassification> = emptyList(),
+    val error: String? = null, val result: String? = null
+)
+
 class AddBillViewModel(
     private val billRepository: BillRepository,
     private val categoryRepository: CategoryRepository,
     private val categoryAdminRepository: CategoryAdminRepository,
     private val remoteCategory: suspend (String, BillType, List<CategoryEntity>) -> AiBillDraft? = { _, _, _ -> null },
     private val importPhotoFile: suspend (Uri) -> String = { error("Photo importer unavailable") },
-    private val deletePhotoFile: (String) -> Unit = {}
+    private val deletePhotoFile: (String) -> Unit = {},
+    private val remotePendingCategories: suspend (List<BillEntity>, List<CategoryEntity>) -> Map<Long, AiBillDraft> = { _, _ -> emptyMap() }
 ) : ViewModel() {
 
     val categories: StateFlow<List<CategoryEntity>> = categoryRepository.categories
@@ -123,6 +133,7 @@ class AddBillViewModel(
         photoEpoch++
         photoJob?.cancel()
         cancelCategoryPreview()
+        reclassifyJob?.cancel()
         if (!photoCommitted && (!_saveState.value.isSaving || saveJob?.isCompleted == true)) cleanUncommittedPhoto()
         super.onCleared()
     }
@@ -191,6 +202,70 @@ class AddBillViewModel(
      */
     suspend fun deleteCategory(categoryId: Long): CategoryDeletionResult =
         categoryAdminRepository.deleteCategoryAndReassign(categoryId)
+
+    private val _reclassification = MutableStateFlow(PendingReclassificationState())
+    val reclassification = _reclassification.asStateFlow()
+    private var reclassifyJob: Job? = null
+
+    fun closeReclassification() {
+        if (_reclassification.value.saving) return
+        reclassifyJob?.cancel()
+        _reclassification.value = PendingReclassificationState()
+    }
+
+    fun preparePendingReclassification() {
+        if (_reclassification.value.loading || _reclassification.value.saving) return
+        reclassifyJob?.cancel()
+        _reclassification.value = PendingReclassificationState(open = true, loading = true)
+        reclassifyJob = viewModelScope.launch {
+            try {
+                val pending = categoryAdminRepository.pendingBills()
+                val catalog = categoryRepository.getAll()
+                _reclassification.value = _reclassification.value.copy(total = pending.size)
+                val suggested = mutableListOf<CategoryReclassification>()
+                val unresolved = mutableListOf<BillEntity>()
+                pending.forEach { bill ->
+                    val category = CategoryEngine.suggest("${bill.detail} ${bill.note}", catalog)
+                        ?.takeUnless(CategoryDefaults::isVacuum)
+                    if (category == null) unresolved += bill else suggested += CategoryReclassification(bill,
+                        AiBillDraft(targetId = bill.id, category = category.name, iconEmoji = category.iconValue), category.id)
+                }
+                _reclassification.value = _reclassification.value.copy(proposals = suggested.toList(), processed = suggested.size)
+                unresolved.chunked(PendingCategoryClassifier.BATCH_SIZE).forEach { batch ->
+                    val remote = remotePendingCategories(batch, catalog)
+                    currentCoroutineContext().ensureActive()
+                    batch.forEach { bill -> remote[bill.id]?.let { draft ->
+                        val existing = catalog.firstOrNull { it.name.equals(draft.category, true) }
+                        if (draft.category != CategoryDefaults.VACUUM_NAME && (existing == null || existing.deletable))
+                            suggested += CategoryReclassification(bill, draft, existing?.id)
+                    } }
+                    _reclassification.value = _reclassification.value.copy(proposals = suggested.toList(),
+                        processed = _reclassification.value.processed + batch.size)
+                }
+                _reclassification.value = _reclassification.value.copy(loading = false)
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) {
+                _reclassification.value = _reclassification.value.copy(loading = false,
+                    error = "联网分类没能完成，已找到的建议仍可确认，其余留在待定")
+            }
+        }
+    }
+
+    fun confirmPendingReclassification(ids: Set<Long>) {
+        val state = _reclassification.value
+        if (state.loading || state.saving || !state.open) return
+        val chosen = state.proposals.filter { it.original.id in ids }
+        if (chosen.isEmpty()) return
+        _reclassification.value = state.copy(saving = true, error = null)
+        reclassifyJob = viewModelScope.launch {
+            try {
+                val result = categoryAdminRepository.applyReclassification(chosen)
+                _reclassification.value = PendingReclassificationState(open = true,
+                    result = "${result.moved} 笔重新分好类啦" + if (result.skipped > 0) "，${result.skipped} 笔已变化，先保留原样" else " ♡")
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { _reclassification.value = state.copy(error = "没有改动账本，请再试一次") }
+        }
+    }
 
     fun save(
         amountFen: Long,
@@ -263,7 +338,13 @@ class AddBillViewModel(
                         ManualCategoryClassifier.suggestion(result, catalog)
                     },
                     importPhotoFile = { uri -> MemoryFiles.importPhoto(app, uri) },
-                    deletePhotoFile = { path -> MemoryFiles.deleteImportedPhoto(app, path) }
+                    deletePhotoFile = { path -> MemoryFiles.deleteImportedPhoto(app, path) },
+                    remotePendingCategories = { bills, catalog ->
+                        val client = DeepSeekClient(app.container.aiRepository.effectiveApiKey(), onUsage = app.container.aiUsage::record)
+                        val result = client.parseBill(PendingCategoryClassifier.PROMPT,
+                            PendingCategoryClassifier.input(bills, catalog)).getOrThrow()
+                        PendingCategoryClassifier.suggestions(result, bills, catalog)
+                    }
                 )
             }
         }

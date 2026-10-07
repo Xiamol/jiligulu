@@ -23,6 +23,7 @@ import com.jiligulu.app.domain.chat.ChatIntent
 import com.jiligulu.app.domain.chat.ChatContext
 import com.jiligulu.app.domain.chat.ChatContextBuilder
 import com.jiligulu.app.domain.chat.PromptRenderer
+import com.jiligulu.app.domain.chat.LedgerLookup
 import com.jiligulu.app.domain.time.BillTimeResolver
 import com.jiligulu.app.ui.chat.CommandCardCodec
 import com.jiligulu.app.ui.chat.CommandCardPayload
@@ -102,7 +103,8 @@ class AiRepository(
         if (!userPrefs.waterEnabled.first()) WaterReminderScheduler.cancel(context)
         else WaterReminderScheduler.restore(context)
     },
-    private val clientFactory: (String) -> DeepSeekClient = { DeepSeekClient(it) }
+    private val clientFactory: (String) -> DeepSeekClient = { DeepSeekClient(it) },
+    private val ledgerLookupRepository: LedgerLookupRepository? = null
 ) {
     /** R9：逐字不变的固定 system 段；版本随 App 走，解析契约全在这一个资源里。 */
     private val systemPromptTemplate: String by lazy {
@@ -184,8 +186,40 @@ class AiRepository(
         )
         val system = renderer.renderSystem()
         val contextBlock = renderer.renderContext(input, includeStableContext = false)
-        return clientFactory(effectiveApiKey())
-            .parseBill(system, contextBlock, history = recentTurns(requestMillis), stableContext = renderer.renderStableContext())
+        val client = clientFactory(effectiveApiKey())
+        val history = recentTurns(requestMillis)
+        val stableContext = renderer.renderStableContext()
+        val first = client.parseBill(system, contextBlock, history = history, stableContext = stableContext)
+        val initial = first.getOrElse { return first }
+        val query = initial.ledgerQuery ?: return first
+        // Only a read is possible here. Do not mix a lookup with speculative writes/settings.
+        if (initial.bills.isNotEmpty() || initial.appAction != null) return Result.success(AiParseResult(
+            reply = "阿噜先查清账本再整理，请再说一次要查哪一天或什么名目～", ledgerLookupCompleted = true))
+        return try {
+            val lookup = LedgerLookup.from(query, zone)
+            val repository = ledgerLookupRepository ?: return Result.success(AiParseResult(
+                reply = "这次没能打开账本检索，阿噜先不拿最近几天的记录代替～", ledgerLookupCompleted = true))
+            val found = repository.search(lookup)
+            val answer = client.parseBill(system,
+                contextBlock + "\n\n" + found.render(categories, zone) +
+                    "\n本轮检索已经完成。ledger_query 必须为 null；根据查询结果回答原问题。不要再次请求检索，不编造未列出的账单。",
+                history = history, stableContext = stableContext)
+            answer.map { result ->
+                if (result.ledgerQuery != null) AiParseResult(reply = "阿噜还没确定检索范围，告诉我具体日期或账单名目再查一次吧～", ledgerLookupCompleted = true)
+                else {
+                    val ids = found.bills.map { it.id }.toSet()
+                    result.copy(
+                        // A read-only question can never turn a looked-up bill into a new addition.
+                        bills = result.bills.filter { draft -> ChatIntent.isLedgerMutationRequest(input) &&
+                            (draft.isUpdate || draft.isDelete) && draft.targetId in ids },
+                        appAction = null, pending = null, retrievedBillIds = ids, ledgerLookupCompleted = true)
+                }
+            }.recover { AiParseResult(reply = "账本已经查到，但阿噜的回答暂时没连上，请再试一次～", ledgerLookupCompleted = true) }
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (invalid: IllegalArgumentException) {
+            Result.success(AiParseResult(reply = "检索的日期或条件还不明确，请告诉阿噜具体哪一天或什么名目～", ledgerLookupCompleted = true))
+        } catch (failure: Exception) { Result.success(AiParseResult(
+            reply = "这次没能完成账本检索，阿噜先不拿最近的记录代替，请再试一次～", ledgerLookupCompleted = true)) }
     }
 
     /**
@@ -203,6 +237,7 @@ class AiRepository(
         zone: ZoneId,
         pending: PendingDraft?
     ): AiTurn {
+        if (parsed.ledgerLookupCompleted && parsed.bills.isEmpty()) return AiTurn.Chat(parsed.reply)
         parsed.appAction?.let { action ->
             if (!action.isValid || parsed.bills.isNotEmpty()) {
                 return AiTurn.Chat("这次操作还不够明确，阿噜先不动设置。请分开说要改什么～")
@@ -229,8 +264,12 @@ class AiRepository(
         val candidates = PromptRenderer.candidatesFrom(
             if (parsed.bills.any { it.isUpdate || it.isDelete }) billRepository.recent(BillRepository.CANDIDATE_SCAN_LIMIT) else emptyList(), requestMillis, zone
         )
+        // The extra IDs are local provenance from the just-completed lookup, never model JSON.
+        val retrieved = parsed.retrievedBillIds.mapNotNull { id ->
+            billRepository.getById(id)?.takeIf { it.deletedAt == null }
+        }
         val byId = (candidates.latest + candidates.today + candidates.yesterday +
-            candidates.beforeYesterday + candidates.thisWeek).associateBy { it.id }
+            candidates.beforeYesterday + candidates.thisWeek + retrieved).associateBy { it.id }
         val categoryNames = categories.associate { it.id to CategoryLabels.displayName(it.name) }
 
         val updates = parsed.bills.filter { it.isUpdate }

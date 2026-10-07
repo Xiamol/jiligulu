@@ -9,6 +9,7 @@ import androidx.room.TypeConverters
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.jiligulu.app.data.local.dao.BillDao
+import com.jiligulu.app.data.local.dao.LedgerLookupDao
 import com.jiligulu.app.data.local.dao.BudgetDao
 import com.jiligulu.app.data.local.dao.CategoryDao
 import com.jiligulu.app.data.local.dao.ChatMessageDao
@@ -47,6 +48,7 @@ class EnumConverters {
 abstract class AppDatabase : RoomDatabase() {
 
     abstract fun billDao(): BillDao
+    abstract fun ledgerLookupDao(): LedgerLookupDao
     abstract fun categoryDao(): CategoryDao
     abstract fun budgetDao(): BudgetDao
     abstract fun chatMessageDao(): ChatMessageDao
