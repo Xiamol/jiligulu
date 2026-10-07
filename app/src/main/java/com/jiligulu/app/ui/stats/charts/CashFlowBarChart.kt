@@ -16,8 +16,10 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -53,6 +55,14 @@ internal fun cashFlowMonthDateTicks(daysInMonth: Int, selectedDay: Int?): Set<In
         .apply { if (selected != null) add(selected) }
 }
 
+/** Position a full-width label inside the actual pixel viewport, including rounded density boundaries. */
+internal fun cashFlowDateLabelLeftPx(index: Int, count: Int, plotWidthPx: Int, labelWidthPx: Int): Int {
+    if (count <= 0 || plotWidthPx <= 0) return 0
+    val width = labelWidthPx.coerceIn(0, plotWidthPx)
+    val center = plotWidthPx.toDouble() * (index.coerceIn(0, count - 1) + .5) / count
+    return (center - width / 2.0).roundToInt().coerceIn(0, plotWidthPx - width)
+}
+
 /** All visible dates share the available width. Only the selected month bar displays its amount. */
 @Composable
 fun CashFlowBarChart(bars: List<DayBar>, selectedDayMillis: Long?, onSelectDay: (Long) -> Unit,
@@ -61,6 +71,7 @@ fun CashFlowBarChart(bars: List<DayBar>, selectedDayMillis: Long?, onSelectDay: 
     val maxYuan = (bars.maxOfOrNull { it.amountFen } ?: 0L) / 100.0
     val axis = cashFlowAxis(maxYuan)
     val top = axis.top
+    val density = LocalDensity.current
     val monthTicks = remember(bars.firstOrNull()?.dayStartMillis, bars.lastOrNull()?.day, selectedDayMillis) {
         cashFlowMonthDateTicks(bars.lastOrNull()?.day ?: 0,
             bars.firstOrNull { it.dayStartMillis == selectedDayMillis }?.day)
@@ -92,11 +103,11 @@ fun CashFlowBarChart(bars: List<DayBar>, selectedDayMillis: Long?, onSelectDay: 
                             strokeWidth = 1.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(3.dp.toPx(), 5.dp.toPx())))
                     }
                 }
+                Column(Modifier.fillMaxWidth()) {
                 Row(Modifier.fillMaxWidth()) {
                     bars.forEach { bar ->
                         val selectedBar = bar.dayStartMillis == selectedDayMillis
-                        val showDate = !compressedMonth || bar.day in monthTicks
-                        Column(Modifier.width(slot).clickable { onSelectDay(bar.dayStartMillis) }
+                        Column(Modifier.weight(1f).clickable { onSelectDay(bar.dayStartMillis) }
                             .semantics { contentDescription = "${bar.day}日，${Formatters.fenToYuanText(bar.amountFen)}元${if (selectedBar) "，已选中" else ""}" }, horizontalAlignment = Alignment.CenterHorizontally) {
                             Box(Modifier.height(174.dp).width((slot - 1.dp).coerceAtLeast(1.dp)).background(if (selectedBar) MaterialTheme.colorScheme.primaryContainer.copy(alpha = .3f) else Color.Transparent, RoundedCornerShape(22.dp)), contentAlignment = Alignment.BottomCenter) {
                                 if (bar.amountFen > 0) {
@@ -113,15 +124,35 @@ fun CashFlowBarChart(bars: List<DayBar>, selectedDayMillis: Long?, onSelectDay: 
                                         color = if (selectedBar) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
                                 } else Box(Modifier.padding(bottom = 2.dp).size(5.dp).background(if (selectedBar) MaterialTheme.colorScheme.primary else trackColor, RoundedCornerShape(50)))
                             }
-                            Surface(Modifier.padding(top = 4.dp).height(24.dp), shape = RoundedCornerShape(50),
+                            if (!compressedMonth) Surface(Modifier.padding(top = 4.dp).height(24.dp), shape = RoundedCornerShape(50),
                                 color = if (selectedBar) MaterialTheme.colorScheme.primaryContainer else Color.Transparent) {
-                                Text(if (!showDate) "" else if (!compressedMonth && bar.isToday) "今天" else "${bar.day}",
-                                    Modifier.requiredWidth(if (compressedMonth) 24.dp else slot).padding(vertical = 4.dp),
-                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center, fontSize = if (compressedMonth) 9.sp else 10.sp,
+                                Text(if (bar.isToday) "今天" else "${bar.day}",
+                                    Modifier.requiredWidth(slot).padding(vertical = 4.dp),
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center, fontSize = 10.sp,
                                     color = if (selectedBar) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
                     }
+                }
+                if (compressedMonth) {
+                    val labelWidth = 24.dp.coerceAtMost(maxWidth)
+                    val labelWidthPx = with(density) { labelWidth.roundToPx() }
+                    val plotWidthPx = constraints.maxWidth
+                    Box(Modifier.fillMaxWidth().height(28.dp).padding(top = 4.dp)) {
+                        bars.forEachIndexed { index, bar ->
+                            if (bar.day !in monthTicks) return@forEachIndexed
+                            val selected = bar.dayStartMillis == selectedDayMillis
+                            Surface(Modifier.offset { IntOffset(cashFlowDateLabelLeftPx(index, bars.size, plotWidthPx, labelWidthPx), 0) }
+                                .width(labelWidth).height(24.dp).clickable { onSelectDay(bar.dayStartMillis) },
+                                shape = RoundedCornerShape(50),
+                                color = if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent) {
+                                Text("${bar.day}", Modifier.padding(vertical = 4.dp), maxLines = 1, fontSize = 9.sp,
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                    color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+                }
                 }
                 if (compressedMonth) bars.indexOfFirst { it.dayStartMillis == selectedDayMillis }.takeIf { it >= 0 }?.let { index ->
                     val selected = bars[index]

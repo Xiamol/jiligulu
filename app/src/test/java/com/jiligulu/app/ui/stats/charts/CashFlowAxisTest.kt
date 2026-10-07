@@ -50,4 +50,18 @@ class CashFlowAxisTest {
         }
         assertEquals(setOf(1, 5, 10, 15, 20, 25, 31), cashFlowMonthDateTicks(31, null))
     }
+    @Test fun monthDateLabelsRemainInsideFractionalSlotWidthsAtBothEdges() {
+        for (days in 28..31) {
+            for ((plotWidth, labelWidth) in listOf(219 to 24, 280 to 27, 670 to 72, 707 to 72)) {
+                for (index in 0 until days) {
+                    val left = cashFlowDateLabelLeftPx(index, days, plotWidth, labelWidth)
+                    assertTrue(left >= 0)
+                    assertTrue(left + labelWidth <= plotWidth)
+                }
+                assertEquals(0, cashFlowDateLabelLeftPx(0, days, plotWidth, labelWidth))
+                assertEquals(plotWidth - labelWidth,
+                    cashFlowDateLabelLeftPx(days - 1, days, plotWidth, labelWidth))
+            }
+        }
+    }
 }
