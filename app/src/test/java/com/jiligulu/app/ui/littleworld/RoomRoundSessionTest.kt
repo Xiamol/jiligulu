@@ -361,4 +361,80 @@ class RoomRoundSessionTest {
         assertEquals(XiangqiSide.RED, guest.state.value.resignedBy)
         assertFalse(guest.state.value.canUndo)
     }
+
+    @Test fun gomokuApprovedUndoBufferedPastTwentyFiveSecondsSurvivesBackgroundAndReconnect() {
+        for(background in listOf(true,false)) {
+            val (host, guest, channel) = gomoku(1)
+            host.submitMove(GridCell(7,7)); drain(); guest.submitMove(GridCell(8,8)); drain()
+            guest.requestUndo(); drain()
+            if(background) { guest.setForeground(false); drain() }
+            else { channel.host.events.recovering(); channel.guest.events.recovering() }
+            channel.host.hold = true
+            host.respondToUndo(true); drain()
+            val approval = channel.host.sent.last { it.startsWith("GO1|UNDO_STATE|") }
+            shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(45))
+            assertTrue(guest.state.value.connected); assertEquals(2, guest.state.value.pendingUndoRequest)
+            if(background) guest.setForeground(true)
+            channel.host.hold = false
+            channel.host.send(approval); drain()
+            channel.host.events.recovered(); channel.guest.events.recovered(); drain()
+            assertTrue(host.state.value.connected); assertTrue(guest.state.value.connected)
+            assertEquals(host.state.value.game, guest.state.value.game)
+            assertEquals(1, guest.state.value.game.board.count { it != 0 })
+            assertNull(guest.state.value.pendingUndoRequest)
+            host.close(); guest.close()
+        }
+    }
+
+    @Test fun xiangqiConsentAndBufferedApprovalAreNotDiscardedDuringAShortBackgroundTrip() {
+        val host = XiangqiLanSession(); val guest = XiangqiLanSession(); val channel = Channel()
+        host.wireFactory=channel.factory;guest.wireFactory=channel.factory;host.firstPlayer={1}
+        host.host();guest.join("192.168.1.8");channel.connect();host.respondToMatch(true);drain()
+        host.submitMove(XiangqiMove(GridCell(0,6),GridCell(0,5)));drain()
+        guest.submitMove(XiangqiMove(GridCell(0,3),GridCell(0,4)));drain()
+        host.requestUndo();drain();guest.setForeground(false);drain()
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(30))
+        assertEquals(XiangqiSide.RED,host.state.value.pendingUndoRequest)
+        assertEquals(XiangqiSide.RED,guest.state.value.pendingUndoRequest)
+        guest.setForeground(true);drain()
+        channel.host.hold=true;guest.respondToUndo(true);drain()
+        val approval=channel.host.sent.last {it.startsWith("XQ1|UNDO_STATE|")}
+        channel.guest.events.recovering()
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(45))
+        assertEquals(XiangqiSide.RED,guest.state.value.pendingUndoRequest)
+        channel.host.hold=false;channel.host.send(approval);drain()
+        assertTrue(guest.state.value.connected);assertEquals(XiangqiEngine.newGame(),guest.state.value.game)
+        assertEquals(host.state.value.game,guest.state.value.game)
+    }
+
+    @Test fun staleRevisionResignationStillEndsTheSameLiveRoundAndDoesNotLeakIntoRematch() {
+        val (host,guest,channel)=gomoku(1)
+        channel.guest.hold=true;guest.resign()
+        val resignation=channel.guest.sent.last {it.startsWith("GO1|ROOM|RESIGN|")}
+        host.submitMove(GridCell(7,7));drain()
+        assertEquals(1,guest.state.value.revision)
+        channel.guest.hold=false;channel.guest.send(resignation);drain()
+        assertEquals(GomokuOutcome.HUMAN_WON,guest.state.value.game.outcome)
+        assertEquals(host.state.value.game,guest.state.value.game)
+        assertEquals(2,guest.state.value.revision)
+        host.requestRematch();drain();guest.respondToRematch(true);drain()
+        channel.guest.send(resignation);drain()
+        assertTrue(host.state.value.connected);assertTrue(guest.state.value.connected)
+        assertEquals(2,guest.state.value.round);assertEquals(GomokuOutcome.PLAYING,guest.state.value.game.outcome)
+        // The previous guest intent cannot authorize a fabricated new-round concession.
+        channel.host.send(GomokuRoomProtocol.encode(GomokuRoomMessage.Control(RoomControl.Resigned(2,4,1))));drain()
+        assertFalse(guest.state.value.connected);assertEquals(GomokuOutcome.PLAYING,guest.state.value.game.outcome)
+    }
+
+    @Test fun xiangqiResignationAtAnOlderRevisionArrivesAfterTheHostsMoveWithoutGettingLost() {
+        val host=XiangqiLanSession();val guest=XiangqiLanSession();val channel=Channel()
+        host.wireFactory=channel.factory;guest.wireFactory=channel.factory;host.firstPlayer={1}
+        host.host();guest.join("192.168.1.8");channel.connect();host.respondToMatch(true);drain()
+        channel.guest.hold=true;guest.resign()
+        val resignation=channel.guest.sent.last {it.startsWith("XQ1|ROOM|RESIGN|")}
+        host.submitMove(XiangqiMove(GridCell(0,6),GridCell(0,5)));drain()
+        channel.guest.hold=false;channel.guest.send(resignation);drain()
+        assertTrue(guest.state.value.connected);assertEquals(XiangqiOutcome.RED_WON,guest.state.value.game.outcome)
+        assertEquals(host.state.value.game,guest.state.value.game);assertEquals(XiangqiSide.BLACK,guest.state.value.resignedBy)
+    }
 }
