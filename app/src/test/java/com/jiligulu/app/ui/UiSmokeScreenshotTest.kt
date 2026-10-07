@@ -380,7 +380,7 @@ class UiSmokeScreenshotTest {
             capture("statistics-light")
 
             visibleDescription("设置").performClick()
-            awaitText("你的称呼")
+            awaitText("主题与皮肤")
             capture("settings-light")
             compose.onNodeWithText("关于").performClick()
             scrollSettingsTo("阿噜使用手册")
@@ -403,7 +403,7 @@ class UiSmokeScreenshotTest {
             val darkBackground = capture("home-dark")
             assertNotEquals("Theme preference must change the rendered background", lightBackground, darkBackground)
             visibleDescription("设置").performClick()
-            awaitText("你的称呼")
+            awaitText("主题与皮肤")
             capture("settings-dark")
             compose.onNodeWithContentDescription("返回").performClick()
             compose.onNodeWithText("账本").performClick()
@@ -415,7 +415,7 @@ class UiSmokeScreenshotTest {
             compose.onNodeWithContentDescription("返回").performClick()
             awaitText("账本")
             visibleDescription("设置").performClick()
-            awaitText("你的称呼")
+            awaitText("主题与皮肤")
             val cup = runBlocking {
                 app.container.userPrefs.setWaterEnabled(true)
                 app.container.userPrefs.markWaterDue(System.currentTimeMillis(), "水杯准备好啦，一起喝一口，阿噜！")
@@ -450,7 +450,7 @@ class UiSmokeScreenshotTest {
             assertTrue(runBlocking { !app.container.userPrefs.pendingWater.first().isPending })
             capture("water-completed")
             visibleDescription("设置").performClick()
-            awaitText("你的称呼")
+            awaitText("主题与皮肤")
             compose.onNodeWithText("关于").performClick()
             scrollSettingsTo("检查更新")
             compose.waitForIdle()
@@ -811,10 +811,23 @@ class UiSmokeScreenshotTest {
             compose.onNodeWithContentDescription("24日，28.8元，已选中").assertIsDisplayed()
             capture("statistics-soft-bars")
             compose.runOnIdle { activity.setContent { GuluTheme { com.jiligulu.app.ui.settings.SettingsScreen(onBack = {}) } } }
-            awaitText("你的称呼")
+            awaitText("主题与皮肤")
             capture("settings-single-card")
+            compose.onNodeWithTag("settings-tab-互动").performClick()
+            awaitText("你的称呼")
+            scrollSettingsTo("阿噜悬浮球")
+            capture("settings-interaction-card")
+            compose.onNodeWithText("试听").assertDoesNotExist()
+            scrollSettingsTo("采样速度")
+            listOf(15, 30, 60, 120).forEach { fps ->
+                compose.onNodeWithTag("global-glass-rate-$fps").assertIsDisplayed()
+            }
+            compose.onNodeWithContentDescription("采样速度说明").performClick()
+            awaitText("全局关闭时，仅 App 内起效", substring = true)
+            compose.onNodeWithText("知道啦").performClick()
             compose.onNodeWithText("提醒", substring = false).performClick()
-            awaitText("阿噜悬浮球")
+            awaitText("喝水提醒")
+            compose.onNodeWithText("阿噜悬浮球").assertDoesNotExist()
             capture("settings-reminders-card")
             compose.runOnIdle { activity.setContent {} }
         }

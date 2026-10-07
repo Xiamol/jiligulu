@@ -5,9 +5,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,18 +15,14 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.ScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -37,7 +31,6 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -50,7 +43,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -62,9 +54,6 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.font.FontWeight
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.jiligulu.app.data.prefs.UserPrefs
 import com.jiligulu.app.BuildConfig
@@ -111,13 +100,12 @@ fun SettingsScreen(
     }
 
     // Permission launchers belong to the UI; preference writes and scheduling belong to the VM.
-    var settingsTab by rememberSaveable { mutableStateOf(if (checkUpdatesOnOpen) "关于" else "日常") }
+    var settingsTab by rememberSaveable { mutableStateOf(if (checkUpdatesOnOpen) "关于" else "外观") }
     val context = LocalContext.current
     val settingsPrefs = remember(context.applicationContext) { UserPrefs(context.applicationContext) }
     val selectedSkin by settingsPrefs.littleWorldSkin.collectAsStateWithLifecycle(initialValue = null)
     var showSkinSelector by rememberSaveable { mutableStateOf(false) }
     var feedbackSound by remember(context) { mutableStateOf(UiSound.enabled(context)) }
-    var showSoundSamples by remember { mutableStateOf(false) }
     LaunchedEffect(context) { UiSound.warmup(context) }
     val notificationPermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -193,9 +181,11 @@ fun SettingsScreen(
                     }
                 }
             )
-            FlowRow(Modifier.fillMaxWidth().padding(horizontal=16.dp),horizontalArrangement=Arrangement.spacedBy(6.dp)) {
-                listOf("日常", "提醒", "数据", "关于").forEach { tab ->
-                    FilterChip(selected=settingsTab==tab,onClick=uiTap {settingsTab=tab},enabled=state.isLoaded,label={Text(tab)})
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal=16.dp),
+                horizontalArrangement=Arrangement.spacedBy(6.dp)) {
+                listOf("外观", "互动", "提醒", "数据", "关于").forEach { tab ->
+                    FilterChip(selected=settingsTab==tab,onClick=uiTap {settingsTab=tab},enabled=state.isLoaded,
+                        modifier=Modifier.testTag("settings-tab-$tab"), label={Text(tab, maxLines=1)})
                 }
             }
             }
@@ -227,17 +217,18 @@ fun SettingsScreen(
                 }
 
                 if (state.isLoaded) {
-                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    if (settingsTab == "日常") SettingsSection("你的称呼", "💌") {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (settingsTab == "互动") SettingsSection("你的称呼", "💌",
+                        help = "名字和称呼后缀分别点击修改，分别保存。后缀留空时，阿噜会称你为“大人”。") {
                         ProfileSettingRow("名字",state.nickname,editable) { edit(ProfileSettingField.NAME,state.nickname) }
                         ProfileSettingRow("称呼后缀",state.suffix,editable) { edit(ProfileSettingField.SUFFIX,state.suffix) }
                     }
 
-                    if (settingsTab == "日常") SettingsSection("阿噜的记性", "🌱") {
+                    if (settingsTab == "互动") SettingsSection("阿噜的记性", "🌱") {
                         CompanionMemorySettings(enabled = editable)
                     }
 
-                    if (settingsTab == "日常") SettingsSection("外观", "🎨") {
+                    if (settingsTab == "外观") SettingsSection("主题与皮肤", "🎨") {
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             listOf(
                                 UserPrefs.THEME_SYSTEM to "跟随系统",
@@ -252,22 +243,29 @@ fun SettingsScreen(
                                 )
                             }
                         }
-                        DisplayPerformanceSettings(enabled = editable)
                         ProfileSettingRow("全局皮肤", selectedSkin?.title?.let { "$it · 预览" } ?: "打开预览", editable) {
                             showSkinSelector = true
                         }
+                    }
+                    if (settingsTab == "外观") SettingsSection("显示", "🖼️") {
+                        DisplayPerformanceSettings(enabled = editable)
                         StatsDisplaySettings(enabled = editable)
+                    }
+                    if (settingsTab == "互动") SettingsSection("声音", "🔊") {
                         Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
                             Text("按键与棋子音效",Modifier.weight(1f),style=MaterialTheme.typography.bodyMedium)
-                            TextButton(onClick={showSoundSamples=true},enabled=feedbackSound) {Text("试听",style=MaterialTheme.typography.labelSmall)}
-                            Switch(checked=feedbackSound,onCheckedChange={enabled->
+                            Switch(checked=feedbackSound,enabled=editable,onCheckedChange={enabled->
                                 feedbackSound=enabled;UiSound.setEnabled(context,enabled)
                                 if(enabled) UiSound.toggle(context)
                             })
                         }
                     }
+                    if (settingsTab == "互动") SettingsSection("悬浮与玻璃", "📷") {
+                        com.jiligulu.app.ui.capture.FloatingCaptureSettings()
+                    }
 
-                    if (settingsTab == "提醒") SettingsSection("喝水提醒", "💧") {
+                    if (settingsTab == "提醒") SettingsSection("喝水提醒", "💧",
+                        help = "提醒间隔可设为 1 分钟到 12 小时 59 分钟。免打扰支持跨午夜；开始与结束相同则关闭免打扰。所有改动自动保存。通知、准时提醒与后台运行权限会影响提醒是否及时出现。") {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
@@ -297,7 +295,6 @@ fun SettingsScreen(
                             TimePickerField(
                                 label = "提醒间隔",
                                 value = intervalText(intervalHours, intervalMinutes),
-                                supporting = "1 分钟～12 小时 59 分钟",
                                 enabled = editable,
                                 onClick = uiTap { showIntervalPicker = true }
                             )
@@ -308,29 +305,18 @@ fun SettingsScreen(
                                 TimePickerField(label = "结束", value = state.quietEndText.ifBlank { "08:00" },
                                     modifier = Modifier.weight(1f), enabled = editable, onClick = uiTap { showQuietEnd = true })
                             }
-                            Text(
-                                "支持跨午夜；起止相同则关闭免打扰。改动自动保存。",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
                             ReminderPermissionHint()
                         }
                     }
 
-                    if (settingsTab == "提醒") SettingsSection("悬浮记账", "📷") { com.jiligulu.app.ui.capture.FloatingCaptureSettings() }
-
-                    if (settingsTab == "数据") SettingsSection("AI 服务", "✨") {
+                    if (settingsTab == "数据") SettingsSection("AI 服务", "✨",
+                        help = "自定义 API Key 保存在当前设备，调用 DeepSeek 时用于身份验证。AI 对话会发送你的消息、最近对话及部分账本上下文，用于理解请求；开启阿噜的记性时，也会带上已保存的小记忆。API Key 单独保存，留空时使用可用的内置配置。") {
                         AiUsageSettings()
                         ProfileSettingRow("自定义 API Key",if(state.apiKey.isBlank()) {
                             if (com.jiligulu.app.core.ai.AiConfig.DEFAULT_API_KEY.isNotBlank()) "使用内置配置" else "未填写 · 点击设置"
                         } else "已设置 · 点击修改",editable) {
                             edit(ProfileSettingField.API_KEY,state.apiKey)
                         }
-                        Text(
-                            "保存在当前设备，调用 DeepSeek 时用于身份验证。",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
                     }
 
                     if (settingsTab == "数据") SettingsSection("数据管理", "🗂️") {
@@ -350,7 +336,8 @@ fun SettingsScreen(
                         ConversationSettingsCard(vm)
                     }
 
-                    if (settingsTab == "关于") SettingsSection("关于叽里咕噜", "🌱") {
+                    if (settingsTab == "关于") SettingsSection("关于叽里咕噜", "🌱",
+                        help = "叽里咕噜是一个本地优先的 AI 记账小助手，也是会唠叨你好好吃饭的小搭子。\n\n账单、对话和设置保存在这台手机。AI 对话会把消息、最近对话及部分账本上下文发送给 DeepSeek，用于理解请求；启用记性时会附带小记忆。无需登录，暂不支持云同步或应用内备份。\n\n阿噜想说的话：谢谢你愿意把每天的花销交给我。我不会评判你买了什么，但如果你连着两天只吃面，我可能会念叨一句要记得吃肉。") {
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             Text("叽里咕噜", style = MaterialTheme.typography.titleLarge.copy(fontFamily = GuluBrandFont, fontWeight = FontWeight.Normal),
@@ -361,26 +348,14 @@ fun SettingsScreen(
                                     style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onPrimaryContainer)
                             }
                         }
-                        Text("一个本地优先的 AI 记账小助手，也是一个会唠叨你好好吃饭的小搭子。",
-                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-
                         AboutLine(
                             title = "制作人",
                             value = "路陌",
                             brand = true
                         )
                         AboutLine(title = "AI 助手", value = "DeepSeek")
-                        AboutLine(title = "本地保存", value = "账单、对话和设置保存在这台手机")
-                        AboutLine(title = "AI 对话", value = "消息、最近对话及部分账本上下文会发送给 DeepSeek，用于理解请求")
-                        AboutLine(title = "账号同步", value = "无需登录，暂不支持云同步或应用内备份")
-
-                        Text(
-                            "阿噜想说的话：谢谢你愿意把每天的花销交给我。我不会评判你买了什么，" +
-                                "但如果你连着两天只吃面，我可能会念叨一句要记得吃肉。",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            lineHeight = MaterialTheme.typography.bodySmall.lineHeight
-                        )
+                        AboutLine(title = "数据保存", value = "本机")
+                        AboutLine(title = "账号同步", value = "无需登录 · 暂无云同步")
 
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             TextButton(onClick = uiTap { showHandbook = true }) { Text("阿噜使用手册") }
@@ -400,31 +375,6 @@ fun SettingsScreen(
     if (showSkinSelector) GuluDialog("小世界换装", { showSkinSelector = false }, compact = true,
         dense = true, compactWidth = 320.dp, confirmLabel = "好啦") {
         LittleWorldSkinSettings(enabled = editable)
-    }
-    if (showSoundSamples) GuluDialog("听听小声音", { showSoundSamples=false }, compact=true,
-        dense=true, compactWidth=260.dp) {
-        // 2026-10-06 细分后：纸张拆成三种材质分别试听（拆信/翻页/信笺），
-        // 「翻页」不再借用导航音；顺带把棋局与撤销/提示也列出来，方便逐个比对。
-        val samples = listOf(
-            "拆信" to com.jiligulu.app.core.audio.UiCue.ENVELOPE,
-            "翻页" to com.jiligulu.app.core.audio.UiCue.PAGE_TURN,
-            "信笺" to com.jiligulu.app.core.audio.UiCue.LETTER,
-            "纸张" to com.jiligulu.app.core.audio.UiCue.PAPER,
-            "开关" to com.jiligulu.app.core.audio.UiCue.TOGGLE,
-            "收好" to com.jiligulu.app.core.audio.UiCue.CONFIRM,
-            "悔棋" to com.jiligulu.app.core.audio.UiCue.UNDO,
-            "提示" to com.jiligulu.app.core.audio.UiCue.HINT,
-            "木棋" to com.jiligulu.app.core.audio.UiCue.WOOD_MOVE,
-            "棋石" to com.jiligulu.app.core.audio.UiCue.STONE_MOVE,
-            "吃子" to com.jiligulu.app.core.audio.UiCue.CAPTURE,
-            "将军" to com.jiligulu.app.core.audio.UiCue.CHECK)
-        samples.chunked(3).forEach { row ->
-            Row(Modifier.fillMaxWidth()) {
-                row.forEach { (label,cue) ->
-                    TextButton(onClick={UiSound.play(context,cue)},modifier=Modifier.weight(1f)) { Text(label) }
-                }
-            }
-        }
     }
     if (showHandbook) HandbookDialog(onDismiss = { showHandbook = false })
     if (showFontLicense) {
@@ -511,12 +461,14 @@ private fun SettingsCompanionHeader(nickname: String, suffix: String) {
 private fun SettingsSection(
     title: String,
     icon: String,
+    help: String? = null,
     content: @Composable ColumnScope.() -> Unit
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(icon, style = MaterialTheme.typography.titleMedium)
-            Text(title, style = MaterialTheme.typography.titleSmall)
+            Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
+            help?.let { SettingHelpButton(title, it) }
         }
         content()
     }

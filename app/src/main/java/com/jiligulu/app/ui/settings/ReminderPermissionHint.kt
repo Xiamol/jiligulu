@@ -6,6 +6,8 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.provider.Settings
 import android.net.Uri
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -15,6 +17,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.app.NotificationManagerCompat
 import androidx.lifecycle.Lifecycle
@@ -58,15 +62,13 @@ fun ReminderPermissionHint() {
             } catch (_: Exception) { error = "请到系统设置中开启叽里咕噜的通知权限。" }
         }) { Text("打开通知设置") }
     }
-    Text("息屏省电和后台限制可能延迟提醒。可在手机系统设置中允许自启动与后台运行；强行停止应用后，需要重新打开才能恢复。",
-        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    if (Build.MANUFACTURER.equals("vivo", ignoreCase = true) || Build.BRAND.equals("iQOO", ignoreCase = true)) {
-        Text("vivo / iQOO：系统设置中搜索「后台高耗电」或「后台耗电管理」，允许叽里咕噜后台运行；同时开启自启动。仅开启通知和准时提醒权限仍可能被系统冻结。",
-            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text("后台运行", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+        SettingHelpButton("后台运行与提醒", "息屏省电和后台限制可能延迟提醒。可在手机系统设置中允许叽里咕噜自启动与后台运行；强行停止应用后，需要重新打开才能恢复。\n\nvivo / iQOO：在系统设置中搜索“后台高耗电”或“后台耗电管理”，允许叽里咕噜后台运行，并开启自启动。仅开启通知和准时提醒权限仍可能被系统冻结。")
+        TextButton(onClick = {
+            try { context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))) }
+            catch (_: Exception) { error = "请在系统设置中找到叽里咕噜的应用信息。" }
+        }) { Text("系统设置") }
     }
-    TextButton(onClick = {
-        try { context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))) }
-        catch (_: Exception) { error = "请在系统设置中找到叽里咕噜的应用信息。" }
-    }) { Text("打开系统应用设置") }
     error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
 }

@@ -16,6 +16,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
@@ -43,9 +44,10 @@ internal fun DisplayPerformanceSettings(enabled: Boolean = true) {
     var saving by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("刷新率", style = MaterialTheme.typography.titleSmall)
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text("屏幕刷新率", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
             Text("Hz", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            SettingHelpButton("屏幕刷新率", "仅调整叽里咕噜窗口的刷新率，不修改手机系统设置。选择“系统”时跟随设备；设备不支持所选档位时会使用可用档位，系统省电限制优先。改动自动保存。")
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             AppRefreshRate.entries.forEach { rate ->
@@ -71,8 +73,7 @@ internal fun DisplayPerformanceSettings(enabled: Boolean = true) {
                 }
             }
         }
-        Text(if (error) "没能保存，再点一次试试。" else "仅影响阿噜 · 不支持时降档 · 系统省电优先",
-            style = MaterialTheme.typography.labelSmall,
-            color = if (error) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
+        if (error) Text("没能保存，再点一次试试。", style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.error)
     }
 }
