@@ -84,4 +84,17 @@ class RoomRoundProtocolTest {
         val xq = XiangqiEngine.play(XiangqiEngine.newGame(), XiangqiMove(GridCell(0, 6), GridCell(0, 5)))
         assertFalse(XiangqiSnapshotRules.accepts(1, xq, true, XiangqiLanMessage.Snapshot(2, XiangqiEngine.newGame()), allowRestart = false))
     }
+
+    @Test fun invitationProfilesAreOptionalButAvatarIdsMustComeFromTheBundledCatalogue() {
+        assertEquals(RoomControl.Hello("棋友"), RoomControlCodec.decode("HELLO_NAME|5qOL5Y-L|-|-"))
+        for (avatar in listOf("aru", "cat", "leaf", "moon", "star")) {
+            val profile=RoomControl.Hello("棋友",avatarId=avatar)
+            assertEquals(profile,RoomControlCodec.decode(RoomControlCodec.encode(profile)))
+        }
+        for (bad in listOf("https://example.test/a.png", "../cat", "CAT", "", "cat|extra")) {
+            assertThrows(LanProtocolException::class.java) {
+                RoomControlCodec.decode("HELLO_NAME|5qOL5Y-L|-|-|$bad")
+            }
+        }
+    }
 }

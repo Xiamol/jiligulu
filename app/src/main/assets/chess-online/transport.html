@@ -4,7 +4,7 @@
 let peer=null,connection=null,host=false,stopped=false,code='',peerIdentity='',remoteIdentity='',remoteToken='';
 let token='',everConnected=false,retryTimer=null,connectTimer=null,signalTimer=null;
 let outgoing=0,incoming=0,pending=new Map(),inbox=new Map(),hasRelay=false;
-const protocol='gulu-xq-3';
+const protocol='gulu-xq-4';
 function emit(type,value=''){if(!stopped&&window.GuluTransport)window.GuluTransport.event(type,String(value).slice(0,2048));}
 function nonce(){const b=new Uint8Array(16);crypto.getRandomValues(b);return Array.from(b,v=>v.toString(16).padStart(2,'0')).join('');}
 function validIce(value){

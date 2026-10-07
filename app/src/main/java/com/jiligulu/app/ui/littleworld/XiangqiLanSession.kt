@@ -56,6 +56,10 @@ data class XiangqiLanUiState(
     val remoteBackground: Boolean = false,
     val reconnecting: Boolean = false,
     val resignedBy: XiangqiSide? = null,
+    val localAvatarId: String = "aru",
+    val remoteAvatarId: String = "aru",
+    val remoteName: String = "棋友",
+    val peerLeft: Boolean = false,
 )
 
 /** The room creator is the board authority, independent of randomly assigned red/black. */

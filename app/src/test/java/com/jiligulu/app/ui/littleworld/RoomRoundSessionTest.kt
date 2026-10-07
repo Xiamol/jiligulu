@@ -437,4 +437,50 @@ class RoomRoundSessionTest {
         assertTrue(guest.state.value.connected);assertEquals(XiangqiOutcome.RED_WON,guest.state.value.game.outcome)
         assertEquals(host.state.value.game,guest.state.value.game);assertEquals(XiangqiSide.BLACK,guest.state.value.resignedBy)
     }
+
+    @Test fun bothGomokuPlayersReceiveTheOthersProfileAndKeepItAcrossRematch() {
+        val host=GomokuLanSession();val guest=GomokuLanSession();val channel=Channel()
+        host.wireFactory=channel.factory;guest.wireFactory=channel.factory;host.firstPlayer={1}
+        host.host(playerName="小叶",avatarId="leaf");guest.join("192.168.1.8",playerName="小猫",avatarId="cat")
+        channel.connect();host.respondToMatch(true);drain()
+        assertTrue(host.state.value.connected);assertTrue(guest.state.value.connected)
+        assertEquals("小猫",host.state.value.remoteName);assertEquals("cat",host.state.value.remoteAvatarId)
+        assertEquals("小叶",guest.state.value.remoteName);assertEquals("leaf",guest.state.value.remoteAvatarId)
+        assertEquals("leaf",host.state.value.localAvatarId);assertEquals("cat",guest.state.value.localAvatarId)
+        host.requestRematch();drain();guest.respondToRematch(true);drain()
+        assertEquals(2,guest.state.value.round);assertEquals("小叶",guest.state.value.remoteName)
+        assertEquals("cat",host.state.value.remoteAvatarId)
+    }
+
+    @Test fun bothXiangqiPlayersReceiveTheOthersProfileBeforePlaying() {
+        val host=XiangqiLanSession();val guest=XiangqiLanSession();val channel=Channel()
+        host.wireFactory=channel.factory;guest.wireFactory=channel.factory;host.firstPlayer={2}
+        host.host(playerName="月亮",avatarId="moon");guest.join("192.168.1.8",playerName="星星",avatarId="star")
+        channel.connect();host.respondToMatch(true);drain()
+        assertTrue(host.state.value.connected);assertTrue(guest.state.value.connected)
+        assertEquals("星星",host.state.value.remoteName);assertEquals("star",host.state.value.remoteAvatarId)
+        assertEquals("月亮",guest.state.value.remoteName);assertEquals("moon",guest.state.value.remoteAvatarId)
+        assertEquals("moon",host.state.value.localAvatarId)
+    }
+
+    @Test fun deliberateDepartureAtAnOlderRevisionKeepsTheHostsLastBoardInBothGames() {
+        val (goHost,goGuest,goChannel)=gomoku(1)
+        goChannel.host.hold=true
+        goHost.submitMove(GridCell(7,7));drain()
+        val lastGoBoard=goHost.state.value.game
+        goGuest.close();drain()
+        assertTrue(goHost.state.value.peerLeft);assertTrue(goHost.state.value.roomEnded)
+        assertFalse(goHost.state.value.connected);assertFalse(goHost.state.value.sessionActive)
+        assertEquals(lastGoBoard,goHost.state.value.game)
+
+        val host=XiangqiLanSession();val guest=XiangqiLanSession();val channel=Channel()
+        host.wireFactory=channel.factory;guest.wireFactory=channel.factory;host.firstPlayer={1}
+        host.host();guest.join("192.168.1.8");channel.connect();host.respondToMatch(true);drain()
+        channel.host.hold=true
+        host.submitMove(XiangqiMove(GridCell(0,6),GridCell(0,5)));drain()
+        val lastChessBoard=host.state.value.game
+        guest.close();drain()
+        assertTrue(host.state.value.peerLeft);assertTrue(host.state.value.roomEnded)
+        assertFalse(host.state.value.connected);assertEquals(lastChessBoard,host.state.value.game)
+    }
 }
