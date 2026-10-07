@@ -17,6 +17,7 @@ import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.automirrored.outlined.Undo
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.Logout
+import androidx.compose.material.icons.outlined.Flag
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -188,16 +189,23 @@ internal fun ColumnScope.SecretGomokuGame(state: GomokuState, paused: Boolean, b
     onHost: (String) -> Unit = {}, onJoin: (String) -> Unit = {}, onDisconnect: () -> Unit = {},
     onNearbyRetry: () -> Unit = {}, onUndoResponse: (Boolean) -> Unit = {},
     onMatchResponse: (Boolean) -> Unit = {}, onRematchResponse: (Boolean) -> Unit = {},
-    onExit: () -> Unit = onDisconnect, restorationToken: Int = 0,
+    onExit: () -> Unit = onDisconnect, onResign: () -> Unit = {}, restorationToken: Int = 0,
     showRoomEntry: Boolean = false,
     helpBusy: Boolean = false, onControlsBottom: (Float) -> Unit = {}) {
     val context = LocalContext.current
     var modeMenu by remember { mutableStateOf(false) }
+    var resignConfirm by remember(mode, room?.round) { mutableStateOf(false) }
     val network = mode == GomokuPlayMode.ONLINE || mode == GomokuPlayMode.NEARBY
     val localPlayer = if (network) room?.localPlayer else humanPlayer
     val finished = state.outcome != GomokuOutcome.PLAYING
-    val finish = remember(state,mode,localPlayer) { GameFinishPresenter.gomoku(state,
-        if(mode==GomokuPlayMode.HOTSEAT) null else localPlayer, if(mode==GomokuPlayMode.CPU) "阿噜" else "棋友") }
+    val finish = remember(state, mode, localPlayer, room?.resignedBy) {
+        if (network && finished && room?.resignedBy != null) {
+            val lost = room.resignedBy == localPlayer
+            GameFinishPresentation(if (lost) "这局先让一步" else "你赢啦", if (lost) "认输也可以，再下一盘吧" else "棋友认输，这一局收好啦",
+                if (lost) FinishMood.LOSE else FinishMood.WIN, if (lost) "认输" else "胜出")
+        } else GameFinishPresenter.gomoku(state,
+            if(mode==GomokuPlayMode.HOTSEAT) null else localPlayer, if(mode==GomokuPlayMode.CPU) "阿噜" else "棋友")
+    }
     val winningLine = remember(state) { GameFinishPresenter.gomokuWinningLine(state) }
     val finishIdentity = listOf(mode, restorationToken, localPlayer,
         if (network) room?.round else 0, if (network) room?.hostAddress else "",
@@ -255,7 +263,7 @@ internal fun ColumnScope.SecretGomokuGame(state: GomokuState, paused: Boolean, b
             confirmLabel="好呀，换边再下",onConfirm={if(!rematchResponseSent){rematchResponseSent=true;onRematchResponse(true)}},
             dismissLabel="这次收桌",busy=rematchResponseSent) {Text("棋友想再来一局。这一盘会交换黑白。",style=MaterialTheme.typography.bodySmall)}
     }
-    if (network && room != null && !room.connected && (!finished||showRoomEntry)) {
+    if (network && room != null && !room.connected && !room.reconnecting && (!finished||showRoomEntry)) {
         if (mode == GomokuPlayMode.NEARBY) NearbyChessLobby(nearby, room.status, room.error, onJoin, onNearbyRetry, onControlsBottom)
         else OnlineChessLobby(room.sessionActive, room.busy, room.hostAddress, room.status, room.error,
             onHost, onJoin, onDisconnect, onControlsBottom)
@@ -265,25 +273,32 @@ internal fun ColumnScope.SecretGomokuGame(state: GomokuState, paused: Boolean, b
         onRestart, onExit, myRematchRequested = room?.myRematchRequested == true,
         suppressPrompt = network && room?.rematchRequestedBy != null &&
             room.rematchRequestedBy != room.localPlayer && !room.myRematchRequested)
+    if (network && resignConfirm && !finished) GameResignDialog(
+        onDismiss = { resignConfirm = false },
+        onConfirm = { resignConfirm = false; onResign() })
     var undoResponseSent by remember(mode, room?.revision, room?.pendingUndoRequest) { mutableStateOf(false) }
     if (network && room?.pendingUndoRequest != null && room.pendingUndoRequest != room.localPlayer) {
         fun respond(accept: Boolean) { if (!undoResponseSent) { undoResponseSent = true; onUndoResponse(accept) } }
-        SecretWoodDialog("棋友想退回一步", { respond(false) }, busy = undoResponseSent,
+        SecretWoodDialog("棋友想重走这一手", { respond(false) }, busy = undoResponseSent,
             confirmLabel = "同意", onConfirm = { respond(true) }, dismissLabel = "继续这局") {
-            Text("同意后，两张棋桌会一起回到上一步。", style = MaterialTheme.typography.bodySmall)
+            Text("会一起退回棋友上次落子前，包括随后的一手回应。", style = MaterialTheme.typography.bodySmall)
         }
     }
     val latestMove by rememberUpdatedState(onMove)
+    val roomAvailable = room?.connected == true && !room.awaitingAck && !room.localBackground &&
+        !room.remoteBackground && !room.reconnecting && room.pendingUndoRequest == null
     val canMove = !helpBusy && state.outcome == GomokuOutcome.PLAYING && when (mode) {
         GomokuPlayMode.CPU -> !paused && state.currentPlayer == humanPlayer
         GomokuPlayMode.HOTSEAT -> !paused
-        else -> room?.connected == true && !room.awaitingAck && room.pendingUndoRequest == null && state.currentPlayer == localPlayer
+        else -> roomAvailable && state.currentPlayer == localPlayer
     }
-    val wood = remember { Brush.linearGradient(listOf(Color(0xFFF2DFB9), Color(0xFFE5C79A))) }
+    val wood = remember { Brush.linearGradient(listOf(Color(0xFFF0E3CD), Color(0xFFE8D5B4))) }
     val status = when (state.outcome) {
         GomokuOutcome.HUMAN_WON,GomokuOutcome.CPU_WON -> finish?.headline?:"本局结束"
         GomokuOutcome.DRAW -> "棋盘坐满啦，这一局平手 ♡"
         GomokuOutcome.PLAYING -> when {
+            network && room?.reconnecting == true -> "棋局还在，正在重新连接…"
+            network && room?.remoteBackground == true -> "棋友暂时离开，棋局替你们留着"
             network && room?.pendingUndoRequest != null -> "等棋友商量这一步…"
             network && room?.awaitingAck == true -> "等另一张棋桌落稳…"
             !network && paused -> "棋局已暂停，棋子都替你留着"
@@ -381,14 +396,16 @@ internal fun ColumnScope.SecretGomokuGame(state: GomokuState, paused: Boolean, b
     } else {
     Text(status, modifier = Modifier.padding(top = 14.dp), color = Color(0xFF766A7F), style = MaterialTheme.typography.bodyMedium)
     Spacer(Modifier.height(20.dp))
-    Row(Modifier.width(boardSize).padding(horizontal = 34.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+    Row(Modifier.width(boardSize).padding(horizontal = 26.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         if (!network) GameIconTool(if (paused) Icons.Outlined.PlayCircleOutline else Icons.Outlined.PauseCircleOutline,
             if (paused) "继续" else "暂停", onToggle, Modifier.weight(1f), enabled = state.outcome == GomokuOutcome.PLAYING)
-        else GameIconTool(androidx.compose.material.icons.Icons.Outlined.Logout, "离开", onDisconnect, Modifier.weight(1f))
+        else GameIconTool(Icons.Outlined.Flag, "认输", { resignConfirm = true }, Modifier.weight(1f),
+            enabled = roomAvailable)
         if(!network) GameIconTool(Icons.Outlined.Refresh, "重开", onRestart, Modifier.weight(1f))
         GameIconTool(Icons.AutoMirrored.Outlined.Undo, "悔棋", onUndo, Modifier.weight(1f),
-            enabled = canUndo && !helpBusy && (!network || room?.pendingUndoRequest == null),
+            enabled = canUndo && !helpBusy && (!network || roomAvailable),
             cue = com.jiligulu.app.core.audio.UiCue.TOUCH)
+        if (network) GameIconTool(Icons.Outlined.Logout, "离开", onDisconnect, Modifier.weight(1f))
     }
     Text("黑棋先行 · 连成五子获胜", Modifier.padding(top = 4.dp, bottom = 10.dp)
         .onGloballyPositioned { onControlsBottom(it.boundsInRoot().bottom) },

@@ -138,7 +138,8 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
     val nickname by prefs.nickname.collectAsStateWithLifecycle("")
     var activity by rememberSaveable { mutableStateOf<SecretActivity?>(null) }
     var choosingOpponent by rememberSaveable { mutableStateOf(false) }
-    val fullGame = activity == SecretActivity.SNAKE || activity == SecretActivity.GOMOKU || activity == SecretActivity.XIANGQI
+    val fullGame = activity == SecretActivity.SNAKE || activity == SecretActivity.GOMOKU ||
+        activity == SecretActivity.XIANGQI || activity == SecretActivity.WHEEL
     SceneSystemBars(lightIcons = !fullGame)
     var prize by rememberSaveable { mutableStateOf<String?>(null) }
     var spinning by remember { mutableStateOf(false) }
@@ -157,13 +158,9 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
     var gomokuColorAssigned by rememberSaveable{mutableStateOf(false)}
     var gomokuMode by rememberSaveable { mutableStateOf(GomokuPlayMode.CPU) }
     var gomokuRoomEntry by remember{mutableStateOf(false)}
-    var gomokuUndoConsent by remember { mutableStateOf(false) }
-    var gomokuUndoResume by remember { mutableStateOf(false) }
     var xiangqi by rememberSaveable(stateSaver = xiangqiStateSaver) { mutableStateOf(XiangqiEngine.newGame()) }
     var xiangqiHistory by remember { mutableStateOf<List<XiangqiState>>(emptyList()) }
     var xiangqiRestoreToken by remember { mutableIntStateOf(0) }
-    var undoConfirmVisible by remember { mutableStateOf(false) }
-    var undoResume by remember { mutableStateOf(false) }
     var thinkingSeconds by rememberSaveable { mutableIntStateOf(gamePreferences.getInt("xiangqi_thinking_seconds", 120)
         .coerceIn(XiangqiThinkingClock.MIN_SECONDS, XiangqiThinkingClock.MAX_SECONDS)) }
     var xiangqiClock by rememberSaveable(stateSaver = xiangqiClockSaver) { mutableStateOf(XiangqiThinkingClock.reset(xiangqi, thinkingSeconds)) }
@@ -196,7 +193,6 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
     var bubbleToken by remember { mutableIntStateOf(0) }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     var foreground by remember(lifecycle) { mutableStateOf(lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) }
-    var networkGraceJob by remember { mutableStateOf<Job?>(null) }
     var helpJob by remember { mutableStateOf<Job?>(null) }
     var helpBusy by remember { mutableStateOf(false) }
     var helpGeneration by remember { mutableIntStateOf(0) }
@@ -225,7 +221,7 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
     }
     fun canPlayXiangqiSounds(): Boolean {
         if (!foreground || sleeping || activity != SecretActivity.XIANGQI || choosingOpponent ||
-            !archiveReady || gameLoading || clockSetupVisible || undoConfirmVisible) return false
+            !archiveReady || gameLoading || clockSetupVisible) return false
         return when (xiangqiMode) {
             XiangqiPlayMode.CPU, XiangqiPlayMode.HOTSEAT -> !xiangqiPaused
             XiangqiPlayMode.ONLINE -> onlineSession.state.value.let {
@@ -274,7 +270,7 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
         }
     }
     LaunchedEffect(xiangqiSoundRevision, activity, foreground, sleeping, choosingOpponent, archiveReady,
-        gameLoading, xiangqiPaused, xiangqiMode, clockSetupVisible, undoConfirmVisible, canPlayXiangqiSounds()) {
+        gameLoading, xiangqiPaused, xiangqiMode, clockSetupVisible, canPlayXiangqiSounds()) {
         if (!canPlayXiangqiSounds()) {
             if (xiangqiSounds.firstPending != null || xiangqiSoundFollowup?.isActive == true) cancelXiangqiSounds()
             return@LaunchedEffect
@@ -372,7 +368,7 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
         registerXiangqiSound(previous, next)
     }
     fun eligibleGomokuTurn(): Boolean {
-        if (!archiveReady || gameLoading || choosingOpponent || !foreground || sleeping || activity != SecretActivity.GOMOKU || gomokuUndoConsent) return false
+        if (!archiveReady || gameLoading || choosingOpponent || !foreground || sleeping || activity != SecretActivity.GOMOKU) return false
         val position = currentGomokuPosition()
         if (position.outcome != GomokuOutcome.PLAYING) return false
         return when (gomokuMode) {
@@ -380,7 +376,8 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
             GomokuPlayMode.HOTSEAT -> !gomokuPaused
             GomokuPlayMode.NEARBY, GomokuPlayMode.ONLINE -> {
                 val room = if (gomokuMode == GomokuPlayMode.ONLINE) gomokuOnlineSession.state.value else gomokuLanSession.state.value
-                room.connected && !room.awaitingAck && room.pendingUndoRequest == null && position.currentPlayer == room.localPlayer
+                room.connected && !room.awaitingAck && !room.localBackground && !room.remoteBackground && !room.reconnecting &&
+                    room.pendingUndoRequest == null && position.currentPlayer == room.localPlayer
             }
         }
     }
@@ -401,7 +398,8 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
             XiangqiPlayMode.HOTSEAT -> xiangqiStarted && !xiangqiPaused
             XiangqiPlayMode.ONLINE, XiangqiPlayMode.LAN -> {
                 val room = if (xiangqiMode == XiangqiPlayMode.ONLINE) onlineSession.state.value else lanSession.state.value
-                room.connected && !room.awaitingAck && room.pendingUndoRequest == null && position.turnSide == room.localSide
+                room.connected && !room.awaitingAck && !room.localBackground && !room.remoteBackground && !room.reconnecting &&
+                    room.pendingUndoRequest == null && position.turnSide == room.localSide
             }
         }
     }
@@ -485,8 +483,6 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
     }
     fun closeNetworkRooms() {
         cancelXiangqiSounds()
-        networkGraceJob?.cancel()
-        networkGraceJob = null
         lanSession.close()
         onlineSession.close()
         gomokuLanSession.close(); gomokuOnlineSession.close()
@@ -495,7 +491,7 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
     }
     fun changeGomokuMode(value: GomokuPlayMode) {
         if (!archiveReady) return
-        pauseLocalToys(); cancelModeLoad(); closeNetworkRooms(); gomokuUndoConsent = false
+        pauseLocalToys(); cancelModeLoad(); closeNetworkRooms()
         if (value == GomokuPlayMode.NEARBY || value == GomokuPlayMode.ONLINE) {
             gomokuMode = value
             gomokuRoomEntry=value==GomokuPlayMode.ONLINE
@@ -519,7 +515,7 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
     }
     fun changeXiangqiMode(value: XiangqiPlayMode) {
         if (!archiveReady) return
-        pauseLocalToys(); cancelModeLoad(); closeNetworkRooms(); undoConfirmVisible = false
+        pauseLocalToys(); cancelModeLoad(); closeNetworkRooms()
         clockSetupVisible = false; resumeAfterClockSetup = false
         if (value == XiangqiPlayMode.LAN || value == XiangqiPlayMode.ONLINE) {
             xiangqiMode = value
@@ -559,7 +555,7 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
         if (activeRoomConnected()) { cancelHelp(); leaveRoomAction = action } else action()
     }
     fun pauseToys() { pauseLocalToys(); closeNetworkRooms() }
-    fun closeToy() { pauseToys(); cancelModeLoad(); leaveRoomAction = null; activity = null; choosingOpponent=false; clockSetupVisible = false; resumeAfterClockSetup = false; undoConfirmVisible = false; gomokuUndoConsent = false }
+    fun closeToy() { pauseToys(); cancelModeLoad(); leaveRoomAction = null; activity = null; choosingOpponent=false; clockSetupVisible = false; resumeAfterClockSetup = false }
     fun openToy(value: SecretActivity) {
         if (!archiveReady || gameLoading) return
         if(value==SecretActivity.PAPER) UiSound.paper(context) else UiSound.navigate(context)
@@ -591,7 +587,7 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
     }
     fun undoGomoku() {
         cancelHelp()
-        val target = if (gomokuMode == GomokuPlayMode.HOTSEAT) gomokuHistory.lastIndex else LocalChessUndo.gomokuTarget(gomokuHistory,gomokuHumanPlayer)
+        val target = LocalChessUndo.gomokuTarget(gomokuHistory, gomokuHumanPlayer)
         if (target >= 0) {
             gomoku = gomokuHistory[target]; gomokuHistory = gomokuHistory.take(target); checkpointGomoku()
             if (foreground && activity == SecretActivity.GOMOKU) UiSound.undo(context)
@@ -646,21 +642,15 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
                 foreground = false
                 xiangqiDiscovery.stop(); gomokuDiscovery.stop()
                 lanSession.allowNearbyMatching(null);gomokuLanSession.allowNearbyMatching(null)
-                networkGraceJob?.cancel()
-                val sharingRoom = !sleeping && (activity == SecretActivity.XIANGQI &&
-                    (xiangqiMode == XiangqiPlayMode.ONLINE || xiangqiMode == XiangqiPlayMode.LAN) &&
-                    (lanSession.state.value.sessionActive || onlineSession.state.value.sessionActive) ||
-                    activity == SecretActivity.GOMOKU && (gomokuMode == GomokuPlayMode.NEARBY || gomokuMode == GomokuPlayMode.ONLINE) &&
-                    (gomokuLanSession.state.value.sessionActive || gomokuOnlineSession.state.value.sessionActive))
-                if (sharingRoom) networkGraceJob = scope.launch {
-                    delay(120_000)
-                    closeNetworkRooms()
-                    networkGraceJob = null
-                } else closeNetworkRooms()
+                // An ordinary app switch is a pause, not a request to destroy the room.
+                // Presence is sent before Android can suspend the socket/WebView timers.
+                lanSession.setForeground(false); onlineSession.setForeground(false)
+                gomokuLanSession.setForeground(false); gomokuOnlineSession.setForeground(false)
             }
             if (event == Lifecycle.Event.ON_START) {
-                networkGraceJob?.cancel(); networkGraceJob = null
                 foreground = true
+                lanSession.setForeground(true); onlineSession.setForeground(true)
+                gomokuLanSession.setForeground(true); gomokuOnlineSession.setForeground(true)
             }
         }
         lifecycle.addObserver(observer)
@@ -866,17 +856,19 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
                     canUndo = when (gomokuMode) {
                         GomokuPlayMode.ONLINE -> gomokuOnline.canUndo
                         GomokuPlayMode.NEARBY -> gomokuLan.canUndo
-                        GomokuPlayMode.HOTSEAT -> gomokuHistory.isNotEmpty()
+                        GomokuPlayMode.HOTSEAT -> LocalChessUndo.gomokuTarget(gomokuHistory, gomokuHumanPlayer) >= 0
                         else -> LocalChessUndo.gomokuTarget(gomokuHistory,gomokuHumanPlayer) >= 0
                     },
                     onUndo = { cancelHelp(); when (gomokuMode) {
                         GomokuPlayMode.ONLINE -> gomokuOnlineSession.requestUndo()
                         GomokuPlayMode.NEARBY -> gomokuLanSession.requestUndo()
                         GomokuPlayMode.CPU -> undoGomoku()
-                        GomokuPlayMode.HOTSEAT -> { gomokuUndoResume = !gomokuPaused; gomokuPaused = true; checkpointGomoku(); gomokuUndoConsent = true }
+                        GomokuPlayMode.HOTSEAT -> undoGomoku()
                     } },
                     onUndoResponse = { accept -> if (gomokuMode == GomokuPlayMode.ONLINE) gomokuOnlineSession.respondToUndo(accept)
                         else if (gomokuMode == GomokuPlayMode.NEARBY) gomokuLanSession.respondToUndo(accept) },
+                    onResign = { cancelHelp(); if (gomokuMode == GomokuPlayMode.ONLINE) gomokuOnlineSession.resign()
+                        else if (gomokuMode == GomokuPlayMode.NEARBY) gomokuLanSession.resign() },
                     helpBusy = helpBusy || gameLoading || !archiveReady, onControlsBottom = { gameControlsBottom = it })
                 SecretActivity.BOARD -> {
                     Text("棋盘替你铺好了，今天想下哪一种？", style = MaterialTheme.typography.bodyMedium)
@@ -938,20 +930,26 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
                         XiangqiPlayMode.ONLINE -> onlineSession.requestUndo()
                         XiangqiPlayMode.LAN -> lanSession.requestUndo()
                         XiangqiPlayMode.CPU -> undoXiangqi()
-                        XiangqiPlayMode.HOTSEAT -> { undoResume = !xiangqiPaused; freezeThinkingClock(); xiangqiPaused = true; checkpointXiangqi(); undoConfirmVisible = true }
+                        XiangqiPlayMode.HOTSEAT -> { freezeThinkingClock(); undoXiangqi() }
                     } },
                     onUndoResponse = { accept -> if (xiangqiMode == XiangqiPlayMode.ONLINE) onlineSession.respondToUndo(accept)
                         else if (xiangqiMode == XiangqiPlayMode.LAN) lanSession.respondToUndo(accept) },
+                    onResign = { cancelXiangqiSounds(); cancelHelp(); if (xiangqiMode == XiangqiPlayMode.ONLINE) onlineSession.resign()
+                        else if (xiangqiMode == XiangqiPlayMode.LAN) lanSession.resign() },
                     onModalOpened = ::cancelHelp, onControlsBottom = { gameControlsBottom = it },
                     onMoveSettled = { epoch, position, _ -> settleXiangqiSound(epoch, position) },
                     onPresentationSkipped = ::skipXiangqiPresentation)
                 SecretActivity.PAPER -> Unit // A fixed-size paper desk owns its own dialog below.
                 SecretActivity.WHEEL -> {
-                    SecretPrizeWheel(rotation.value, minOf(boardSize, 270.dp))
-                    TextButton(onClick = {
-                        UiSound.select(context)
-                        if (!spinning && foreground) spinJob = scope.launch {
+                    Column(Modifier.fillMaxWidth().weight(1f), horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center) {
+                    Text("留一件小事给今天", style = MaterialTheme.typography.bodyMedium, color = Color(0xFF948692))
+                    Spacer(Modifier.height(22.dp))
+                    SecretPrizeWheel(rotation.value, minOf(boardSize, 320.dp), enabled = !spinning && foreground) {
+                        if (!spinning && foreground) {
+                            UiSound.select(context)
                             spinning = true; prize = null
+                            spinJob = scope.launch {
                             try {
                                 val winner = Random.nextInt(wheelGroups.size)
                                 val stop = 360f - (winner * 60f + 30f)
@@ -959,35 +957,25 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
                                     tween(1900, easing = FastOutSlowInEasing))
                                 rotation.snapTo(rotation.value % 360f); prize = wheelGroups[winner].second.random()
                             } finally { spinning = false }
+                            }
                         }
-                    }, enabled = !spinning && foreground,colors=ButtonDefaults.textButtonColors(contentColor=SecretWoodInk)) { Text(if (spinning) "木钉哒哒，停在哪里呢…" else "轻轻转一下") }
+                    }
+                    Spacer(Modifier.height(20.dp))
+                    Text(prize?.let { "$it ♡" } ?: if (spinning) "好运正在绕一圈…" else "轻点转盘，看看今天的小任务",
+                        modifier = Modifier.height(28.dp), color = Color(0xFF79697F),
+                        style = if (prize != null) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodySmall)
+                    Box(Modifier.height(48.dp), contentAlignment = Alignment.Center) {
                     prize?.let { result ->
-                        Text("这次的小任务：$result ♡", color = SecretWoodInk)
                         when (result) {
                             "写封未来信" -> TextButton(onClick = { closeToy(); onOpenNotes() },colors=ButtonDefaults.textButtonColors(contentColor=SecretWoodInk)) { Text("去寄一封") }
                             "看一张照片" -> TextButton(onClick = { closeToy(); onOpenMemories() },colors=ButtonDefaults.textButtonColors(contentColor=SecretWoodInk)) { Text("翻翻纪念册") }
                             "听一句悄悄话" -> TextButton(onClick = { openToy(SecretActivity.PAPER) },colors=ButtonDefaults.textButtonColors(contentColor=SecretWoodInk)) { Text("去听悄悄话") }
                         }
                     }
+                    }
+                    Spacer(Modifier.height(32.dp))
+                    }
                 }
-            }
-        }
-        if (gomokuUndoConsent && activity == SecretActivity.GOMOKU && gomokuMode == GomokuPlayMode.HOTSEAT) {
-            SecretWoodDialog("可以退回这一步吗？", {
-                gomokuUndoConsent = false; gomokuPaused = !gomokuUndoResume; checkpointGomoku()
-            }, confirmLabel = "同意", onConfirm = {
-                undoGomoku(); gomokuUndoConsent = false; gomokuPaused = !gomokuUndoResume; checkpointGomoku()
-            }, dismissLabel = "不同意") {
-                Text("把手机交给对方，等对方选择后再继续。", style = MaterialTheme.typography.bodySmall)
-            }
-        }
-        if (undoConfirmVisible && activity == SecretActivity.XIANGQI && xiangqiMode == XiangqiPlayMode.HOTSEAT) {
-            SecretWoodDialog("可以退回这一步吗？", {
-                undoConfirmVisible = false; xiangqiPaused = !undoResume; checkpointXiangqi()
-            }, confirmLabel = "同意", onConfirm = {
-                undoXiangqi(); undoConfirmVisible = false; xiangqiPaused = !undoResume; checkpointXiangqi()
-            }, dismissLabel = "不同意") {
-                Text("把手机交给对方，等对方选择后再继续。", style = MaterialTheme.typography.bodySmall)
             }
         }
         if (fullGame) SecretGamePage(title, { leaveNetworkSafely(::closeToy) },
@@ -1141,7 +1129,8 @@ private fun SecretToyDialog(title: String, onDismiss: () -> Unit, reservedHeight
 }
 
 @Composable
-private fun SecretPrizeWheel(angle: Float, diameter: androidx.compose.ui.unit.Dp) {
+private fun SecretPrizeWheel(angle: Float, diameter: androidx.compose.ui.unit.Dp,
+    enabled: Boolean, onSpin: () -> Unit) {
     val context = LocalContext.current
     val font = remember(context) { context.resources.getFont(R.font.zcool_kuaile) }
     val labelPaint = remember(font) { android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
@@ -1153,7 +1142,9 @@ private fun SecretPrizeWheel(angle: Float, diameter: androidx.compose.ui.unit.Dp
     fun iconPath(cx:Float,cy:Float,scale:Float,points:List<Offset>)=Path().apply {
         points.forEachIndexed { i,p -> if(i==0) moveTo(cx+p.x*scale,cy+p.y*scale) else lineTo(cx+p.x*scale,cy+p.y*scale) };close()
     }
-    Box(Modifier.size(diameter), contentAlignment = Alignment.Center) {
+    Box(Modifier.size(diameter).testTag("secret-prize-wheel")
+        .semantics { contentDescription = if (enabled) "好运转盘，轻点转盘转一下" else "好运转盘正在旋转" }
+        .clickable(enabled = enabled, role = Role.Button, onClick = onSpin), contentAlignment = Alignment.Center) {
         Canvas(Modifier.fillMaxSize().padding(10.dp).graphicsLayer { rotationZ=angle }) {
             val radius=size.minDimension*.47f
             val paperRadius=radius*.94f

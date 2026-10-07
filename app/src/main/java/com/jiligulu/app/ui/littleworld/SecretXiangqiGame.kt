@@ -16,6 +16,7 @@ import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.Extension
 import androidx.compose.material.icons.outlined.HelpOutline
 import androidx.compose.material.icons.outlined.Logout
+import androidx.compose.material.icons.outlined.Flag
 import androidx.compose.material.icons.outlined.PauseCircleOutline
 import androidx.compose.material.icons.outlined.PlayCircleOutline
 import androidx.compose.material.icons.outlined.Refresh
@@ -80,6 +81,7 @@ internal fun ColumnScope.SecretXiangqiGame(state: XiangqiState, mode: XiangqiPla
     canUndo: Boolean = false, onUndo: () -> Unit = {}, onUndoResponse: (Boolean) -> Unit = {},
     nearby: NearbyRoomsState? = null, onNearbyRetry: () -> Unit = {},
     onMatchResponse: (Boolean) -> Unit = {}, onRematchResponse: (Boolean) -> Unit = {}, onExit: () -> Unit = onDisconnect,
+    onResign: () -> Unit = {},
     onModalOpened: () -> Unit = {}, onControlsBottom: (Float) -> Unit = {},
     presentationEpoch: Int = 0,
     onPresentationSkipped: (epoch: Int, position: XiangqiState) -> Unit = { _, _ -> },
@@ -87,8 +89,14 @@ internal fun ColumnScope.SecretXiangqiGame(state: XiangqiState, mode: XiangqiPla
     val soundContext = LocalContext.current
     val finished = state.outcome!=XiangqiOutcome.PLAYING
     val networkMode = mode == XiangqiPlayMode.LAN || mode == XiangqiPlayMode.ONLINE
-    val finish = remember(state,mode,lan.localSide,humanSide) { GameFinishPresenter.xiangqi(state,
-        when(mode){XiangqiPlayMode.CPU->humanSide;XiangqiPlayMode.HOTSEAT->null;else->lan.localSide}) }
+    val finish = remember(state, mode, lan.localSide, humanSide, lan.resignedBy) {
+        if (networkMode && finished && lan.resignedBy != null) {
+            val lost = lan.resignedBy == lan.localSide
+            GameFinishPresentation(if (lost) "这局先让一步" else "你赢啦", if (lost) "认输也可以，再下一盘吧" else "棋友认输，这一局收好啦",
+                if (lost) FinishMood.LOSE else FinishMood.WIN, if (lost) "认输" else "胜出")
+        } else GameFinishPresenter.xiangqi(state,
+            when(mode){XiangqiPlayMode.CPU->humanSide;XiangqiPlayMode.HOTSEAT->null;else->lan.localSide})
+    }
     val presentationKey = XiangqiPresentationKey(presentationEpoch, restorationToken, mode.ordinal,
         if (networkMode) lan.round else 0, if (networkMode) lan.hostAddress else "",
         networkMode && lan.connected, if (networkMode) lan.localSide else humanSide)
@@ -99,9 +107,16 @@ internal fun ColumnScope.SecretXiangqiGame(state: XiangqiState, mode: XiangqiPla
     }
     var finishEvent by remember(presentationKey) { mutableIntStateOf(0) }
     var promptRequest by remember(presentationKey) { mutableIntStateOf(0) }
-    LaunchedEffect(state, presentationKey) { if (state.outcome == XiangqiOutcome.PLAYING) revealedFinish = null }
+    LaunchedEffect(state, presentationKey, lan.resignedBy) {
+        if (state.outcome == XiangqiOutcome.PLAYING) revealedFinish = null
+        else if (networkMode && lan.resignedBy != null && revealedFinish != state) {
+            // Resigning changes no piece position, so it has no move animation to release the result.
+            finishEvent++; revealedFinish = state
+        }
+    }
     val finishRevealed = revealedFinish == state
     var modeMenu by remember { mutableStateOf(false) }
+    var resignConfirm by remember(mode, lan.round) { mutableStateOf(false) }
     val modeNames = remember { mapOf(XiangqiPlayMode.CPU to "和阿噜下", XiangqiPlayMode.ONLINE to "创建房间",
         XiangqiPlayMode.LAN to "附近的人", XiangqiPlayMode.HOTSEAT to "同屏双人") }
     Row(Modifier.width(boardWidth).height(42.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -146,14 +161,14 @@ internal fun ColumnScope.SecretXiangqiGame(state: XiangqiState, mode: XiangqiPla
     var undoResponseSent by remember(mode, lan.revision, lan.pendingUndoRequest) { mutableStateOf(false) }
     if (networkMode && lan.pendingUndoRequest != null && lan.pendingUndoRequest != lan.localSide) {
         fun respond(accept: Boolean) { if (!undoResponseSent) { undoResponseSent = true; onUndoResponse(accept) } }
-        SecretWoodDialog("棋友想退回一步", { respond(false) },
+        SecretWoodDialog("棋友想重走这一手", { respond(false) },
             busy = undoResponseSent, confirmLabel = "同意", onConfirm = { respond(true) }, dismissLabel = "继续这局") {
-            Text("同意后，两张棋桌会一起回到上一步。", style = MaterialTheme.typography.bodySmall)
+            Text("会一起退回棋友上次落子前，包括随后的一手回应。", style = MaterialTheme.typography.bodySmall)
         }
     }
     var choosePuzzle by remember {mutableStateOf(false)}
     var showRules by remember { mutableStateOf(false) }
-    if (networkMode && !lan.connected && (!finished||showRoomEntry)) {
+    if (networkMode && !lan.connected && !lan.reconnecting && (!finished||showRoomEntry)) {
         if (mode == XiangqiPlayMode.LAN) NearbyChessLobby(nearby, lan.status, lan.error, onJoin, onNearbyRetry, onControlsBottom)
         else OnlineChessLobby(lan.sessionActive, lan.busy, lan.hostAddress, lan.status, lan.error,
             onHost, onJoin, onDisconnect, onControlsBottom)
@@ -179,12 +194,17 @@ internal fun ColumnScope.SecretXiangqiGame(state: XiangqiState, mode: XiangqiPla
         suppressPrompt = networkMode && lan.rematchRequestedBy != null &&
             lan.rematchRequestedBy != lan.localSide && !lan.myRematchRequested,
     )
+    if (networkMode && resignConfirm && !finished) GameResignDialog(
+        onDismiss = { resignConfirm = false },
+        onConfirm = { resignConfirm = false; onResign() })
     val playerName = if (state.turnSide == XiangqiSide.RED) "红方" else "黑方"
     val inCheck = remember(state) { state.outcome == XiangqiOutcome.PLAYING && XiangqiEngine.isInCheck(state, state.turnSide) }
     val status = when (state.outcome) {
         XiangqiOutcome.RED_WON -> "红方胜出"
         XiangqiOutcome.BLACK_WON -> "黑方胜出"
         XiangqiOutcome.PLAYING -> when {
+            networkMode && lan.reconnecting -> "棋局还在，正在重新连接…"
+            networkMode && lan.remoteBackground -> "棋友暂时离开，棋局替你们留着"
             !networkMode && paused -> "棋局已暂停"
             networkMode && lan.awaitingAck -> "正在等另一张棋桌回应…"
             networkMode && lan.pendingUndoRequest != null -> "等棋友商量这一步…"
@@ -197,10 +217,12 @@ internal fun ColumnScope.SecretXiangqiGame(state: XiangqiState, mode: XiangqiPla
     // 需求③：棋子还在路上时，本地再点棋盘不算一步——拦住重复落子。
     // 状态更新在动画的 LaunchedEffect 里（drawscope 拿不到回调，所以提到上一层）。
     var boardAnimating by remember(presentationKey) { mutableStateOf(false) }
+    val roomAvailable = lan.connected && !lan.awaitingAck && !lan.localBackground && !lan.remoteBackground &&
+        !lan.reconnecting && lan.pendingUndoRequest == null
     val canMove = !helpBusy && !boardAnimating && state.outcome == XiangqiOutcome.PLAYING && when (mode) {
         XiangqiPlayMode.CPU -> !paused && state.turnSide == humanSide
         XiangqiPlayMode.HOTSEAT -> !paused
-        XiangqiPlayMode.LAN, XiangqiPlayMode.ONLINE -> lan.connected && !lan.awaitingAck && lan.pendingUndoRequest == null && state.turnSide == lan.localSide
+        XiangqiPlayMode.LAN, XiangqiPlayMode.ONLINE -> roomAvailable && state.turnSide == lan.localSide
     }
     Spacer(Modifier.height(10.dp))
     XiangqiBoard(state, boardWidth, canMove,
@@ -230,10 +252,12 @@ internal fun ColumnScope.SecretXiangqiGame(state: XiangqiState, mode: XiangqiPla
         style = MaterialTheme.typography.bodySmall, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
         Row(Modifier.width(boardWidth).padding(horizontal = 6.dp, vertical = 4.dp)) {
             GameIconTool(Icons.AutoMirrored.Outlined.Undo, "悔棋", onUndo, Modifier.weight(1f),
-                enabled = canUndo && !helpBusy && (!networkMode || !lan.awaitingAck && lan.pendingUndoRequest == null),
+                enabled = canUndo && !helpBusy && (!networkMode || roomAvailable),
                 cue = UiCue.TOUCH)
             if (networkMode) {
-                GameIconTool(Icons.Outlined.Logout, "离开棋桌", onDisconnect, Modifier.weight(1f))
+                GameIconTool(Icons.Outlined.Flag, "认输", { resignConfirm = true }, Modifier.weight(1f),
+                    enabled = roomAvailable)
+                GameIconTool(Icons.Outlined.Logout, "离开", onDisconnect, Modifier.weight(1f))
             } else {
                 GameIconTool(if (paused) Icons.Outlined.PlayCircleOutline else Icons.Outlined.PauseCircleOutline,
                     if (paused) "继续" else "暂停", onToggle, Modifier.weight(1f), enabled = state.outcome == XiangqiOutcome.PLAYING)
@@ -311,7 +335,15 @@ internal fun GameIconTool(icon: ImageVector, label: String, onClick: () -> Unit,
         .clickable(enabled = enabled, role = Role.Button, onClick = { UiSound.play(context, cue); onClick() }).padding(vertical = 5.dp),
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(3.dp)) {
         Icon(icon, null, Modifier.size(22.dp), tint = Color(0xFF87748E).copy(alpha = if (enabled) 1f else .3f))
-        Text(label, fontSize = 10.sp, color = Color(0xFF87748E).copy(alpha = if (enabled) 1f else .3f))
+        Text(label, fontSize = 11.sp, color = Color(0xFF87748E).copy(alpha = if (enabled) 1f else .3f))
+    }
+}
+
+@Composable
+internal fun GameResignDialog(onDismiss: () -> Unit, onConfirm: () -> Unit) {
+    SecretWoodDialog("这局先认输？", onDismiss, confirmLabel = "认输", onConfirm = onConfirm,
+        dismissLabel = "接着下", compactWidth = 250.dp) {
+        Text("这盘留给棋友，下盘再见分晓。", style = MaterialTheme.typography.bodyMedium, color = SecretWoodInk)
     }
 }
 
@@ -325,7 +357,7 @@ private fun XiangqiBoard(state: XiangqiState, width: Dp, canMove: Boolean, flipp
     onPresentationSkipped: (XiangqiPresentationKey, XiangqiState) -> Unit) {
     val context = LocalContext.current
     val typeface = remember(context) { context.resources.getFont(R.font.zcool_kuaile) }
-    val wood = remember { Brush.linearGradient(listOf(Color(0xFFF2DFB9), Color(0xFFE5C79A))) }
+    val wood = remember { Brush.linearGradient(listOf(Color(0xFFF0E3CD), Color(0xFFE8D5B4))) }
     val textPaint = remember(typeface) { Paint(Paint.ANTI_ALIAS_FLAG).apply {
         this.typeface = typeface
         textAlign = Paint.Align.CENTER
