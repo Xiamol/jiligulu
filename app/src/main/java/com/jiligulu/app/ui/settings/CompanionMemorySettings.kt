@@ -22,6 +22,9 @@ import com.jiligulu.app.ui.components.GuluDialog
 import com.jiligulu.app.ui.components.CompactFormField
 import com.jiligulu.app.core.audio.UiSound
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
@@ -40,8 +43,8 @@ internal fun CompanionMemorySettings(enabled: Boolean, prefs: UserPrefs = rememb
     fun write(action: suspend () -> Unit, after: () -> Unit = {}) {
         if (busy) return
         busy = true; error = null
-        scope.launch {
-            try { action(); after() }
+        scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            try { withContext(NonCancellable) { action() }; after() }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { error = "这次没保存好，再试一下吧" }
             finally { busy = false }
