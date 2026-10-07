@@ -5,7 +5,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,14 +13,19 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.ScrollState
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Card
@@ -39,6 +44,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -69,7 +75,9 @@ import com.jiligulu.app.ui.persona.GuluMascot
 import com.jiligulu.app.ui.theme.GuluBrandFont
 import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+private val SettingsTabs = listOf("外观", "互动", "提醒", "数据", "关于")
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 @Composable
 fun SettingsScreen(
     onBack: () -> Unit,
@@ -80,10 +88,12 @@ fun SettingsScreen(
 ) {
     val state by vm.uiState.collectAsStateWithLifecycle()
     val fieldScope = rememberCoroutineScope()
+    val pagerState = rememberPagerState(initialPage = if (checkUpdatesOnOpen) SettingsTabs.lastIndex else 0) { SettingsTabs.size }
+    val tabsScroll = rememberLazyListState()
     var editingField by remember { mutableStateOf<ProfileSettingField?>(null) }
     var fieldText by remember { mutableStateOf("") }
     fun edit(field: ProfileSettingField, value: String) { vm.clearError(); fieldText=value; editingField=field }
-    editingField?.let { field ->
+    editingField?.takeIf { (if (it == ProfileSettingField.API_KEY) 3 else 1) == pagerState.currentPage }?.let { field ->
         GuluDialog(field.title, { if(!state.isSaving) {editingField=null;fieldText=""} }, confirmLabel="保存", compact=true,
             dense=true,compactWidth=280.dp,busy=state.isSaving,
             confirmEnabled=field!=ProfileSettingField.NAME || fieldText.isNotBlank(),
@@ -100,7 +110,6 @@ fun SettingsScreen(
     }
 
     // Permission launchers belong to the UI; preference writes and scheduling belong to the VM.
-    var settingsTab by rememberSaveable { mutableStateOf(if (checkUpdatesOnOpen) "关于" else "外观") }
     val context = LocalContext.current
     val settingsPrefs = remember(context.applicationContext) { UserPrefs(context.applicationContext) }
     val selectedSkin by settingsPrefs.littleWorldSkin.collectAsStateWithLifecycle(initialValue = null)
@@ -122,20 +131,25 @@ fun SettingsScreen(
     val reminderScroll = rememberSaveable(saver = ScrollState.Saver) { ScrollState(0) }
     val dataScroll = rememberSaveable(saver = ScrollState.Saver) { ScrollState(0) }
     val aboutScroll = rememberSaveable(saver = ScrollState.Saver) { ScrollState(0) }
-    val settingsScroll = when (settingsTab) {
-        "互动" -> interactionScroll
-        "提醒" -> reminderScroll
-        "数据" -> dataScroll
-        "关于" -> aboutScroll
-        else -> appearanceScroll
+    val pageScrollStates = listOf(appearanceScroll, interactionScroll, reminderScroll, dataScroll, aboutScroll)
+    LaunchedEffect(pagerState.currentPage) {
+        editingField = null
+        fieldText = ""
+        showSkinSelector = false
+        showHandbook = false
+        showFontLicense = false
+        showIntervalPicker = false
+        showQuietStart = false
+        showQuietEnd = false
+        tabsScroll.animateScrollToItem(pagerState.currentPage)
     }
-    LaunchedEffect(checkUpdatesOnOpen, settingsTab, settingsScroll.maxValue) {
-        if (checkUpdatesOnOpen && settingsTab == "关于" && settingsScroll.maxValue in 1 until Int.MAX_VALUE) {
-            settingsScroll.scrollTo(settingsScroll.maxValue)
+    LaunchedEffect(checkUpdatesOnOpen, pagerState.currentPage, aboutScroll.maxValue) {
+        if (checkUpdatesOnOpen && pagerState.currentPage == SettingsTabs.lastIndex && aboutScroll.maxValue in 1 until Int.MAX_VALUE) {
+            aboutScroll.scrollTo(aboutScroll.maxValue)
         }
     }
 
-    if (showIntervalPicker) {
+    if (showIntervalPicker && pagerState.currentPage == 2) {
         val total = state.waterInterval
         TimePickerDialog(
             title = "提醒间隔",
@@ -151,7 +165,7 @@ fun SettingsScreen(
             }
         )
     }
-    if (showQuietStart) {
+    if (showQuietStart && pagerState.currentPage == 2) {
         TimePickerDialog(
             title = "免打扰开始时间",
             hour = state.quietStartText.minutesOfDayOr(23 * 60) / 60,
@@ -163,7 +177,7 @@ fun SettingsScreen(
             }
         )
     }
-    if (showQuietEnd) {
+    if (showQuietEnd && pagerState.currentPage == 2) {
         TimePickerDialog(
             title = "免打扰结束时间",
             hour = state.quietEndText.minutesOfDayOr(8 * 60) / 60,
@@ -192,10 +206,12 @@ fun SettingsScreen(
                     }
                 }
             )
-            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal=16.dp),
+            LazyRow(Modifier.fillMaxWidth().testTag("settings-tabs"), state = tabsScroll,
+                contentPadding = PaddingValues(horizontal = 16.dp),
                 horizontalArrangement=Arrangement.spacedBy(6.dp)) {
-                listOf("外观", "互动", "提醒", "数据", "关于").forEach { tab ->
-                    FilterChip(selected=settingsTab==tab,onClick=uiTap {settingsTab=tab},enabled=state.isLoaded,
+                itemsIndexed(SettingsTabs, key = { _, tab -> tab }) { index, tab ->
+                    FilterChip(selected=pagerState.currentPage==index,
+                        onClick=uiTap {fieldScope.launch {pagerState.animateScrollToPage(index)}},enabled=editable,
                         modifier=Modifier.testTag("settings-tab-$tab"), label={Text(tab, maxLines=1)})
                 }
             }
@@ -207,13 +223,18 @@ fun SettingsScreen(
                 CircularProgressIndicator()
             }
         } else {
+            HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize().padding(padding).testTag("settings-pages"),
+                userScrollEnabled = editable, beyondViewportPageCount = 1,
+                verticalAlignment = Alignment.Top, key = { SettingsTabs[it] }) { page ->
+            val settingsTab = SettingsTabs[page]
+            val pageActive = page == pagerState.currentPage && !pagerState.isScrollInProgress
+            CompositionLocalProvider(LocalSettingPageActive provides pageActive) {
             SpringScrollColumn(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(padding)
-                    .testTag("settings-list")
+                    .testTag(if (page == pagerState.currentPage) "settings-list" else "settings-list-$settingsTab")
                     .padding(horizontal = 16.dp, vertical = 8.dp),
-                state = settingsScroll,
+                state = pageScrollStates[page],
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 state.error?.let { error ->
@@ -373,22 +394,24 @@ fun SettingsScreen(
                             TextButton(onClick = uiTap { showFontLicense = true }) { Text("字体与开源许可") }
                         }
                     }
-                    if (settingsTab == "关于") SettingsCompanionHeader(state.nickname, state.suffix)
-                    if (settingsTab == "关于") SettingsSection("版本与更新", "🎁") { UpdateSettingsCard(checkOnOpen = checkUpdatesOnOpen) }
+                    if (settingsTab == "关于") SettingsCompanionHeader(state.nickname, state.suffix, active = pageActive)
+                    if (settingsTab == "关于") SettingsSection("版本与更新", "🎁") { UpdateSettingsCard(checkOnOpen = checkUpdatesOnOpen && pageActive) }
                     }
                     Text("慢慢记，日子也会慢慢发光 ♡", modifier = Modifier.align(Alignment.CenterHorizontally).padding(bottom = 8.dp),
                         style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
+            }
+            }
         }
     }
 
-    if (showSkinSelector) GuluDialog("小世界换装", { showSkinSelector = false }, compact = true,
+    if (showSkinSelector && pagerState.currentPage == 0) GuluDialog("小世界换装", { showSkinSelector = false }, compact = true,
         dense = true, compactWidth = 320.dp, confirmLabel = "好啦") {
         LittleWorldSkinSettings(enabled = editable)
     }
-    if (showHandbook) HandbookDialog(onDismiss = { showHandbook = false })
-    if (showFontLicense) {
+    if (showHandbook && pagerState.currentPage == SettingsTabs.lastIndex) HandbookDialog(onDismiss = { showHandbook = false })
+    if (showFontLicense && pagerState.currentPage == SettingsTabs.lastIndex) {
         GuluDialog(
             onDismiss = { showFontLicense = false },
             title = "字体与开源许可"
@@ -450,7 +473,7 @@ private fun String.minutesOfDayOr(fallback: Int): Int {
 }
 
 @Composable
-private fun SettingsCompanionHeader(nickname: String, suffix: String) {
+private fun SettingsCompanionHeader(nickname: String, suffix: String, active: Boolean) {
     var noteIndex by rememberSaveable { mutableStateOf(CompanionCornerNotes.randomIndex()) }
     val nextNote = { noteIndex = CompanionCornerNotes.nextIndex(noteIndex) }
         Row(Modifier.fillMaxWidth().padding(vertical = 4.dp),
@@ -464,7 +487,7 @@ private fun SettingsCompanionHeader(nickname: String, suffix: String) {
                     Text("再听一句悄悄话 ♡", style = MaterialTheme.typography.labelSmall)
                 }
             }
-            GuluMascot(modifier = Modifier.padding(start=8.dp).size(64.dp), onClick = uiTap(nextNote))
+            GuluMascot(modifier = Modifier.padding(start=8.dp).size(64.dp), onClick = uiTap(nextNote), active = active)
         }
 }
 

@@ -31,6 +31,7 @@ import kotlinx.coroutines.launch
 @Composable
 internal fun CompanionMemorySettings(enabled: Boolean, prefs: UserPrefs = rememberUserPrefs()) {
     val context = LocalContext.current
+    val pageActive = LocalSettingPageActive.current
     val nullableMemory = remember(prefs) { prefs.companionMemory.map<CompanionMemoryState, CompanionMemoryState?> { it } }
     val memory by nullableMemory.collectAsStateWithLifecycle(initialValue = null)
     var open by remember { mutableStateOf(false) }
@@ -40,6 +41,9 @@ internal fun CompanionMemorySettings(enabled: Boolean, prefs: UserPrefs = rememb
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
+    LaunchedEffect(pageActive) {
+        if (!pageActive) { open = false; editing = null; clearing = false }
+    }
     fun write(action: suspend () -> Unit, after: () -> Unit = {}) {
         if (busy) return
         busy = true; error = null
@@ -64,7 +68,7 @@ internal fun CompanionMemorySettings(enabled: Boolean, prefs: UserPrefs = rememb
             color = MaterialTheme.colorScheme.primary)
     }
     error?.takeIf { !open }?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
-    if (open && editing == null && !clearing) {
+    if (pageActive && open && editing == null && !clearing) {
         val facts = memory?.facts.orEmpty()
         GuluDialog("阿噜记得的小事", onDismiss = { open = false }, compact = true, dense = true,
             confirmLabel = "收好啦", busy = busy) {
@@ -93,7 +97,7 @@ internal fun CompanionMemorySettings(enabled: Boolean, prefs: UserPrefs = rememb
             error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
         }
     }
-    editing?.let { fact ->
+    editing?.takeIf { pageActive }?.let { fact ->
         GuluDialog("更正这条小记忆", onDismiss = { editing = null }, compact = true, dense = true, compactWidth = 280.dp,
             busy = busy, confirmLabel = "保存这一条", dismissLabel = "先等等",
             confirmEnabled = CompanionMemoryPolicy.validValue(editText.trim()),
@@ -104,7 +108,7 @@ internal fun CompanionMemorySettings(enabled: Boolean, prefs: UserPrefs = rememb
             error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
         }
     }
-    if (clearing) GuluDialog("让阿噜重新认识你？", onDismiss = { clearing = false }, compact = true, dense = true,
+    if (pageActive && clearing) GuluDialog("让阿噜重新认识你？", onDismiss = { clearing = false }, compact = true, dense = true,
         busy = busy, confirmLabel = "全部忘记", dismissLabel = "留着吧",
         onConfirm = { write({ prefs.clearCompanionMemories() }, { clearing = false }) }) {
         Text("清空这些小记忆，账单和聊天记录会保留。", style = MaterialTheme.typography.bodyMedium)

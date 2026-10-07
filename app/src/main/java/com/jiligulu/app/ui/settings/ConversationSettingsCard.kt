@@ -22,10 +22,11 @@ import com.jiligulu.app.ui.components.GuluDialog
 @Composable
 fun ConversationSettingsCard(vm: SettingsViewModel) {
     val state by vm.uiState.collectAsStateWithLifecycle()
+    val pageActive = LocalSettingPageActive.current
     var confirm by rememberSaveable { mutableStateOf(false) }
     val busy = state.isClearingHistory
-    LaunchedEffect(state.historyMessage, busy) {
-        if (!busy && state.historyMessage != null) confirm = false
+    LaunchedEffect(state.historyMessage, busy, pageActive) {
+        if (!pageActive || !busy && state.historyMessage != null) confirm = false
     }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -37,7 +38,7 @@ fun ConversationSettingsCard(vm: SettingsViewModel) {
             modifier = Modifier.testTag("clear-history-entry")) { Text("清空") }
     }
     state.historyMessage?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary) }
-    if (confirm) GuluDialog(title = "给聊天腾个小空位？", onDismiss = { confirm = false },
+    if (confirm && pageActive) GuluDialog(title = "给聊天腾个小空位？", onDismiss = { confirm = false },
         confirmLabel = "清空对话", dismissLabel = "先留着", busy = busy,
         onConfirm = vm::clearHistory) {
         Text("会删除聊天文字、已结束的卡片和待执行指令，并重置阿噜的对话上下文。清空后无法找回。")

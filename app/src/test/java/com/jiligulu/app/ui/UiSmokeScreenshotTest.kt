@@ -8,6 +8,8 @@ import android.os.Looper
 import android.view.PixelCopy
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotDisplayed
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.isDisplayed
 import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.assertIsEnabled
@@ -15,6 +17,7 @@ import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.swipeDown
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.swipeRight
+import androidx.compose.ui.test.swipe
 import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.foundation.layout.fillMaxSize
@@ -24,6 +27,7 @@ import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.hasAnyDescendant
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.SemanticsMatcher
@@ -36,6 +40,7 @@ import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.onFirst
@@ -382,7 +387,9 @@ class UiSmokeScreenshotTest {
             visibleDescription("设置").performClick()
             awaitText("主题与皮肤")
             capture("settings-light")
-            compose.onNodeWithText("关于").performClick()
+            compose.onNodeWithTag("settings-tabs").performScrollToIndex(4)
+            compose.onNodeWithTag("settings-tab-关于").performClick()
+            awaitSettingsPage("关于", "制作人")
             scrollSettingsTo("阿噜使用手册")
             compose.onNodeWithText("阿噜使用手册").performClick()
             awaitText("阿噜使用手册 ♡")
@@ -451,15 +458,18 @@ class UiSmokeScreenshotTest {
             capture("water-completed")
             visibleDescription("设置").performClick()
             awaitText("主题与皮肤")
-            compose.onNodeWithText("关于").performClick()
+            compose.onNodeWithTag("settings-tabs").performScrollToIndex(4)
+            compose.onNodeWithTag("settings-tab-关于").performClick()
+            awaitSettingsPage("关于", "制作人")
             scrollSettingsTo("检查更新")
             compose.waitForIdle()
             // 内置默认更新源后，检查更新按钮应始终可点击（不再依赖手动配置仓库）
             compose.onNodeWithText("检查更新").assertIsEnabled()
             capture("update-settings")
 
-            scrollSettingsTo("数据", towardTop = true)
-            compose.onNodeWithText("数据", substring = false).performClick()
+            compose.onNodeWithTag("settings-tabs").performScrollToIndex(3)
+            compose.onNodeWithTag("settings-tab-数据").performClick()
+            awaitSettingsPage("数据", "AI 服务")
             scrollSettingsTo("历史对话")
             val history = app.container.chatHistoryRepository
             val keptBills = runBlocking { app.container.billRepository.recent(30) }
@@ -811,10 +821,10 @@ class UiSmokeScreenshotTest {
             compose.onNodeWithContentDescription("24日，28.8元，已选中").assertIsDisplayed()
             capture("statistics-soft-bars")
             compose.runOnIdle { activity.setContent { GuluTheme { com.jiligulu.app.ui.settings.SettingsScreen(onBack = {}) } } }
-            awaitText("主题与皮肤")
+            awaitSettingsPage("外观", "主题与皮肤")
             capture("settings-single-card")
             compose.onNodeWithTag("settings-tab-互动").performClick()
-            awaitText("你的称呼")
+            awaitSettingsPage("互动", "你的称呼")
             scrollSettingsTo("阿噜悬浮球")
             capture("settings-interaction-card")
             compose.onNodeWithText("试听").assertDoesNotExist()
@@ -825,10 +835,80 @@ class UiSmokeScreenshotTest {
             compose.onNodeWithContentDescription("采样速度说明").performClick()
             awaitText("全局关闭时，仅 App 内起效", substring = true)
             compose.onNodeWithText("知道啦").performClick()
-            compose.onNodeWithText("提醒", substring = false).performClick()
-            awaitText("喝水提醒")
-            compose.onNodeWithText("阿噜悬浮球").assertDoesNotExist()
+            compose.onNodeWithTag("settings-tab-提醒").performClick()
+            awaitSettingsPage("提醒", "喝水提醒")
+            // Pager may keep the interaction page composed beside the visible reminder page.
+            compose.onNodeWithText("阿噜悬浮球").assertIsNotDisplayed()
             capture("settings-reminders-card")
+            compose.runOnIdle { activity.setContent {} }
+        }
+    }
+
+    @Test(timeout = 75_000)
+    @Config(qualifiers = "w411dp-h640dp-port-xhdpi")
+    fun settingsPagerSwipesSynchronizeTabsAndRestoreInteractionScroll() {
+        val app = RuntimeEnvironment.getApplication() as JiliguluApp
+        runBlocking {
+            app.container.userPrefs.setNickname("路陌")
+            app.container.userPrefs.setThemeMode(UserPrefs.THEME_LIGHT)
+            app.container.userPrefs.setWaterEnabled(false)
+            app.container.userPrefs.setUpdateRepository("")
+            app.container.userPrefs.setAnnouncementSource("")
+            app.container.announcements.initialize()
+        }
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity {
+                bindActivity(it)
+                it.setContent { GuluTheme { com.jiligulu.app.ui.settings.SettingsScreen(onBack = {}) } }
+            }
+            awaitSettingsPage("外观", "主题与皮肤")
+            compose.onNodeWithTag("settings-pages").performTouchInput {
+                swipe(Offset(width * .8f, height * .08f), Offset(width * .2f, height * .08f), durationMillis = 300)
+            }
+            awaitSettingsPage("互动", "你的称呼")
+            compose.onNodeWithText("主题与皮肤").assertIsNotDisplayed()
+
+            val initialScroll = currentSettingsScroll().fetchSemanticsNode()
+                .config[SemanticsProperties.VerticalScrollAxisRange]
+            assertEquals("Interaction starts at the top", 0f, initialScroll.value(), .5f)
+            assertTrue("The compact viewport must make interaction settings scrollable", initialScroll.maxValue() > 0f)
+            currentSettingsScroll().performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, 200f) }
+            compose.mainClock.advanceTimeBy(350)
+            compose.waitForIdle()
+            val beforeScroll = currentSettingsScroll().fetchSemanticsNode()
+                .config[SemanticsProperties.VerticalScrollAxisRange].value()
+            assertTrue("The interaction page must actually move before leaving it", beforeScroll > 0f)
+            val anchor = "悬浮与玻璃"
+            val beforeAnchor = visibleText(anchor).getUnclippedBoundsInRoot().top.value
+
+            // Drag across a section title, away from the icon-size slider and its gestures.
+            val pagerTop = compose.onNodeWithTag("settings-pages").fetchSemanticsNode().boundsInRoot.top
+            val titleY = visibleText(anchor).fetchSemanticsNode().boundsInRoot.center.y - pagerTop
+            compose.onNodeWithTag("settings-pages").performTouchInput {
+                swipe(Offset(width * .8f, titleY), Offset(width * .2f, titleY), durationMillis = 300)
+            }
+            awaitSettingsPage("提醒", "喝水提醒")
+            compose.onNodeWithText(anchor).assertIsNotDisplayed()
+            val reminderScroll = currentSettingsScroll().fetchSemanticsNode()
+                .config[SemanticsProperties.VerticalScrollAxisRange].value()
+            assertEquals("A new page must have its own scroll position", 0f, reminderScroll, .5f)
+            compose.onNodeWithTag("settings-pages").performTouchInput {
+                swipe(Offset(width * .2f, height * .08f), Offset(width * .8f, height * .08f), durationMillis = 300)
+            }
+            awaitSettingsPage("互动", anchor)
+            assertEquals("Swiping back must restore interaction scroll", beforeScroll,
+                currentSettingsScroll().fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange].value(), 1f)
+            assertEquals("The same title must return to its viewport anchor", beforeAnchor,
+                visibleText(anchor).getUnclippedBoundsInRoot().top.value, 1f)
+
+            compose.onNodeWithTag("settings-tabs").performScrollToIndex(0)
+            compose.onNodeWithTag("settings-tab-外观").performClick()
+            awaitSettingsPage("外观", "主题与皮肤")
+            compose.onNodeWithTag("settings-tab-互动").performClick()
+            awaitSettingsPage("互动", anchor)
+            assertEquals("Selecting a tab must also restore interaction scroll", beforeScroll,
+                currentSettingsScroll().fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange].value(), 1f)
+            assertEquals(beforeAnchor, visibleText(anchor).getUnclippedBoundsInRoot().top.value, 1f)
             compose.runOnIdle { activity.setContent {} }
         }
     }
@@ -1188,11 +1268,43 @@ class UiSmokeScreenshotTest {
         compose.waitForIdle()
     }
 
+    private fun awaitSettingsPage(tab: String, anchor: String) {
+        compose.waitUntil(10_000) {
+            shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(16))
+            rememberLiveActivityModels()
+            val chip = compose.onAllNodesWithTag("settings-tab-$tab").fetchSemanticsNodes().singleOrNull()
+            val targets = compose.onAllNodesWithText(anchor)
+            chip != null && chip.config.contains(SemanticsProperties.Selected) &&
+                chip.config[SemanticsProperties.Selected] &&
+                targets.fetchSemanticsNodes().indices.any { targets[it].isDisplayed() }
+        }
+        // Current-page selection can change during the drag; wait until the page settles too.
+        compose.mainClock.advanceTimeBy(800)
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(16))
+        compose.waitForIdle()
+        compose.onNodeWithTag("settings-tab-$tab").assertIsSelected()
+        val selectedTabs = compose.onAllNodes(SemanticsMatcher("selected settings tab") { node ->
+            node.config.contains(SemanticsProperties.TestTag) &&
+                node.config[SemanticsProperties.TestTag].startsWith("settings-tab-") &&
+                node.config.contains(SemanticsProperties.Selected) && node.config[SemanticsProperties.Selected]
+        }).fetchSemanticsNodes()
+        assertEquals("Exactly one settings tab must be selected", 1, selectedTabs.size)
+        visibleText(anchor).assertIsDisplayed()
+    }
+
+    private fun currentSettingsScroll(): androidx.compose.ui.test.SemanticsNodeInteraction = compose.onNode(
+        SemanticsMatcher("scrollable content in the active settings page") { node ->
+            node.config.contains(SemanticsProperties.VerticalScrollAxisRange) &&
+                node.config.contains(SemanticsActions.ScrollBy)
+        } and hasAnyAncestor(hasTestTag("settings-list")),
+        useUnmergedTree = true
+    )
+
     private fun scrollSettingsTo(text: String, towardTop: Boolean = false) {
         // A bounded single action + a frame avoids Compose 1.7's synchronous search-scroll loop.
         repeat(12) {
             if (runCatching { compose.onNodeWithText(text).assertIsDisplayed() }.isSuccess) return
-            compose.onNodeWithTag("settings-list").performSemanticsAction(SemanticsActions.ScrollBy) {
+            currentSettingsScroll().performSemanticsAction(SemanticsActions.ScrollBy) {
                 it(0f, if (towardTop) -400f else 400f)
             }
             compose.mainClock.advanceTimeBy(250)

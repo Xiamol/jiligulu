@@ -13,6 +13,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -39,9 +40,11 @@ import kotlinx.coroutines.delay
 @Composable
 fun AiUsageSettings() {
     val app = LocalContext.current.applicationContext as? JiliguluApp ?: return
+    val pageActive = LocalSettingPageActive.current
     val snapshot: AiUsageSnapshot? by app.container.aiUsage.snapshots.collectAsStateWithLifecycle(initialValue = null)
     var show by rememberSaveable { mutableStateOf(false) }
     var lifetime by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(pageActive) { if (!pageActive) show = false }
     val lifecycleOwner = LocalLifecycleOwner.current
     val day by produceState(LocalDate.now(), lifecycleOwner) {
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -63,7 +66,7 @@ fun AiUsageSettings() {
         }
         Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "查看 AI 用量", tint = MaterialTheme.colorScheme.primary)
     }
-    if (show) GuluDialog("用量小账本 ✨", onDismiss = { show = false }, compact = true) {
+    if (show && pageActive) GuluDialog("用量小账本 ✨", onDismiss = { show = false }, compact = true) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FilterChip(selected = !lifetime, onClick = com.jiligulu.app.ui.components.uiTap(com.jiligulu.app.core.audio.UiCue.SELECT) { lifetime = false }, label = { Text("今天") })
             FilterChip(selected = lifetime, onClick = com.jiligulu.app.ui.components.uiTap(com.jiligulu.app.core.audio.UiCue.SELECT) { lifetime = true }, label = { Text("累计") })
