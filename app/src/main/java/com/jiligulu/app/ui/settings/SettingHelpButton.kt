@@ -29,7 +29,7 @@ fun SettingHelpButton(title: String, description: String, modifier: Modifier = M
     var open by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(pageActive) { if (!pageActive) open = false }
     IconButton(onClick = uiTap { open = true }, enabled = pageActive, modifier = modifier.size(32.dp)) {
-        Icon(Icons.Outlined.HelpOutline, contentDescription = "$title说明", modifier = Modifier.size(18.dp),
+        Icon(Icons.Outlined.HelpOutline, contentDescription = "${title}说明", modifier = Modifier.size(18.dp),
             tint = MaterialTheme.colorScheme.onSurfaceVariant)
     }
     if (open && pageActive) GuluDialog(title, onDismiss = { open = false }, compact = true, dense = true, compactWidth = 300.dp) {
