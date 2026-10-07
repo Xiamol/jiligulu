@@ -97,6 +97,12 @@ class RoomRoundProtocolTest {
         assertThrows(RoomVersionMismatchException::class.java){GomokuRoomProtocol.decode("GO1|HELLO")}
     }
 
+    @Test fun aPartialAgreedDrawCannotBeImportedAsAnOrdinaryGomokuState() {
+        val played=GomokuEngine.play(GomokuEngine.newGame(),7,7)
+        val forged=GomokuRoomProtocol.encode(GomokuRoomMessage.Snapshot(2,played.copy(outcome=GomokuOutcome.DRAW)))
+        assertThrows(LanProtocolException::class.java){GomokuRoomProtocol.decode(forged)}
+    }
+
     @Test fun drawConsentCannotCrossNonceRoundRevisionOrBeForged() {
         val offer=RoomDrawOffer(2,7,4,2)
         val result=RoomControl.DrawResult(offer,RoomDrawResolution.ACCEPTED,8)

@@ -109,6 +109,31 @@ class RoomRoundSessionTest {
         host.close();guest.close()
     }
 
+    @Test fun anAgreedPartialDrawSurvivesBackgroundReconnectAndBufferedResultReplayWithoutAStateSnapshot() {
+        val(host,guest,channel)=gomoku(1)
+        host.submitMove(GridCell(7,7));drain();guest.submitMove(GridCell(8,7));drain()
+        host.requestDraw();drain();guest.respondToDraw(true);drain()
+        val agreed=host.state.value.game;val revision=host.state.value.revision
+        assertEquals(GomokuOutcome.DRAW,agreed.outcome)
+        assertEquals(2,agreed.board.count {it!=0})
+        val result=channel.host.sent.last {it.contains("|DRAW_RESULT|")}
+        val hostCount=channel.host.sent.size;val guestCount=channel.guest.sent.size
+        host.setForeground(false);guest.setForeground(false);drain()
+        channel.host.events.recovering();channel.guest.events.recovering();drain()
+        host.setForeground(true);guest.setForeground(true)
+        channel.host.events.recovered();channel.guest.events.recovered();drain()
+        // Transport-level connected notifications on an existing room are not a new HELLO.
+        channel.host.events.connected();channel.guest.events.connected();drain()
+        // The online wire resends original numbered lines. A repeated commit is harmless.
+        channel.host.send(result);drain()
+        val resumed=channel.host.sent.drop(hostCount)+channel.guest.sent.drop(guestCount)
+        assertTrue(resumed.none {it.startsWith("GO2|STATE|")})
+        assertTrue(host.state.value.connected);assertTrue(guest.state.value.connected)
+        assertEquals(agreed,host.state.value.game);assertEquals(agreed,guest.state.value.game)
+        assertEquals(revision,guest.state.value.revision)
+        host.close();guest.close()
+    }
+
     @Test fun simultaneousDrawRequestsAgreeOnceAndDoNotDeadlock() {
         val(host,guest)=gomoku(1)
         host.requestDraw();guest.requestDraw();drain()
