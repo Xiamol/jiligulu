@@ -16,6 +16,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowForward
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -70,9 +71,7 @@ internal fun ColumnScope.NearbyChessLobby(nearby: NearbyRoomsState?, status: Str
         Column(Modifier.widthIn(max = 328.dp).fillMaxWidth().padding(horizontal = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally) {
             Text("寻找附近的棋友", fontFamily = GuluBrandFont, fontSize = 24.sp, color = ChessLobbyColors.ink)
-            Text("同一个 Wi-Fi，坐下来下一盘", Modifier.padding(top = 8.dp),
-                style = MaterialTheme.typography.bodySmall, color = ChessLobbyColors.muted)
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(20.dp))
             NearbyRadar(nearby?.searching == true && failure == null)
             Spacer(Modifier.height(20.dp))
             if (!nearby?.rooms.isNullOrEmpty()) {
@@ -114,7 +113,8 @@ internal fun ColumnScope.NearbyChessLobby(nearby: NearbyRoomsState?, status: Str
 
 @Composable
 internal fun ColumnScope.OnlineChessLobby(active: Boolean, busy: Boolean, code: String, status: String, error: String?,
-    onHost: (String) -> Unit, onJoin: (String) -> Unit, onDisconnect: () -> Unit, onControlsBottom: (Float) -> Unit) {
+    onHost: (String) -> Unit, onJoin: (String) -> Unit, onDisconnect: () -> Unit, onControlsBottom: (Float) -> Unit,
+    game: String = "xiangqi") {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     val keyboard = LocalSoftwareKeyboardController.current
@@ -146,15 +146,28 @@ internal fun ColumnScope.OnlineChessLobby(active: Boolean, busy: Boolean, code: 
             } else RoomInvitation(if (active) code else "一起下一盘")
             Spacer(Modifier.height(if (compact) 10.dp else 18.dp))
             if (active) {
-                if (code.isNotEmpty()) TextButton(onClick = {
-                    UiSound.select(context); clipboard.setText(AnnotatedString(code)); copied = true
-                }, modifier = Modifier.testTag("room-copy"),
-                    colors = ButtonDefaults.textButtonColors(contentColor = ChessLobbyColors.accent)) {
-                    Icon(Icons.Outlined.ContentCopy, null, Modifier.size(16.dp))
-                    Spacer(Modifier.width(8.dp)); Text(if (copied) "复制好啦 ♡" else "复制房间码")
+                if (code.isNotEmpty()) Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    TextButton(onClick = {
+                        UiSound.select(context); clipboard.setText(AnnotatedString(code)); copied = true
+                    }, modifier = Modifier.testTag("room-copy"),
+                        colors = ButtonDefaults.textButtonColors(contentColor = ChessLobbyColors.accent)) {
+                        Icon(Icons.Outlined.ContentCopy, null, Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp)); Text(if (copied) "已复制" else "复制")
+                    }
+                    TextButton(onClick = {
+                        UiSound.select(context)
+                        val invite = ChessRoomInvite(game, code)
+                        val text = "来和我下一盘${if (game == "xiangqi") "象棋" else "五子棋"}吧 ♡\n${invite.uri}\n房间码：$code"
+                        val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                            type = "text/plain"; putExtra(android.content.Intent.EXTRA_TEXT, text)
+                        }
+                        runCatching { context.startActivity(android.content.Intent.createChooser(send, "邀请棋友")) }
+                    }, modifier = Modifier.testTag("room-share"),
+                        colors = ButtonDefaults.textButtonColors(contentColor = ChessLobbyColors.accent)) {
+                        Icon(Icons.Outlined.Share, null, Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp)); Text("邀请")
+                    }
                 }
-                Text("把房间码交给棋友，就能找到这里", style = MaterialTheme.typography.bodySmall,
-                    color = ChessLobbyColors.muted)
                 Spacer(Modifier.height(10.dp))
                 LobbyStatus(error ?: status, error != null)
                 TextButton(onClick = { UiSound.select(context); onDisconnect() },

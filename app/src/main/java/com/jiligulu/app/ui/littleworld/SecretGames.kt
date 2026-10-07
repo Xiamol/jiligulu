@@ -191,10 +191,9 @@ internal fun ColumnScope.SecretGomokuGame(state: GomokuState, paused: Boolean, b
     onNearbyRetry: () -> Unit = {}, onUndoResponse: (Boolean) -> Unit = {},
     onMatchResponse: (Boolean) -> Unit = {}, onRematchResponse: (Boolean) -> Unit = {},
     onExit: () -> Unit = onDisconnect, onResign: () -> Unit = {}, restorationToken: Int = 0,
-    showRoomEntry: Boolean = false,
+    showRoomEntry: Boolean = false, playerProfile: ChessPlayerProfile = ChessPlayerProfile(),
     helpBusy: Boolean = false, onControlsBottom: (Float) -> Unit = {}) {
     val context = LocalContext.current
-    var modeMenu by remember { mutableStateOf(false) }
     var resignConfirm by remember(mode, room?.round) { mutableStateOf(false) }
     val network = mode == GomokuPlayMode.ONLINE || mode == GomokuPlayMode.NEARBY
     val localPlayer = if (network) room?.localPlayer else humanPlayer
@@ -225,23 +224,6 @@ internal fun ColumnScope.SecretGomokuGame(state: GomokuState, paused: Boolean, b
             finishGlow.animateTo(0f,tween(GAME_FINISH_BOARD_EFFECT_MS))
         }
     }
-    val modeNames = remember { mapOf(GomokuPlayMode.CPU to "和阿噜下", GomokuPlayMode.NEARBY to "附近的人",
-        GomokuPlayMode.ONLINE to "创建房间", GomokuPlayMode.HOTSEAT to "同屏双人") }
-    Row(Modifier.width(boardSize).height(36.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box {
-            TextButton(onClick = { UiSound.select(context); modeMenu = true }, enabled=!finished, contentPadding = PaddingValues(horizontal = 6.dp)) {
-                Text(modeNames.getValue(mode), color = Color(0xFF766A7F), style = MaterialTheme.typography.bodySmall)
-                Icon(Icons.Outlined.ExpandMore, "选择对局方式", Modifier.size(16.dp), tint = Color(0xFF928497))
-            }
-            if(modeMenu) SecretWoodDialog("和谁下？",{modeMenu=false},confirmLabel="返回棋盘") {
-                modeNames.forEach { (value,label)->TextButton(onClick={
-                    UiSound.select(context);modeMenu=false;if(value!=mode)onMode(value)
-                },modifier=Modifier.fillMaxWidth().height(48.dp),colors=ButtonDefaults.textButtonColors(contentColor=SecretWoodInk)) {
-                    Text(if(value==mode) "✓ $label" else label)
-                } }
-            }
-        }
-    }
     var matchResponseSent by remember(mode,room?.pendingMatchName) { mutableStateOf(false) }
     // 到场后才响匹配音；邀请可能被拒绝，恢复已连接的棋局也不重播。
     val matchLifecycle = LocalLifecycleOwner.current.lifecycle
@@ -261,13 +243,13 @@ internal fun ColumnScope.SecretGomokuGame(state: GomokuState, paused: Boolean, b
     var rematchResponseSent by remember(mode,room?.round,room?.rematchRequestedBy) { mutableStateOf(false) }
     if(network && room?.rematchRequestedBy!=null && room.rematchRequestedBy!=room.localPlayer && !room.myRematchRequested) {
         SecretWoodDialog("再摆一盘？",{if(!rematchResponseSent){rematchResponseSent=true;onRematchResponse(false)}},
-            confirmLabel="好呀，换边再下",onConfirm={if(!rematchResponseSent){rematchResponseSent=true;onRematchResponse(true)}},
-            dismissLabel="这次收桌",busy=rematchResponseSent) {Text("棋友想再来一局。这一盘会交换黑白。",style=MaterialTheme.typography.bodySmall)}
+            confirmLabel="换边再下",onConfirm={if(!rematchResponseSent){rematchResponseSent=true;onRematchResponse(true)}},
+            dismissLabel="收桌",busy=rematchResponseSent,compactWidth=292.dp) { }
     }
-    if (network && room != null && !room.connected && !room.reconnecting && (!finished||showRoomEntry)) {
+    if (network && room != null && !room.connected && !room.reconnecting && !room.peerLeft && (!finished||showRoomEntry)) {
         if (mode == GomokuPlayMode.NEARBY) NearbyChessLobby(nearby, room.status, room.error, onJoin, onNearbyRetry, onControlsBottom)
         else OnlineChessLobby(room.sessionActive, room.busy, room.hostAddress, room.status, room.error,
-            onHost, onJoin, onDisconnect, onControlsBottom)
+            onHost, onJoin, onDisconnect, onControlsBottom, game = "gomoku")
         return
     }
     GameFinishOverlay(finish, finishIdentity, state.takeIf { finished }, finishEvent, promptRequest,
@@ -281,9 +263,7 @@ internal fun ColumnScope.SecretGomokuGame(state: GomokuState, paused: Boolean, b
     if (network && room?.pendingUndoRequest != null && room.pendingUndoRequest != room.localPlayer) {
         fun respond(accept: Boolean) { if (!undoResponseSent) { undoResponseSent = true; onUndoResponse(accept) } }
         SecretWoodDialog("棋友想重走这一手", { respond(false) }, busy = undoResponseSent,
-            confirmLabel = "同意", onConfirm = { respond(true) }, dismissLabel = "继续这局") {
-            Text("会一起退回棋友上次落子前，包括随后的一手回应。", style = MaterialTheme.typography.bodySmall)
-        }
+            confirmLabel = "同意", onConfirm = { respond(true) }, dismissLabel = "继续下", compactWidth = 292.dp) { }
     }
     val latestMove by rememberUpdatedState(onMove)
     val roomAvailable = room?.connected == true && !room.awaitingAck && !room.localBackground &&
@@ -294,6 +274,12 @@ internal fun ColumnScope.SecretGomokuGame(state: GomokuState, paused: Boolean, b
         else -> roomAvailable && state.currentPlayer == localPlayer
     }
     val wood = remember { Brush.linearGradient(listOf(Color(0xFFF0E3CD), Color(0xFFE8D5B4))) }
+    var peerDepartureDismissed by remember(mode, room?.round, room?.hostAddress) { mutableStateOf(false) }
+    if (network && room?.peerLeft == true && !peerDepartureDismissed) SecretWoodDialog("棋友已离开", { peerDepartureDismissed = true },
+        confirmLabel = "知道啦", compactWidth = 270.dp) { }
+    ChessRoundStart(finishIdentity, ready = if (network) room?.connected == true else !paused,
+        emptyBoard = state.board.none { it != 0 }, text = if (mode == GomokuPlayMode.HOTSEAT) "黑方先行"
+            else if (localPlayer == 1) "你先行" else "对方先行")
     val status = when (state.outcome) {
         GomokuOutcome.HUMAN_WON,GomokuOutcome.CPU_WON -> finish?.headline?:"本局结束"
         GomokuOutcome.DRAW -> "棋盘坐满啦，这一局平手 ♡"
@@ -309,18 +295,23 @@ internal fun ColumnScope.SecretGomokuGame(state: GomokuState, paused: Boolean, b
         }
     }
     BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
-    // Header and mode selector take 92 dp; offset half so the board itself centers on the page.
-    val boardTop = ((maxHeight - boardSize) / 2 - 46.dp).coerceAtLeast(60.dp)
+    // Seats sit directly above a centered board; no spacer reserved for the old mode menu.
+    val boardTop = ((maxHeight - boardSize) / 2 - 72.dp).coerceAtLeast(0.dp)
     Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
-    Spacer(Modifier.height((boardTop - 60.dp).coerceAtLeast(0.dp)))
-    Row(Modifier.width(boardSize).height(36.dp), verticalAlignment = Alignment.CenterVertically) {
-        GameSeat(if (mode == GomokuPlayMode.HOTSEAT) "黑方" else if(localPlayer==1) "你" else if(mode==GomokuPlayMode.CPU) "阿噜" else "棋友",
-            Color(0xFF4C4950), active = state.currentPlayer == 1 && (network || !paused))
-        Spacer(Modifier.weight(1f))
-        GameSeat(if (mode == GomokuPlayMode.HOTSEAT) "白方" else if(localPlayer==2) "你" else if(mode==GomokuPlayMode.CPU) "阿噜" else "棋友",
-            Color(0xFFF9F5EA), active = state.currentPlayer == 2 && (network || !paused))
+    Spacer(Modifier.height(boardTop))
+    Row(Modifier.width(boardSize).height(56.dp), verticalAlignment = Alignment.CenterVertically) {
+        val opponent = if (mode == GomokuPlayMode.CPU) ChessPlayerProfile("阿噜", "aru")
+            else ChessPlayerProfile(room?.remoteName ?: "棋友", room?.remoteAvatarId ?: "star")
+        fun profile(player: Int) = if (mode == GomokuPlayMode.HOTSEAT) ChessPlayerProfile(if (player == 1) playerProfile.name else "棋友", if (player == 1) playerProfile.avatarId else "cat")
+            else if (localPlayer == player) playerProfile else opponent
+        fun seatStatus(player: Int) = when { finished -> "结束"; room?.peerLeft == true && player != localPlayer -> "已离开"
+            network && room?.remoteBackground == true && player != localPlayer -> "暂离"; !network && paused -> "暂停"
+            state.currentPlayer == player -> if (mode == GomokuPlayMode.CPU && player != humanPlayer) "思考中" else "落子中"; else -> "等待" }
+        ChessPlayerSeat(profile(1), Color(0xFF4C4950), "黑方", state.currentPlayer == 1 && !finished, seatStatus(1), Modifier.weight(1f))
+        Spacer(Modifier.width(10.dp))
+        ChessPlayerSeat(profile(2), Color(0xFFF9F5EA), "白方", state.currentPlayer == 2 && !finished, seatStatus(2), Modifier.weight(1f), alignEnd = true)
     }
-    Spacer(Modifier.height(24.dp))
+    Spacer(Modifier.height(16.dp))
     Canvas(Modifier.size(boardSize).shadow(3.dp, RoundedCornerShape(13.dp), clip = false)
         .clip(RoundedCornerShape(13.dp)).background(wood).drawWithCache {
             val grains = List(24) { band ->
@@ -395,8 +386,7 @@ internal fun ColumnScope.SecretGomokuGame(state: GomokuState, paused: Boolean, b
             room?.myRematchRequested==true,Modifier.width(boardSize).padding(top=10.dp)
                 .onGloballyPositioned{onControlsBottom(it.boundsInRoot().bottom)})
     } else {
-    Text(status, modifier = Modifier.padding(top = 14.dp), color = Color(0xFF766A7F), style = MaterialTheme.typography.bodyMedium)
-    Spacer(Modifier.height(20.dp))
+    Spacer(Modifier.height(24.dp))
     Row(Modifier.width(boardSize).padding(horizontal = if (mode == GomokuPlayMode.HOTSEAT) 6.dp else 26.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         if (!network) GameIconTool(if (paused) Icons.Outlined.PlayCircleOutline else Icons.Outlined.PauseCircleOutline,
@@ -413,9 +403,7 @@ internal fun ColumnScope.SecretGomokuGame(state: GomokuState, paused: Boolean, b
             enabled = canUndo && !helpBusy && (!network || roomAvailable), cue = com.jiligulu.app.core.audio.UiCue.TOUCH)
         if (network) GameIconTool(Icons.Outlined.Logout, "离开", onDisconnect, Modifier.weight(1f))
     }
-    Text("黑棋先行 · 连成五子获胜", Modifier.padding(top = 4.dp, bottom = 10.dp)
-        .onGloballyPositioned { onControlsBottom(it.boundsInRoot().bottom) },
-        style = MaterialTheme.typography.labelSmall, color = Color(0xFF9C8D98))
+    Spacer(Modifier.height(10.dp).onGloballyPositioned { onControlsBottom(it.boundsInRoot().bottom) })
     }
     }
     }

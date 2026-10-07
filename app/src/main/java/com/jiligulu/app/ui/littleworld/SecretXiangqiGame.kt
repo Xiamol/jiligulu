@@ -77,7 +77,7 @@ internal fun ColumnScope.SecretXiangqiGame(state: XiangqiState, mode: XiangqiPla
     helpBusy: Boolean = false, assistedSelection: GridCell? = null,
     restorationToken: Int = 0,
     humanSide: XiangqiSide = XiangqiSide.RED,
-    showRoomEntry: Boolean = false,
+    showRoomEntry: Boolean = false, playerProfile: ChessPlayerProfile = ChessPlayerProfile(),
     canUndo: Boolean = false, onUndo: () -> Unit = {}, onUndoResponse: (Boolean) -> Unit = {},
     canUndoRed: Boolean = false, canUndoBlack: Boolean = false, onHotseatUndo: (XiangqiSide) -> Unit = {},
     nearby: NearbyRoomsState? = null, onNearbyRetry: () -> Unit = {},
@@ -116,32 +116,7 @@ internal fun ColumnScope.SecretXiangqiGame(state: XiangqiState, mode: XiangqiPla
         }
     }
     val finishRevealed = revealedFinish == state
-    var modeMenu by remember { mutableStateOf(false) }
     var resignConfirm by remember(mode, lan.round) { mutableStateOf(false) }
-    val modeNames = remember { mapOf(XiangqiPlayMode.CPU to "和阿噜下", XiangqiPlayMode.ONLINE to "创建房间",
-        XiangqiPlayMode.LAN to "附近的人", XiangqiPlayMode.HOTSEAT to "同屏双人") }
-    val showTurnInfo = !networkMode || lan.connected || lan.reconnecting
-    Row((if (showTurnInfo) Modifier.width(boardWidth) else Modifier.fillMaxWidth()).height(if (showTurnInfo) 42.dp else 36.dp),
-        verticalAlignment = Alignment.CenterVertically) {
-        Box {
-            TextButton(onClick = { UiSound.select(soundContext); onModalOpened(); modeMenu = true }, enabled=!finished, contentPadding = PaddingValues(horizontal = 8.dp)) {
-                Text(modeNames.getValue(mode), color = Color(0xFF766A7F), style = MaterialTheme.typography.bodySmall)
-                Icon(Icons.Outlined.ExpandMore, "选择对局方式", Modifier.size(18.dp), tint = Color(0xFF928497))
-            }
-            if(modeMenu) SecretWoodDialog("和谁下？",{modeMenu=false},confirmLabel="返回棋盘") {
-                modeNames.forEach { (value,label)->TextButton(onClick={
-                    UiSound.select(soundContext);modeMenu=false;if(mode!=value)onMode(value)
-                },modifier=Modifier.fillMaxWidth().height(48.dp),colors=ButtonDefaults.textButtonColors(contentColor=SecretWoodInk)) {
-                    Text(if(value==mode) "✓ $label" else label)
-                } }
-            }
-        }
-        Spacer(Modifier.weight(1f))
-        if (showTurnInfo) Text(if (state.outcome != XiangqiOutcome.PLAYING) "本局结束" else if (paused && mode != XiangqiPlayMode.ONLINE && mode != XiangqiPlayMode.LAN)
-            "已暂停" else if (state.turnSide == XiangqiSide.RED) "红方回合" else "黑方回合",
-            style = MaterialTheme.typography.bodySmall,
-            color = if (state.turnSide == XiangqiSide.RED) Color(0xFFAF766A) else Color(0xFF766A7F))
-    }
     var matchResponseSent by remember(mode,lan.pendingMatchName) {mutableStateOf(false)}
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     var wasConnected by remember(mode) { mutableStateOf(lan.connected) }
@@ -158,23 +133,21 @@ internal fun ColumnScope.SecretXiangqiGame(state: XiangqiState, mode: XiangqiPla
     var rematchResponseSent by remember(mode,lan.round,lan.rematchRequestedBy) {mutableStateOf(false)}
     if(networkMode && lan.rematchRequestedBy!=null && lan.rematchRequestedBy!=lan.localSide && !lan.myRematchRequested) {
         SecretWoodDialog("再摆一盘？",{if(!rematchResponseSent){rematchResponseSent=true;onRematchResponse(false)}},
-            confirmLabel="好呀，换边再下",onConfirm={if(!rematchResponseSent){rematchResponseSent=true;onRematchResponse(true)}},
-            dismissLabel="这次收桌",busy=rematchResponseSent){Text("棋友想再来一局。这一盘会交换红黑。",style=MaterialTheme.typography.bodySmall)}
+            confirmLabel="换边再下",onConfirm={if(!rematchResponseSent){rematchResponseSent=true;onRematchResponse(true)}},
+            dismissLabel="收桌",busy=rematchResponseSent,compactWidth=292.dp){ }
     }
     var undoResponseSent by remember(mode, lan.revision, lan.pendingUndoRequest) { mutableStateOf(false) }
     if (networkMode && lan.pendingUndoRequest != null && lan.pendingUndoRequest != lan.localSide) {
         fun respond(accept: Boolean) { if (!undoResponseSent) { undoResponseSent = true; onUndoResponse(accept) } }
         SecretWoodDialog("棋友想重走这一手", { respond(false) },
-            busy = undoResponseSent, confirmLabel = "同意", onConfirm = { respond(true) }, dismissLabel = "继续这局") {
-            Text("会一起退回棋友上次落子前，包括随后的一手回应。", style = MaterialTheme.typography.bodySmall)
-        }
+            busy = undoResponseSent, confirmLabel = "同意", onConfirm = { respond(true) }, dismissLabel = "继续下", compactWidth = 292.dp) { }
     }
     var choosePuzzle by remember {mutableStateOf(false)}
     var showRules by remember { mutableStateOf(false) }
-    if (networkMode && !lan.connected && !lan.reconnecting && (!finished||showRoomEntry)) {
+    if (networkMode && !lan.connected && !lan.reconnecting && !lan.peerLeft && (!finished||showRoomEntry)) {
         if (mode == XiangqiPlayMode.LAN) NearbyChessLobby(nearby, lan.status, lan.error, onJoin, onNearbyRetry, onControlsBottom)
         else OnlineChessLobby(lan.sessionActive, lan.busy, lan.hostAddress, lan.status, lan.error,
-            onHost, onJoin, onDisconnect, onControlsBottom)
+            onHost, onJoin, onDisconnect, onControlsBottom, game = "xiangqi")
         return
     }
     if(choosePuzzle) SecretWoodDialog("一着小残局",{choosePuzzle=false}) {
@@ -202,6 +175,13 @@ internal fun ColumnScope.SecretXiangqiGame(state: XiangqiState, mode: XiangqiPla
         onConfirm = { resignConfirm = false; onResign() })
     val playerName = if (state.turnSide == XiangqiSide.RED) "红方" else "黑方"
     val inCheck = remember(state) { state.outcome == XiangqiOutcome.PLAYING && XiangqiEngine.isInCheck(state, state.turnSide) }
+    var peerDepartureDismissed by remember(mode, lan.round, lan.hostAddress) { mutableStateOf(false) }
+    if (networkMode && lan.peerLeft && !peerDepartureDismissed) SecretWoodDialog("棋友已离开", { peerDepartureDismissed = true },
+        confirmLabel = "知道啦", compactWidth = 270.dp) { }
+    val openingIdentity = listOf(mode, restorationToken, humanSide, lan.round, if (networkMode) lan.hostAddress else "")
+    ChessRoundStart(openingIdentity, ready = if (networkMode) lan.connected else !paused,
+        emptyBoard = state.ply == 0, text = if (mode == XiangqiPlayMode.HOTSEAT) "红方先行"
+            else if ((if (networkMode) lan.localSide else humanSide) == XiangqiSide.RED) "你先行" else "对方先行")
     val status = when (state.outcome) {
         XiangqiOutcome.RED_WON -> "红方胜出"
         XiangqiOutcome.BLACK_WON -> "黑方胜出"
@@ -227,7 +207,23 @@ internal fun ColumnScope.SecretXiangqiGame(state: XiangqiState, mode: XiangqiPla
         XiangqiPlayMode.HOTSEAT -> !paused
         XiangqiPlayMode.LAN, XiangqiPlayMode.ONLINE -> roomAvailable && state.turnSide == lan.localSide
     }
-    Spacer(Modifier.height(10.dp))
+    Spacer(Modifier.height(8.dp))
+    Row(Modifier.width(boardWidth).height(56.dp), verticalAlignment = Alignment.CenterVertically) {
+        val localSide = if (networkMode) lan.localSide else humanSide
+        val opponent = if (mode == XiangqiPlayMode.CPU) ChessPlayerProfile("阿噜", "aru") else ChessPlayerProfile(lan.remoteName, lan.remoteAvatarId)
+        fun profile(side: XiangqiSide) = if (mode == XiangqiPlayMode.HOTSEAT)
+            ChessPlayerProfile(if (side == XiangqiSide.RED) playerProfile.name else "棋友", if (side == XiangqiSide.RED) playerProfile.avatarId else "cat")
+            else if (side == localSide) playerProfile else opponent
+        fun seatStatus(side: XiangqiSide) = when { finished -> "结束"; networkMode && lan.peerLeft && side != localSide -> "已离开"
+            networkMode && lan.remoteBackground && side != localSide -> "暂离"; !networkMode && paused -> "暂停"
+            state.turnSide == side && inCheck -> "被将军"; state.turnSide == side -> if (mode == XiangqiPlayMode.CPU && side != humanSide) "思考中" else "落子中"; else -> "等待" }
+        ChessPlayerSeat(profile(XiangqiSide.RED), Color(0xFFAF766A), "红方", state.turnSide == XiangqiSide.RED && !finished,
+            seatStatus(XiangqiSide.RED), Modifier.weight(1f))
+        Spacer(Modifier.width(10.dp))
+        ChessPlayerSeat(profile(XiangqiSide.BLACK), Color(0xFF514953), "黑方", state.turnSide == XiangqiSide.BLACK && !finished,
+            seatStatus(XiangqiSide.BLACK), Modifier.weight(1f), alignEnd = true)
+    }
+    Spacer(Modifier.height(14.dp))
     XiangqiBoard(state, boardWidth, canMove,
         flipped = mode==XiangqiPlayMode.CPU && humanSide==XiangqiSide.BLACK || networkMode && lan.localSide == XiangqiSide.BLACK, onMove = onMove,
         remoteSelection = remoteSelection, onSelectionChanged = onSelectionChanged, assistedSelection = assistedSelection,
@@ -249,10 +245,7 @@ internal fun ColumnScope.SecretXiangqiGame(state: XiangqiState, mode: XiangqiPla
         GameFinishActions(finish,{ promptRequest++ },onExit,networkMode,lan.roomEnded,lan.resultSecondsLeft,lan.myRematchRequested,
             Modifier.width(boardWidth).padding(top=10.dp).onGloballyPositioned{onControlsBottom(it.boundsInRoot().bottom)})
     } else {
-    Text(
-        if (finish != null && !finishRevealed) "等这一手落稳…" else status,
-        modifier = Modifier.padding(vertical = 10.dp).width(boardWidth), color = Color(0xFF766A7F),
-        style = MaterialTheme.typography.bodySmall, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+    Spacer(Modifier.height(16.dp))
         Row(Modifier.width(boardWidth).padding(horizontal = 6.dp, vertical = 4.dp)) {
             if (mode == XiangqiPlayMode.HOTSEAT) {
                 GameIconTool(Icons.AutoMirrored.Outlined.Undo, "悔红", { onHotseatUndo(XiangqiSide.RED) }, Modifier.weight(1f),
@@ -276,10 +269,7 @@ internal fun ColumnScope.SecretXiangqiGame(state: XiangqiState, mode: XiangqiPla
             GameIconTool(Icons.Outlined.HelpOutline, "规则", { onModalOpened(); if (!networkMode && !paused) onToggle(); showRules = true }, Modifier.weight(1f))
         }
     Column(Modifier.onGloballyPositioned { onControlsBottom(it.boundsInRoot().bottom) }, horizontalAlignment = Alignment.CenterHorizontally) {
-    Text(if (networkMode) "你执${if(lan.localSide==XiangqiSide.RED)"红" else "黑"} · 联机不限时"
-        else if (mode == XiangqiPlayMode.HOTSEAT) "同屏对弈 · 每手 ${thinkingClock.durationMillis / 1000} 秒"
-        else "你执${if(humanSide==XiangqiSide.RED)"红" else "黑"} · 每手 ${thinkingClock.durationMillis / 1000} 秒",
-        Modifier.padding(top = 8.dp, bottom = 8.dp), style = MaterialTheme.typography.labelSmall, color = Color(0xFF9C8D98))
+    Spacer(Modifier.height(8.dp))
     lan.error?.takeIf { networkMode }?.let {
         Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
     }
@@ -352,9 +342,7 @@ internal fun GameIconTool(icon: ImageVector, label: String, onClick: () -> Unit,
 @Composable
 internal fun GameResignDialog(onDismiss: () -> Unit, onConfirm: () -> Unit) {
     SecretWoodDialog("这局先认输？", onDismiss, confirmLabel = "认输", onConfirm = onConfirm,
-        dismissLabel = "接着下", compactWidth = 250.dp) {
-        Text("这盘留给棋友，下盘再见分晓。", style = MaterialTheme.typography.bodyMedium, color = SecretWoodInk)
-    }
+        dismissLabel = "接着下", compactWidth = 270.dp) { }
 }
 
 @Composable

@@ -168,24 +168,18 @@ internal fun GameFinishOverlay(
                 }
             }
             FinishOverlayPhase.QUESTION -> Dialog(onDismissRequest = { close() }) {
-                Surface(Modifier.widthIn(max = 292.dp).fillMaxWidth().testTag("game-rematch-question"),
-                    shape = RoundedCornerShape(20.dp), color = Color(0xFFF5F1E9), tonalElevation = 0.dp) {
-                    Column(Modifier.padding(horizontal = 22.dp, vertical = 18.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("再来一局？", style = MaterialTheme.typography.titleLarge, color = SecretWoodInk)
-                        Text(result.headline, Modifier.padding(top = 6.dp), style = MaterialTheme.typography.bodySmall,
-                            color = SecretWoodInk.copy(alpha = .72f))
-                        Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.Center) {
-                            TextButton(onClick = { UiSound.tap(context); close() },
-                                colors = ButtonDefaults.textButtonColors(contentColor = SecretWoodInk)) { Text("先看棋盘") }
-                            TextButton(onClick = { UiSound.select(context); close(); onAgain() }, enabled = !myRematchRequested,
-                                colors = ButtonDefaults.textButtonColors(contentColor = SecretWoodInk)) {
-                                Text(if (myRematchRequested) "等棋友点头" else "再来一局")
-                            }
+                SecretWoodSurface(Modifier.widthIn(max = 292.dp).fillMaxWidth().testTag("game-rematch-question"),
+                    contentPadding = PaddingValues(horizontal = 22.dp, vertical = 20.dp)) {
+                    Text("再来一局？", Modifier.fillMaxWidth().padding(top = 24.dp),
+                        textAlign = TextAlign.Center, style = MaterialTheme.typography.titleLarge, color = SecretWoodInk)
+                    Row(Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        TextButton(onClick = { UiSound.navigate(context); close(); onExit?.invoke() }, Modifier.weight(1f).height(44.dp),
+                            colors = ButtonDefaults.textButtonColors(contentColor = SecretWoodInk.copy(alpha = .7f))) {
+                            Text(if (onExit == null) "先歇会儿" else "收桌")
                         }
-                        onExit?.let { exit ->
-                            TextButton(onClick = { UiSound.navigate(context); close(); exit() },
-                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
-                                colors = ButtonDefaults.textButtonColors(contentColor = SecretWoodInk.copy(alpha = .72f))) { Text("收桌") }
+                        TextButton(onClick = { UiSound.select(context); close(); onAgain() }, Modifier.weight(1f).height(44.dp), enabled = !myRematchRequested,
+                            colors = ButtonDefaults.textButtonColors(contentColor = SecretWoodInk)) {
+                            Text(if (myRematchRequested) "等棋友点头" else "再来一局")
                         }
                     }
                 }
@@ -235,9 +229,7 @@ internal fun GameFinishActions(result: GameFinishPresentation, onQuestion: () ->
     myRematchRequested: Boolean = false, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
-        Text("本局已结束 · ${result.headline}", style = MaterialTheme.typography.bodySmall, color = SecretWoodInk)
-        Text(result.detail, style = MaterialTheme.typography.labelSmall, color = SecretWoodInk.copy(alpha = .70f),
-            maxLines = 2, textAlign = TextAlign.Center)
+        Text(result.headline, style = MaterialTheme.typography.titleSmall, color = SecretWoodInk)
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
             onExit?.let { exit -> TextButton(onClick = { UiSound.navigate(context); exit() },
                 colors = ButtonDefaults.textButtonColors(contentColor = SecretWoodInk)) { Text("收桌") } }
@@ -245,8 +237,6 @@ internal fun GameFinishActions(result: GameFinishPresentation, onQuestion: () ->
                 colors = ButtonDefaults.textButtonColors(contentColor = SecretWoodInk)) {
                 Text(if (myRematchRequested) "等棋友点头" else "再来一局")
             }
-            if (network) Text(if (roomEnded) "棋桌已收好" else "${secondsLeft.coerceAtLeast(0)} 秒",
-                style = MaterialTheme.typography.labelSmall, color = SecretWoodInk.copy(alpha = .62f))
         }
     }
 }

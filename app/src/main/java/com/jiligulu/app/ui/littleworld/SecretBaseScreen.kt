@@ -124,7 +124,8 @@ private const val MOVE_SOUND_FOLLOWUP_MS = 150L
 
 /** One room, with toys on the furniture. Opening a toy never starts a background game. */
 @Composable
-fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories: () -> Unit) {
+fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories: () -> Unit,
+    roomInvite: ChessRoomInvite? = null, onRoomInviteConsumed: () -> Unit = {}) {
     val context = LocalContext.current
     val prefs = (context.applicationContext as JiliguluApp).container.userPrefs
     val gamePreferences = remember(context) { context.getSharedPreferences("gulu_secret_games", android.content.Context.MODE_PRIVATE) }
@@ -136,10 +137,15 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
     var leaveRoomAction by remember { mutableStateOf<(() -> Unit)?>(null) }
     val petSleeping by prefs.secretPetSleeping.collectAsStateWithLifecycle(gamePreferences.getBoolean("secret_night", false))
     val nickname by prefs.nickname.collectAsStateWithLifecycle("")
+    var chessName by rememberSaveable { mutableStateOf(gamePreferences.getString("chess_nickname", null)) }
+    var chessAvatar by rememberSaveable { mutableStateOf(gamePreferences.getString("chess_avatar", "aru").orEmpty()) }
+    val chessProfile = ChessPlayerProfile(chessName ?: nickname, chessAvatar).normalized()
+    var editChessProfile by remember { mutableStateOf(false) }
+    var hubXiangqi by rememberSaveable { mutableStateOf(true) }
     var activity by rememberSaveable { mutableStateOf<SecretActivity?>(null) }
     var choosingOpponent by rememberSaveable { mutableStateOf(false) }
     val fullGame = activity == SecretActivity.SNAKE || activity == SecretActivity.GOMOKU ||
-        activity == SecretActivity.XIANGQI || activity == SecretActivity.WHEEL
+        activity == SecretActivity.XIANGQI || activity == SecretActivity.WHEEL || activity == SecretActivity.BOARD
     SceneSystemBars(lightIcons = !fullGame)
     var prize by rememberSaveable { mutableStateOf<String?>(null) }
     var spinning by remember { mutableStateOf(false) }
@@ -182,8 +188,8 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
     val gomokuLan by gomokuLanSession.state.collectAsStateWithLifecycle()
     val gomokuOnlineSession = remember(context) { GomokuOnlineSession(context) }
     val gomokuOnline by gomokuOnlineSession.state.collectAsStateWithLifecycle()
-    val xiangqiDiscovery = remember(context, nickname) { NsdRoomDiscovery(context, NearbyGameKind.XIANGQI, nickname.ifBlank { "棋友" }) }
-    val gomokuDiscovery = remember(context, nickname) { NsdRoomDiscovery(context, NearbyGameKind.GOMOKU, nickname.ifBlank { "棋友" }) }
+    val xiangqiDiscovery = remember(context, chessProfile.name) { NsdRoomDiscovery(context, NearbyGameKind.XIANGQI, chessProfile.name) }
+    val gomokuDiscovery = remember(context, chessProfile.name) { NsdRoomDiscovery(context, NearbyGameKind.GOMOKU, chessProfile.name) }
     val nearbyXiangqi by xiangqiDiscovery.state.collectAsStateWithLifecycle()
     val nearbyGomoku by gomokuDiscovery.state.collectAsStateWithLifecycle()
     var starTaps by rememberSaveable { mutableIntStateOf(0) }
@@ -495,7 +501,7 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
         if (value == GomokuPlayMode.NEARBY || value == GomokuPlayMode.ONLINE) {
             gomokuMode = value
             gomokuRoomEntry=value==GomokuPlayMode.ONLINE
-            if(value==GomokuPlayMode.NEARBY&&foreground) gomokuLanSession.host(playerName=nickname.ifBlank{"棋友"})
+            if(value==GomokuPlayMode.NEARBY&&foreground) gomokuLanSession.host(playerName=chessProfile.name,avatarId=chessProfile.avatarId)
             return
         }
         val localMode = if (value == GomokuPlayMode.CPU) LocalGameMode.CPU else LocalGameMode.HOTSEAT
@@ -520,7 +526,7 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
         if (value == XiangqiPlayMode.LAN || value == XiangqiPlayMode.ONLINE) {
             xiangqiMode = value
             xiangqiRoomEntry=value==XiangqiPlayMode.ONLINE
-            if(value==XiangqiPlayMode.LAN&&foreground) lanSession.host(playerName=nickname.ifBlank{"棋友"})
+            if(value==XiangqiPlayMode.LAN&&foreground) lanSession.host(playerName=chessProfile.name,avatarId=chessProfile.avatarId)
             return
         }
         val localMode = if (value == XiangqiPlayMode.CPU) LocalGameMode.CPU else LocalGameMode.HOTSEAT
@@ -556,6 +562,13 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
     }
     fun pauseToys() { pauseLocalToys(); closeNetworkRooms() }
     fun closeToy() { pauseToys(); cancelModeLoad(); leaveRoomAction = null; activity = null; choosingOpponent=false; clockSetupVisible = false; resumeAfterClockSetup = false }
+    fun returnChessHub() {
+        pauseToys(); cancelModeLoad(); leaveRoomAction = null; choosingOpponent = false
+        clockSetupVisible = false; resumeAfterClockSetup = false; activity = SecretActivity.BOARD; gameControlsBottom = 0f
+    }
+    fun backFromToy() {
+        if (activity == SecretActivity.GOMOKU || activity == SecretActivity.XIANGQI) returnChessHub() else closeToy()
+    }
     fun openToy(value: SecretActivity) {
         if (!archiveReady || gameLoading) return
         if(value==SecretActivity.PAPER) UiSound.paper(context) else UiSound.navigate(context)
@@ -599,7 +612,7 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
     }
     LaunchedEffect(activity, foreground, sleeping, archiveReady, gameLoading, choosingOpponent, xiangqiMode, xiangqiDiscovery, lan.connected, lan.hostAddress, lan.sessionActive, lan.error,lan.roomEnded,lan.awaitingMatch) {
         if (archiveReady && !gameLoading && !choosingOpponent && activity == SecretActivity.XIANGQI && foreground && !sleeping && xiangqiMode == XiangqiPlayMode.LAN && !lan.connected) {
-            if (!lanSession.state.value.sessionActive && lanSession.state.value.error == null && !lanSession.state.value.roomEnded) lanSession.host(playerName=nickname.ifBlank{"棋友"})
+            if (!lanSession.state.value.sessionActive && lanSession.state.value.error == null && !lanSession.state.value.roomEnded) lanSession.host(playerName=chessProfile.name,avatarId=chessProfile.avatarId)
             val room = lanSession.state.value
             if (room.sessionActive && room.isHost && !room.awaitingMatch && !room.roomEnded && room.hostAddress.isNotBlank() && room.error == null) {
                 xiangqiDiscovery.start();lanSession.allowNearbyMatching(xiangqiDiscovery.localId)
@@ -609,7 +622,7 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
     }
     LaunchedEffect(activity, foreground, sleeping, archiveReady, gameLoading, choosingOpponent, gomokuMode, gomokuDiscovery, gomokuLan.connected, gomokuLan.hostAddress, gomokuLan.sessionActive, gomokuLan.error,gomokuLan.roomEnded,gomokuLan.awaitingMatch) {
         if (archiveReady && !gameLoading && !choosingOpponent && activity == SecretActivity.GOMOKU && foreground && !sleeping && gomokuMode == GomokuPlayMode.NEARBY && !gomokuLan.connected) {
-            if (!gomokuLanSession.state.value.sessionActive && gomokuLanSession.state.value.error == null && !gomokuLanSession.state.value.roomEnded) gomokuLanSession.host(playerName=nickname.ifBlank{"棋友"})
+            if (!gomokuLanSession.state.value.sessionActive && gomokuLanSession.state.value.error == null && !gomokuLanSession.state.value.roomEnded) gomokuLanSession.host(playerName=chessProfile.name,avatarId=chessProfile.avatarId)
             val room = gomokuLanSession.state.value
             if (room.sessionActive && room.isHost && !room.awaitingMatch && !room.roomEnded && room.hostAddress.isNotBlank() && room.error == null) {
                 gomokuDiscovery.start();gomokuLanSession.allowNearbyMatching(gomokuDiscovery.localId)
@@ -622,14 +635,14 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
         val peer=nearbyXiangqi.autoCandidate;val own=nearbyXiangqi.localId
         if(peer!=null&&own.isNotBlank()&&foreground&&!sleeping&&!choosingOpponent&&activity==SecretActivity.XIANGQI&&
             xiangqiMode==XiangqiPlayMode.LAN&&!lan.connected&&!lan.awaitingMatch&&!lan.roomEnded&&triedNearbyPeers.add("xq:$own:${peer.id}")) {
-            lanSession.allowNearbyMatching(own);xiangqiDiscovery.stop();lanSession.joinNearby(peer,own,nickname.ifBlank{"棋友"})
+            lanSession.allowNearbyMatching(own);xiangqiDiscovery.stop();lanSession.joinNearby(peer,own,chessProfile.name,chessProfile.avatarId)
         }
     }
     LaunchedEffect(nearbyGomoku.autoCandidate?.id,nearbyGomoku.localId,activity,foreground,choosingOpponent,gomokuMode,gomokuLan.connected,gomokuLan.awaitingMatch) {
         val peer=nearbyGomoku.autoCandidate;val own=nearbyGomoku.localId
         if(peer!=null&&own.isNotBlank()&&foreground&&!sleeping&&!choosingOpponent&&activity==SecretActivity.GOMOKU&&
             gomokuMode==GomokuPlayMode.NEARBY&&!gomokuLan.connected&&!gomokuLan.awaitingMatch&&!gomokuLan.roomEnded&&triedNearbyPeers.add("go:$own:${peer.id}")) {
-            gomokuLanSession.allowNearbyMatching(own);gomokuDiscovery.stop();gomokuLanSession.joinNearby(peer,own,nickname.ifBlank{"棋友"})
+            gomokuLanSession.allowNearbyMatching(own);gomokuDiscovery.stop();gomokuLanSession.joinNearby(peer,own,chessProfile.name,chessProfile.avatarId)
         }
     }
 
@@ -782,7 +795,36 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
             }
         }
     }
-    BackHandler { if (activity != null) leaveNetworkSafely(::closeToy) else { pauseToys(); onBack() } }
+    LaunchedEffect(roomInvite, archiveReady, foreground, sleeping) {
+        val invite = roomInvite ?: return@LaunchedEffect
+        if (!archiveReady || !foreground) return@LaunchedEffect
+        if (sleeping) {
+            night = false; gamePreferences.edit().putBoolean("secret_night", false).apply()
+            prefs.setSecretPetSleeping(false)
+            return@LaunchedEffect
+        }
+        val join = {
+            hubXiangqi = invite.game == "xiangqi"
+            choosingOpponent = false
+            activity = if (hubXiangqi) SecretActivity.XIANGQI else SecretActivity.GOMOKU
+            if (hubXiangqi) {
+                changeXiangqiMode(XiangqiPlayMode.ONLINE)
+                onlineSession.join(invite.code, playerName = chessProfile.name, avatarId = chessProfile.avatarId)
+                if (onlineSession.state.value.sessionActive) xiangqiRoomEntry = false
+            } else {
+                changeGomokuMode(GomokuPlayMode.ONLINE)
+                gomokuOnlineSession.join(invite.code, playerName = chessProfile.name, avatarId = chessProfile.avatarId)
+                if (gomokuOnlineSession.state.value.sessionActive) gomokuRoomEntry = false
+            }
+        }
+        leaveNetworkSafely(join)
+        onRoomInviteConsumed()
+    }
+    if (editChessProfile) ChessProfileEditor(chessProfile, { editChessProfile = false }) { profile ->
+        chessName = profile.name; chessAvatar = profile.avatarId; editChessProfile = false
+        gamePreferences.edit().putString("chess_nickname", profile.name).putString("chess_avatar", profile.avatarId).apply()
+    }
+    BackHandler { if (activity != null) leaveNetworkSafely(::backFromToy) else { pauseToys(); onBack() } }
 
     Box(Modifier.fillMaxSize().background(Color(0xFFE8D1B0))) {
         if (!fullGame) SecretRoomStage(sleeping = sleeping, toysEnabled = archiveReady && !gameLoading, onPet = { UiSound.pet(context);rest(!sleeping) },
@@ -808,16 +850,18 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
         val title = when (toy) {
             SecretActivity.WHEEL -> "阿噜的好运转盘"
             SecretActivity.SNAKE -> "小蛇吃星星"
-            SecretActivity.BOARD -> "下一盘？"
+            SecretActivity.BOARD -> "棋友会"
             SecretActivity.GOMOKU -> "五子棋"
             SecretActivity.XIANGQI -> "象棋"
             SecretActivity.PAPER -> "阿噜的秘密纸条"
         }
         val toyContent: @Composable ColumnScope.(androidx.compose.ui.unit.Dp) -> Unit = { boardSize ->
-            if(choosingOpponent&&(toy==SecretActivity.GOMOKU||toy==SecretActivity.XIANGQI)) {
-                ChessOpponentChoicePage(toy==SecretActivity.XIANGQI) { opponent ->
+            if(toy == SecretActivity.BOARD || choosingOpponent&&(toy==SecretActivity.GOMOKU||toy==SecretActivity.XIANGQI)) {
+                ChessOpponentChoicePage(hubXiangqi, chessProfile, onGame = { hubXiangqi = it },
+                    onEditProfile = { editChessProfile = true }) { opponent ->
+                    activity = if (hubXiangqi) SecretActivity.XIANGQI else SecretActivity.GOMOKU
                     choosingOpponent=false
-                    if(toy==SecretActivity.GOMOKU) changeGomokuMode(when(opponent){ChessOpponent.ARU->GomokuPlayMode.CPU
+                    if(!hubXiangqi) changeGomokuMode(when(opponent){ChessOpponent.ARU->GomokuPlayMode.CPU
                         ChessOpponent.NEARBY->GomokuPlayMode.NEARBY;ChessOpponent.ROOM->GomokuPlayMode.ONLINE;ChessOpponent.SAME_PHONE->GomokuPlayMode.HOTSEAT})
                     else changeXiangqiMode(when(opponent){ChessOpponent.ARU->XiangqiPlayMode.CPU;ChessOpponent.NEARBY->XiangqiPlayMode.LAN
                         ChessOpponent.ROOM->XiangqiPlayMode.ONLINE;ChessOpponent.SAME_PHONE->XiangqiPlayMode.HOTSEAT})
@@ -839,18 +883,18 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
                         else -> { gomokuHumanPlayer=3-gomokuHumanPlayer;gomokuColorAssigned=true;gomokuRestoreToken++;gomokuHistory = emptyList(); gomoku = GomokuEngine.newGame(); gomokuStarted = true; gomokuPaused = false; checkpointGomoku() }
                     } },
                     mode = gomokuMode, onMode = { value -> leaveNetworkSafely { changeGomokuMode(value) } }, room = visibleGomokuRoom, nearby = nearbyGomoku,
-                    humanPlayer=gomokuHumanPlayer,restorationToken=gomokuRestoreToken,onExit={leaveNetworkSafely(::closeToy)},
-                    showRoomEntry=gomokuRoomEntry,
-                    onHost = { code -> if (foreground) {gomokuOnlineSession.host(code=code,playerName=nickname.ifBlank{"棋友"});
+                    humanPlayer=gomokuHumanPlayer,restorationToken=gomokuRestoreToken,onExit={leaveNetworkSafely(::returnChessHub)},
+                    showRoomEntry=gomokuRoomEntry, playerProfile = chessProfile,
+                    onHost = { code -> if (foreground) {gomokuOnlineSession.host(code=code,playerName=chessProfile.name,avatarId=chessProfile.avatarId);
                         if(gomokuOnlineSession.state.value.sessionActive)gomokuRoomEntry=false} },
                     onJoin = { address -> if (foreground) {
-                        if (gomokuMode == GomokuPlayMode.ONLINE) {gomokuOnlineSession.join(address,playerName=nickname.ifBlank{"棋友"});
+                        if (gomokuMode == GomokuPlayMode.ONLINE) {gomokuOnlineSession.join(address,playerName=chessProfile.name,avatarId=chessProfile.avatarId);
                             if(gomokuOnlineSession.state.value.sessionActive)gomokuRoomEntry=false}
                         else { val own=nearbyGomoku.localId;val peer=nearbyGomoku.rooms.firstOrNull{it.address==address}
-                            if(own.isNotBlank()&&peer!=null){gomokuLanSession.allowNearbyMatching(own);gomokuDiscovery.stop();gomokuLanSession.joinNearby(peer,own,nickname.ifBlank{"棋友"})} }
+                            if(own.isNotBlank()&&peer!=null){gomokuLanSession.allowNearbyMatching(own);gomokuDiscovery.stop();gomokuLanSession.joinNearby(peer,own,chessProfile.name,chessProfile.avatarId)} }
                     } },
-                    onDisconnect = { if (activeRoomConnected()) leaveNetworkSafely(::closeToy) else { cancelHelp(); closeNetworkRooms() } },
-                    onNearbyRetry = { if (foreground) { gomokuDiscovery.stop();gomokuLanSession.allowNearbyMatching(null);gomokuLanSession.host(playerName=nickname.ifBlank{"棋友"}) } },
+                    onDisconnect = { leaveNetworkSafely(::returnChessHub) },
+                    onNearbyRetry = { if (foreground) { gomokuDiscovery.stop();gomokuLanSession.allowNearbyMatching(null);gomokuLanSession.host(playerName=chessProfile.name,avatarId=chessProfile.avatarId) } },
                     onMatchResponse={accept->if(gomokuMode==GomokuPlayMode.ONLINE)gomokuOnlineSession.respondToMatch(accept)else gomokuLanSession.respondToMatch(accept)},
                     onRematchResponse={accept->if(gomokuMode==GomokuPlayMode.ONLINE)gomokuOnlineSession.respondToRematch(accept)else gomokuLanSession.respondToRematch(accept)},
                     canUndo = when (gomokuMode) {
@@ -873,16 +917,7 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
                     onResign = { cancelHelp(); if (gomokuMode == GomokuPlayMode.ONLINE) gomokuOnlineSession.resign()
                         else if (gomokuMode == GomokuPlayMode.NEARBY) gomokuLanSession.resign() },
                     helpBusy = helpBusy || gameLoading || !archiveReady, onControlsBottom = { gameControlsBottom = it })
-                SecretActivity.BOARD -> {
-                    Text("棋盘替你铺好了，今天想下哪一种？", style = MaterialTheme.typography.bodyMedium)
-                    Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
-                        TextButton(onClick = { openToy(SecretActivity.GOMOKU) },modifier=Modifier.weight(1f).height(48.dp),
-                            colors=ButtonDefaults.textButtonColors(contentColor=SecretWoodInk)) { Text("五子棋",fontSize=17.sp) }
-                        VerticalDivider(Modifier.height(26.dp),color=SecretWoodInk.copy(alpha=.20f))
-                        TextButton(onClick = { openToy(SecretActivity.XIANGQI) },modifier=Modifier.weight(1f).height(48.dp),
-                            colors=ButtonDefaults.textButtonColors(contentColor=SecretWoodInk)) { Text("象棋",fontSize=17.sp) }
-                    }
-                }
+                SecretActivity.BOARD -> Unit
                 SecretActivity.XIANGQI -> SecretXiangqiGame(
                     state = when (xiangqiMode) { XiangqiPlayMode.LAN -> lan.game; XiangqiPlayMode.ONLINE -> online.game; else -> xiangqi },
                     mode = xiangqiMode, paused = xiangqiPaused || gameLoading || !archiveReady, boardWidth = boardSize,
@@ -906,19 +941,19 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
                         else if (xiangqiMode == XiangqiPlayMode.ONLINE) {if(online.roomEnded){choosingOpponent=true;closeNetworkRooms()}else onlineSession.requestRematch()}
                         else { xiangqiHumanSide=xiangqiHumanSide.opponent;xiangqiColorAssigned=true;xiangqiRestoreToken++;xiangqiHistory = emptyList(); xiangqi = XiangqiEngine.newGame(); xiangqiClock = XiangqiThinkingClock.reset(xiangqi, thinkingSeconds)
                             clockTickAt = 0L; clockEpoch++; xiangqiStarted = false; xiangqiPaused = true; resumeAfterClockSetup = false; clockSetupVisible = true; checkpointXiangqi() } },
-                    humanSide=xiangqiHumanSide,onExit={leaveNetworkSafely(::closeToy)},
-                    showRoomEntry=xiangqiRoomEntry,
-                    onHost = { code -> if (foreground) { if (xiangqiMode == XiangqiPlayMode.ONLINE) {onlineSession.host(code=code,playerName=nickname.ifBlank{"棋友"});
-                        if(onlineSession.state.value.sessionActive)xiangqiRoomEntry=false} else lanSession.host(playerName=nickname.ifBlank{"棋友"}) } },
-                    onJoin = { address -> if (foreground) { if (xiangqiMode == XiangqiPlayMode.ONLINE) {onlineSession.join(address,playerName=nickname.ifBlank{"棋友"});
+                    humanSide=xiangqiHumanSide,onExit={leaveNetworkSafely(::returnChessHub)},
+                    showRoomEntry=xiangqiRoomEntry, playerProfile = chessProfile,
+                    onHost = { code -> if (foreground) { if (xiangqiMode == XiangqiPlayMode.ONLINE) {onlineSession.host(code=code,playerName=chessProfile.name,avatarId=chessProfile.avatarId);
+                        if(onlineSession.state.value.sessionActive)xiangqiRoomEntry=false} else lanSession.host(playerName=chessProfile.name,avatarId=chessProfile.avatarId) } },
+                    onJoin = { address -> if (foreground) { if (xiangqiMode == XiangqiPlayMode.ONLINE) {onlineSession.join(address,playerName=chessProfile.name,avatarId=chessProfile.avatarId);
                         if(onlineSession.state.value.sessionActive)xiangqiRoomEntry=false}
                         else { val own=nearbyXiangqi.localId;val peer=nearbyXiangqi.rooms.firstOrNull{it.address==address}
-                            if(own.isNotBlank()&&peer!=null){lanSession.allowNearbyMatching(own);xiangqiDiscovery.stop();lanSession.joinNearby(peer,own,nickname.ifBlank{"棋友"})} } } },
+                            if(own.isNotBlank()&&peer!=null){lanSession.allowNearbyMatching(own);xiangqiDiscovery.stop();lanSession.joinNearby(peer,own,chessProfile.name,chessProfile.avatarId)} } } },
                     nearby = nearbyXiangqi,
-                    onNearbyRetry = { if (foreground) { xiangqiDiscovery.stop();lanSession.allowNearbyMatching(null);lanSession.host(playerName=nickname.ifBlank{"棋友"}) } },
+                    onNearbyRetry = { if (foreground) { xiangqiDiscovery.stop();lanSession.allowNearbyMatching(null);lanSession.host(playerName=chessProfile.name,avatarId=chessProfile.avatarId) } },
                     onMatchResponse={accept->if(xiangqiMode==XiangqiPlayMode.ONLINE)onlineSession.respondToMatch(accept)else lanSession.respondToMatch(accept)},
                     onRematchResponse={accept->if(xiangqiMode==XiangqiPlayMode.ONLINE)onlineSession.respondToRematch(accept)else lanSession.respondToRematch(accept)},
-                    onDisconnect = { if (activeRoomConnected()) leaveNetworkSafely(::closeToy) else { cancelHelp(); closeNetworkRooms() } },
+                    onDisconnect = { leaveNetworkSafely(::returnChessHub) },
                     onPuzzle = { position -> cancelXiangqiSounds();cancelHelp();xiangqiHumanSide=position.turnSide;xiangqiColorAssigned=true;xiangqiRestoreToken++; xiangqiHistory = emptyList(); xiangqi=position; xiangqiClock=XiangqiThinkingClock.reset(position, thinkingSeconds)
                         clockTickAt = 0L; clockEpoch++; xiangqiStarted=true; xiangqiPaused=false; checkpointXiangqi() },
                     helpBusy = helpBusy || gameLoading || !archiveReady, assistedSelection = assistedSelection,
@@ -990,7 +1025,7 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
         val showXiangqiClock = toy == SecretActivity.XIANGQI && !choosingOpponent &&
             (xiangqiMode == XiangqiPlayMode.CPU || xiangqiMode == XiangqiPlayMode.HOTSEAT ||
                 visibleNetwork.connected || visibleNetwork.reconnecting)
-        if (fullGame) SecretGamePage(title, { leaveNetworkSafely(::closeToy) },
+        if (fullGame) SecretGamePage(title, { leaveNetworkSafely(::backFromToy) },
             boardAspect = if (toy == SecretActivity.XIANGQI) 1.13f else 1f,
             reservedHeight = when (toy) {
                 SecretActivity.SNAKE -> 320
@@ -1047,11 +1082,9 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
                 })
         }
         leaveRoomAction?.let { action ->
-            SecretWoodDialog("收起这张棋桌吗？", { leaveRoomAction = null },
-                confirmLabel = "离开棋桌", onConfirm = { leaveRoomAction = null; action() },
-                dismissLabel = "再坐一会儿", compactWidth = 280.dp) {
-                Text("离开会结束当前房间连接；本地棋局会替你留好。", style = MaterialTheme.typography.bodySmall)
-            }
+            SecretWoodDialog("离开这盘棋？", { leaveRoomAction = null },
+                confirmLabel = "回棋友会", onConfirm = { leaveRoomAction = null; action() },
+                dismissLabel = "继续下", compactWidth = 292.dp) { }
         }
         if (fullGame && (gameLoading || !archiveReady)) {
             Box(Modifier.matchParentSize().pointerInput(Unit) {
