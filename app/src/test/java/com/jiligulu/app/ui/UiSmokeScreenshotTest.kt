@@ -1063,7 +1063,7 @@ class UiSmokeScreenshotTest {
             render { com.jiligulu.app.ui.littleworld.WishBookScreen({}, {}) }
             awaitText("去海边的小旅行", substring = true)
             visibleClickLabel("查看去海边的小旅行").performClick()
-            awaitText("已装满 30%")
+            awaitText("30% · 正在攒")
             capture("wishbook-active", dialog = true)
             compose.onNodeWithText("放颗星星").performClick()
             awaitText("给「去海边的小旅行」放颗星星")
@@ -1073,8 +1073,9 @@ class UiSmokeScreenshotTest {
                 shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(16))
                 compose.onAllNodesWithText("给「去海边的小旅行」放颗星星").fetchSemanticsNodes().isEmpty()
             }
-            visibleClickLabel("查看去海边的小旅行").performClick()
-            awaitText("已装满 31%")
+            // Saving a deposit returns to its parent bottle window, rather than the shelf.
+            awaitText("31% · 正在攒")
+            compose.onNodeWithText("放颗星星").assertIsDisplayed()
             assertEquals(31_000L, runBlocking { c.littleWorld.snapshot().wishes.first { it.id == activeId }.savedFen })
             compose.onNodeWithText("收起来").performClick()
             compose.onNodeWithText("纪念").performClick()
