@@ -1,6 +1,10 @@
 package com.jiligulu.app.ui.futurenotes
 
 import android.Manifest
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -33,6 +37,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import com.jiligulu.app.JiliguluApp
 import com.jiligulu.app.data.littleworld.FutureNote
@@ -44,6 +51,8 @@ import com.jiligulu.app.ui.littleworld.ImmersiveDestination
 import com.jiligulu.app.ui.littleworld.ImmersiveDestinationScene
 import com.jiligulu.app.ui.littleworld.StickerPaperArtwork
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.delay
 import java.time.*
 import java.time.format.DateTimeFormatter
 
@@ -274,7 +283,46 @@ fun DueFutureNoteHost(enabled:Boolean,requestedId:String?,onConsumed:()->Unit) {
     val scope=rememberCoroutineScope()
     var current by remember{mutableStateOf<String?>(null)}
     var handled by remember{mutableStateOf(setOf<String>())}
-    val now by produceState(System.currentTimeMillis(),enabled){if(enabled)while(true){value=System.currentTimeMillis();kotlinx.coroutines.delay(30000)}}
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var clockRevision by remember { mutableIntStateOf(0) }
+    DisposableEffect(enabled, lifecycleOwner, context) {
+        var registered = false
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) { clockRevision++ }
+        }
+        val filter = IntentFilter().apply {
+            addAction(Intent.ACTION_TIME_CHANGED)
+            addAction(Intent.ACTION_TIMEZONE_CHANGED)
+            addAction(Intent.ACTION_DATE_CHANGED)
+        }
+        fun unregister() {
+            if (registered) { runCatching { context.unregisterReceiver(receiver) }; registered = false }
+        }
+        fun register() {
+            if (!enabled || registered) return
+            // These are protected system broadcasts. Legacy registration avoids requiring
+            // AndroidX's synthetic receiver permission on pre-33 virtual/test devices.
+            registered = runCatching {
+                if (Build.VERSION.SDK_INT >= 33) context.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+                else @Suppress("DEPRECATION") context.registerReceiver(receiver, filter)
+            }.isSuccess
+        }
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_START -> register()
+                Lifecycle.Event.ON_STOP, Lifecycle.Event.ON_DESTROY -> unregister()
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) register()
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer); unregister() }
+    }
+    val now by produceState(System.currentTimeMillis(), enabled, lifecycleOwner,
+        state.futureNotes, handled, clockRevision) {
+        if (enabled) lifecycleOwner.lifecycle.watchFutureNoteDeadlines(state.futureNotes, handled,
+            publish = { value = it })
+    }
     LaunchedEffect(enabled,requestedId,state.futureNotes,now){
         if(enabled&&current==null){
             current=state.futureNotes.firstOrNull{it.id==requestedId}?.id
@@ -290,6 +338,28 @@ fun DueFutureNoteHost(enabled:Boolean,requestedId:String?,onConsumed:()->Unit) {
         PostPaperDialog(note.title, onDismiss={close(false)}, height=300.dp, dismissLabel="留在信匣", confirmLabel="收好啦", onConfirm={close(true)}){
             Text(note.body,style=MaterialTheme.typography.bodyMedium)
             Text("过去的你，托阿噜送来的 ♡",style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.primary)
+        }
+    }
+}
+
+/** No periodic poll: pause off-screen, refresh on return, then wait for the next future letter. */
+internal suspend fun Lifecycle.watchFutureNoteDeadlines(
+    notes: List<FutureNote>,
+    handled: Set<String>,
+    nowMillis: () -> Long = System::currentTimeMillis,
+    publish: (Long) -> Unit
+) {
+    repeatOnLifecycle(Lifecycle.State.STARTED) {
+        while (true) {
+            val now = nowMillis()
+            publish(now)
+            // Overdue letters are already eligible for the presenter. Waiting on them
+            // again would create a busy loop while their dialog is still open.
+            val next = notes.asSequence().filter {
+                it.readAt == null && it.presentedAt == null && it.id !in handled && it.dueAt > now
+            }.minOfOrNull { it.dueAt } ?: awaitCancellation()
+            val remaining = runCatching { Math.subtractExact(next, now) }.getOrDefault(Long.MAX_VALUE)
+            delay(remaining)
         }
     }
 }
