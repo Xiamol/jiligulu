@@ -56,6 +56,9 @@ class UserPrefs(private val context: Context) {
         private val KEY_NICKNAME = stringPreferencesKey("nickname")
         private val KEY_NAME_SUFFIX = stringPreferencesKey("name_suffix")
         private val KEY_API_KEY = stringPreferencesKey("api_key_override")
+        private val KEY_COMPANION_MEMORY_ENABLED = booleanPreferencesKey("companion_memory_enabled")
+        private val KEY_COMPANION_MEMORY_FACTS = stringPreferencesKey("companion_memory_facts")
+        private val KEY_COMPANION_MEMORY_REVISION = longPreferencesKey("companion_memory_revision")
         private val KEY_THEME_MODE = stringPreferencesKey("theme_mode")
         private val KEY_LITTLE_WORLD_SKIN = stringPreferencesKey("little_world_skin")
         private val KEY_SECRET_STAR_BEST = intPreferencesKey("secret_star_best")
@@ -171,6 +174,68 @@ class UserPrefs(private val context: Context) {
 
     /** 用户自定义 Key，空串表示用内置默认 */
     val apiKeyOverride: Flow<String> = context.dataStore.data.map { it[KEY_API_KEY] ?: "" }
+
+    val companionMemory: Flow<com.jiligulu.app.domain.persona.CompanionMemoryState> = context.dataStore.data.map {
+        com.jiligulu.app.domain.persona.CompanionMemoryState(
+            enabled = it[KEY_COMPANION_MEMORY_ENABLED] ?: true,
+            revision = it[KEY_COMPANION_MEMORY_REVISION] ?: 0,
+            facts = com.jiligulu.app.domain.persona.CompanionMemoryPolicy.decode(it[KEY_COMPANION_MEMORY_FACTS].orEmpty()))
+    }.distinctUntilChanged()
+
+    /** A reply from an older epoch cannot resurrect facts cleared/corrected/disabled by the user. */
+    suspend fun rememberCompanionFactsIfCurrent(expectedRevision: Long,
+        facts: List<com.jiligulu.app.domain.persona.CompanionFact>): Boolean {
+        if (facts.isEmpty()) return false
+        var applied = false
+        context.dataStore.edit { prefs ->
+            val enabled = prefs[KEY_COMPANION_MEMORY_ENABLED] ?: true
+            val revision = prefs[KEY_COMPANION_MEMORY_REVISION] ?: 0
+            if (enabled && revision == expectedRevision) {
+                val existing = com.jiligulu.app.domain.persona.CompanionMemoryPolicy.decode(prefs[KEY_COMPANION_MEMORY_FACTS].orEmpty())
+                val updated = com.jiligulu.app.domain.persona.CompanionMemoryPolicy.merge(existing, facts)
+                prefs[KEY_COMPANION_MEMORY_FACTS] = com.jiligulu.app.domain.persona.CompanionMemoryPolicy.encode(updated)
+                prefs[KEY_COMPANION_MEMORY_REVISION] = revision + 1
+                applied = true
+            }
+        }
+        return applied
+    }
+
+    suspend fun setCompanionMemoryEnabled(enabled: Boolean) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_COMPANION_MEMORY_ENABLED] = enabled
+            prefs[KEY_COMPANION_MEMORY_REVISION] = (prefs[KEY_COMPANION_MEMORY_REVISION] ?: 0) + 1
+        }
+    }
+
+    suspend fun clearCompanionMemories() {
+        context.dataStore.edit { prefs ->
+            prefs.remove(KEY_COMPANION_MEMORY_FACTS)
+            prefs[KEY_COMPANION_MEMORY_REVISION] = (prefs[KEY_COMPANION_MEMORY_REVISION] ?: 0) + 1
+        }
+    }
+
+    suspend fun removeCompanionMemory(id: String) {
+        context.dataStore.edit { prefs ->
+            val existing = com.jiligulu.app.domain.persona.CompanionMemoryPolicy.decode(prefs[KEY_COMPANION_MEMORY_FACTS].orEmpty())
+            prefs[KEY_COMPANION_MEMORY_FACTS] = com.jiligulu.app.domain.persona.CompanionMemoryPolicy.encode(existing.filter { it.id != id })
+            prefs[KEY_COMPANION_MEMORY_REVISION] = (prefs[KEY_COMPANION_MEMORY_REVISION] ?: 0) + 1
+        }
+    }
+
+    suspend fun correctCompanionMemory(id: String, value: String) {
+        val text = value.trim()
+        require(com.jiligulu.app.domain.persona.CompanionMemoryPolicy.validValue(text)) { "请写一条简短的小记忆" }
+        context.dataStore.edit { prefs ->
+            val existing = com.jiligulu.app.domain.persona.CompanionMemoryPolicy.decode(prefs[KEY_COMPANION_MEMORY_FACTS].orEmpty())
+            val old = existing.firstOrNull { it.id == id } ?: return@edit
+            val updated = old.copy(id = com.jiligulu.app.domain.persona.CompanionMemoryPolicy.id(old.kind, text), value = text,
+                evidence = "", updatedAt = System.currentTimeMillis(), editedByUser = true)
+            prefs[KEY_COMPANION_MEMORY_FACTS] = com.jiligulu.app.domain.persona.CompanionMemoryPolicy.encode(
+                com.jiligulu.app.domain.persona.CompanionMemoryPolicy.merge(existing.filter { it.id != id }, listOf(updated)))
+            prefs[KEY_COMPANION_MEMORY_REVISION] = (prefs[KEY_COMPANION_MEMORY_REVISION] ?: 0) + 1
+        }
+    }
 
     /** 主题模式：system / light / dark，默认跟随系统 */
     val themeMode: Flow<String> = context.dataStore.data.map { it[KEY_THEME_MODE] ?: THEME_SYSTEM }

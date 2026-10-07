@@ -208,7 +208,7 @@ fun SettingsScreen(
                     .testTag("settings-list")
                     .padding(horizontal = 16.dp, vertical = 8.dp),
                 state = settingsScroll,
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 state.error?.let { error ->
                     Card(
@@ -222,15 +222,19 @@ fun SettingsScreen(
                 }
 
                 if (state.isLoaded) {
-                    SettingsCompanionHeader(state.nickname, state.suffix)
+                    if (settingsTab == "日常") SettingsCompanionHeader(state.nickname, state.suffix)
 
-                    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                    if (settingsTab == "日常") SettingsSection("你的称呼", "让阿噜用你喜欢的方式叫你", "💌") {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    if (settingsTab == "日常") SettingsSection("你的称呼", "💌") {
                         ProfileSettingRow("名字",state.nickname,editable) { edit(ProfileSettingField.NAME,state.nickname) }
                         ProfileSettingRow("称呼后缀",state.suffix,editable) { edit(ProfileSettingField.SUFFIX,state.suffix) }
                     }
 
-                    if (settingsTab == "日常") SettingsSection("外观", "给小账本换个喜欢的模样", "🎨") {
+                    if (settingsTab == "日常") SettingsSection("阿噜的记性", "🌱") {
+                        CompanionMemorySettings(enabled = editable)
+                    }
+
+                    if (settingsTab == "日常") SettingsSection("外观", "🎨") {
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             listOf(
                                 UserPrefs.THEME_SYSTEM to "跟随系统",
@@ -246,6 +250,7 @@ fun SettingsScreen(
                             }
                         }
                         LittleWorldSkinSettings(enabled = editable)
+                        DisplayPerformanceSettings(enabled = editable)
                         Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
                             Text("按键与棋子音效",Modifier.weight(1f),style=MaterialTheme.typography.bodyMedium)
                             TextButton(onClick={showSoundSamples=true},enabled=feedbackSound) {Text("试听",style=MaterialTheme.typography.labelSmall)}
@@ -256,19 +261,14 @@ fun SettingsScreen(
                         }
                     }
 
-                    if (settingsTab == "提醒") SettingsSection("喝水提醒", "工作再忙，也记得照顾自己", "💧") {
+                    if (settingsTab == "提醒") SettingsSection("喝水提醒", "💧") {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(16.dp)
                         ) {
                             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Text("让阿噜提醒我", style = MaterialTheme.typography.bodyLarge)
-                                Text(
-                                    "提醒设置会自动保存",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                                Text("让阿噜提醒我", style = MaterialTheme.typography.bodyMedium)
                             }
                             Switch(
                                 checked = state.waterEnabled,
@@ -291,25 +291,19 @@ fun SettingsScreen(
                             TimePickerField(
                                 label = "提醒间隔",
                                 value = intervalText(intervalHours, intervalMinutes),
-                                supporting = "点右边选个时长，1 分钟到 12 小时 59 分都行",
+                                supporting = "1 分钟～12 小时 59 分钟",
                                 enabled = editable,
                                 onClick = uiTap { showIntervalPicker = true }
                             )
                             Text("免打扰时段", style = MaterialTheme.typography.labelLarge)
-                            TimePickerField(
-                                label = "开始",
-                                value = state.quietStartText.ifBlank { "23:00" },
-                                enabled = editable,
-                                onClick = uiTap { showQuietStart = true }
-                            )
-                            TimePickerField(
-                                label = "结束",
-                                value = state.quietEndText.ifBlank { "08:00" },
-                                enabled = editable,
-                                onClick = uiTap { showQuietEnd = true }
-                            )
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                TimePickerField(label = "开始", value = state.quietStartText.ifBlank { "23:00" },
+                                    modifier = Modifier.weight(1f), enabled = editable, onClick = uiTap { showQuietStart = true })
+                                TimePickerField(label = "结束", value = state.quietEndText.ifBlank { "08:00" },
+                                    modifier = Modifier.weight(1f), enabled = editable, onClick = uiTap { showQuietEnd = true })
+                            }
                             Text(
-                                "支持跨午夜；开始和结束相同则不免打扰。喝水时间到了，阿噜会提醒你；账本页也能点水杯开始。",
+                                "支持跨午夜；起止相同则关闭免打扰。改动自动保存。",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -317,9 +311,9 @@ fun SettingsScreen(
                         }
                     }
 
-                    if (settingsTab == "提醒") SettingsSection("悬浮记账", "阿噜陪你跨应用记一笔", "📷") { com.jiligulu.app.ui.capture.FloatingCaptureSettings() }
+                    if (settingsTab == "提醒") SettingsSection("悬浮记账", "📷") { com.jiligulu.app.ui.capture.FloatingCaptureSettings() }
 
-                    if (settingsTab == "数据") SettingsSection("AI 服务", "让每一句生活，都有回应", "✨") {
+                    if (settingsTab == "数据") SettingsSection("AI 服务", "✨") {
                         AiUsageSettings()
                         ProfileSettingRow("自定义 API Key",if(state.apiKey.isBlank()) "使用内置配置" else "已设置 · 点击修改",editable) {
                             edit(ProfileSettingField.API_KEY,state.apiKey)
@@ -331,12 +325,12 @@ fun SettingsScreen(
                         )
                     }
 
-                    if (settingsTab == "数据") SettingsSection("数据管理", "删掉的东西，先放在手边", "🗂️") {
+                    if (settingsTab == "数据") SettingsSection("数据管理", "🗂️") {
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                Text("回收站", style = MaterialTheme.typography.bodyLarge)
+                                Text("回收站", style = MaterialTheme.typography.bodyMedium)
                                 Text(
-                                    "删掉的账单会先收在这儿，后悔了能捞回来",
+                                    "已删账单与草稿，可恢复",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -348,7 +342,7 @@ fun SettingsScreen(
                         ConversationSettingsCard(vm)
                     }
 
-                    if (settingsTab == "关于") SettingsSection("关于叽里咕噜", "小小的账本，大大的生活", "🌱") {
+                    if (settingsTab == "关于") SettingsSection("关于叽里咕噜", "🌱") {
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             Text("叽里咕噜", style = MaterialTheme.typography.titleLarge.copy(fontFamily = GuluBrandFont, fontWeight = FontWeight.Normal),
@@ -385,7 +379,7 @@ fun SettingsScreen(
                             TextButton(onClick = uiTap { showFontLicense = true }) { Text("字体与开源许可") }
                         }
                     }
-                    if (settingsTab == "关于") SettingsSection("版本与更新", "查看版本、检查新消息", "🎁") { UpdateSettingsCard(checkOnOpen = checkUpdatesOnOpen) }
+                    if (settingsTab == "关于") SettingsSection("版本与更新", "🎁") { UpdateSettingsCard(checkOnOpen = checkUpdatesOnOpen) }
                     }
                     Text("慢慢记，日子也会慢慢发光 ♡", modifier = Modifier.align(Alignment.CenterHorizontally).padding(bottom = 8.dp),
                         style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -496,14 +490,13 @@ private fun SettingsCompanionHeader(nickname: String, suffix: String) {
                     Text("再听一句悄悄话 ♡", style = MaterialTheme.typography.labelSmall)
                 }
             }
-            GuluMascot(modifier = Modifier.padding(start=8.dp).size(76.dp), onClick = uiTap(nextNote))
+            GuluMascot(modifier = Modifier.padding(start=8.dp).size(64.dp), onClick = uiTap(nextNote))
         }
 }
 
 @Composable
 private fun SettingsSection(
     title: String,
-    description: String,
     icon: String,
     content: @Composable ColumnScope.() -> Unit
 ) {
@@ -512,7 +505,6 @@ private fun SettingsSection(
             Text(icon, style = MaterialTheme.typography.titleMedium)
             Text(title, style = MaterialTheme.typography.titleSmall)
         }
-        Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         content()
     }
 }

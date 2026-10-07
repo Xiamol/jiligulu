@@ -98,6 +98,9 @@ data class AiLedgerQuery(
 )
 
 @Serializable
+data class AiMemoryUpdate(val kind: String = "", val value: String = "", val evidence: String = "")
+
+@Serializable
 data class AiParseResult(
     val bills: List<AiBillDraft> = emptyList(),
     val reply: String = "",
@@ -110,6 +113,8 @@ data class AiParseResult(
     /** App settings / trash operations only create a local confirmation card. */
     @SerialName("app_action") val appAction: AiAppAction? = null,
     @SerialName("ledger_query") val ledgerQuery: AiLedgerQuery? = null,
+    @SerialName("memory_updates") @Serializable(with = AiMemoryUpdatesSerializer::class)
+    val memoryUpdates: List<AiMemoryUpdate> = emptyList(),
     /** Local provenance only. The model cannot grant itself permission to edit arbitrary IDs. */
     @kotlinx.serialization.Transient val retrievedBillIds: Set<Long> = emptySet(),
     @kotlinx.serialization.Transient val ledgerLookupCompleted: Boolean = false

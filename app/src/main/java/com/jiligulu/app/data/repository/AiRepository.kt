@@ -24,6 +24,9 @@ import com.jiligulu.app.domain.chat.ChatContext
 import com.jiligulu.app.domain.chat.ChatContextBuilder
 import com.jiligulu.app.domain.chat.PromptRenderer
 import com.jiligulu.app.domain.chat.LedgerLookup
+import com.jiligulu.app.domain.persona.CompanionFact
+import com.jiligulu.app.domain.persona.CompanionMemoryState
+import com.jiligulu.app.domain.persona.CompanionMemoryPolicy
 import com.jiligulu.app.domain.time.BillTimeResolver
 import com.jiligulu.app.ui.chat.CommandCardCodec
 import com.jiligulu.app.ui.chat.CommandCardPayload
@@ -36,6 +39,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.first
 import java.time.Instant
 import java.time.ZoneId
@@ -104,7 +108,10 @@ class AiRepository(
         else WaterReminderScheduler.restore(context)
     },
     private val clientFactory: (String) -> DeepSeekClient = { DeepSeekClient(it) },
-    private val ledgerLookupRepository: LedgerLookupRepository? = null
+    private val ledgerLookupRepository: LedgerLookupRepository? = null,
+    private val rememberCompanionFacts: suspend (Long, List<CompanionFact>) -> Unit = { revision, facts ->
+        userPrefs.rememberCompanionFactsIfCurrent(revision, facts)
+    }
 ) {
     /** R9：逐字不变的固定 system 段；版本随 App 走，解析契约全在这一个资源里。 */
     private val systemPromptTemplate: String by lazy {
@@ -158,6 +165,26 @@ class AiRepository(
                     com.jiligulu.app.core.ai.ImageCategoryClassifier.apply(fallback, suggestions, categories)
             }
         }.onFailure { if (it is CancellationException) throw it }
+        // A single snapshot both renders current memory and protects the eventual write from settings changes.
+        val memory = try { userPrefs.companionMemory.first() }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { CompanionMemoryState(enabled = false) }
+        suspend fun complete(result: Result<AiParseResult>, earlierUpdates: List<com.jiligulu.app.core.ai.AiMemoryUpdate> = emptyList()): Result<AiParseResult> {
+            val parsed = result.getOrNull() ?: return result
+            if (memory.enabled) {
+                val facts = CompanionMemoryPolicy.accepted(input, earlierUpdates + parsed.memoryUpdates, requestMillis)
+                if (facts.isNotEmpty()) try {
+                    kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                    rememberCompanionFacts(memory.revision, facts)
+                } catch (_: CancellationException) {
+                    // Propagate a real cancelled chat, but an isolated optional-store cancellation
+                    // must not discard a successfully parsed bill while the chat is still active.
+                    kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                }
+                catch (_: Exception) { /* Optional memory cannot turn a valid bill draft into an error. */ }
+            }
+            return Result.success(parsed.copy(memoryUpdates = emptyList()))
+        }
         val categories = categoryRepository.getAll()
         val pending = PromptRenderer.pendingOf(chatHistoryRepository.latestPending())
         val chatContext = buildContext(categories, requestMillis, zone)
@@ -185,17 +212,17 @@ class AiRepository(
             appSettings = appSettings
         )
         val system = renderer.renderSystem()
-        val contextBlock = renderer.renderContext(input, includeStableContext = false)
+        val contextBlock = renderer.renderContext(input, includeStableContext = false) + "\n\n" + memory.renderForAi()
         val client = clientFactory(effectiveApiKey())
         val history = recentTurns(requestMillis)
         val stableContext = renderer.renderStableContext()
         val first = client.parseBill(system, contextBlock, history = history, stableContext = stableContext)
         val initial = first.getOrElse { return first }
-        val query = initial.ledgerQuery ?: return first
+        val query = initial.ledgerQuery ?: return complete(first)
         // Only a read is possible here. Do not mix a lookup with speculative writes/settings.
         if (initial.bills.isNotEmpty() || initial.appAction != null) return Result.success(AiParseResult(
             reply = "阿噜先查清账本再整理，请再说一次要查哪一天或什么名目～", ledgerLookupCompleted = true))
-        return try {
+        val queried = try {
             val lookup = LedgerLookup.from(query, zone)
             val repository = ledgerLookupRepository ?: return Result.success(AiParseResult(
                 reply = "这次没能打开账本检索，阿噜先不拿最近几天的记录代替～", ledgerLookupCompleted = true))
@@ -220,6 +247,7 @@ class AiRepository(
             Result.success(AiParseResult(reply = "检索的日期或条件还不明确，请告诉阿噜具体哪一天或什么名目～", ledgerLookupCompleted = true))
         } catch (failure: Exception) { Result.success(AiParseResult(
             reply = "这次没能完成账本检索，阿噜先不拿最近的记录代替，请再试一次～", ledgerLookupCompleted = true)) }
+        return complete(queried, initial.memoryUpdates)
     }
 
     /**
