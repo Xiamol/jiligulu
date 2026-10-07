@@ -15,6 +15,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.window.Dialog
@@ -46,15 +47,17 @@ fun GuluDialog(
             else Modifier.fillMaxWidth()
         LedgerCard(width.heightIn(max = (LocalConfiguration.current.screenHeightDp * if (compact) .62f else .82f).dp),
             contentPadding = if(dense || compact) 12.dp else 16.dp) {
-            Text(title, modifier = Modifier.padding(bottom = if(dense) 6.dp else 10.dp),
+            Text(title, modifier = Modifier.fillMaxWidth().padding(bottom = if(dense) 10.dp else 12.dp),
                 style = (if(dense) MaterialTheme.typography.titleMedium else MaterialTheme.typography.titleLarge).copy(fontFamily = GuluBrandFont, fontWeight = FontWeight.Normal),
-                color = MaterialTheme.colorScheme.primary)
+                textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.primary)
             val bodyScroll = rememberScrollState()
             SpringScrollColumn(Modifier.weight(1f, fill = false), state = bodyScroll,
                 verticalArrangement = Arrangement.spacedBy(if(dense) 6.dp else 10.dp), content = content)
-            Row(Modifier.fillMaxWidth().padding(top = if(dense) 6.dp else 8.dp), horizontalArrangement = Arrangement.End) {
-                dismissLabel?.let { TextButton(onClick = uiTap(dismissCue, onDismiss), enabled = !busy) { Text(it) } }
-                TextButton(onClick = uiTap(confirmCue, onConfirm), enabled = !busy && confirmEnabled) {
+            Row(Modifier.fillMaxWidth().padding(top = if(dense) 8.dp else 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                dismissLabel?.let { TextButton(onClick = uiTap(dismissCue, onDismiss), enabled = !busy,
+                    modifier = Modifier.weight(1f)) { Text(it, textAlign = TextAlign.Center) } }
+                TextButton(onClick = uiTap(confirmCue, onConfirm), enabled = !busy && confirmEnabled,
+                    modifier = Modifier.weight(1f)) {
                     Text(if (busy) "正在处理…" else confirmLabel)
                 }
             }

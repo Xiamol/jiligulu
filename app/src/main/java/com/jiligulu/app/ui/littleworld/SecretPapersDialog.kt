@@ -17,6 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -58,21 +59,27 @@ fun SecretPapersDialog(notes: List<String>, onDismiss: () -> Unit) {
             catch(_: Exception) { error = "还没收好，再试一次吧。" }
             finally { busy = false } }
     }
-    val height = minOf(296.dp, (LocalConfiguration.current.screenHeightDp * .72f).dp)
-    Dialog(onDismissRequest = { if(!busy) onDismiss() }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+    val height = minOf(330.dp, (LocalConfiguration.current.screenHeightDp * .72f).dp)
+    Dialog(onDismissRequest = { if(!busy) { if (mode != "read") mode = "read" else onDismiss() } },
+        properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnBackPress = !busy, dismissOnClickOutside = !busy)) {
         com.jiligulu.app.ui.capture.DialogGlassBackdrop()
-        SecretWoodSurface(Modifier.widthIn(max = 280.dp).fillMaxWidth().height(height),contentPadding=PaddingValues(14.dp)) {
-            Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
-                if(mode != "read") IconButton(onClick = uiTap { mode = "read" }, modifier = Modifier.size(40.dp)) {
-                    Icon(Icons.Outlined.ArrowBack, "返回纸条", Modifier.size(18.dp)) }
-                Text(if(mode == "write") "写给阿噜" else if(mode == "favorites") "喜欢的纸条" else "秘密纸条",
-                    Modifier.weight(1f).padding(start=50.dp), fontSize = 16.sp,
-                    maxLines = 1, color = SecretWoodInk)
+        SecretWoodSurface(Modifier.widthIn(max = 280.dp).fillMaxWidth().height(height),
+            contentPadding = PaddingValues(start = 24.dp, end = 24.dp, top = 40.dp, bottom = 22.dp)) {
+            Text(if(mode == "write") "写给阿噜" else if(mode == "favorites") "喜欢的纸条" else "秘密纸条",
+                Modifier.fillMaxWidth().height(28.dp), textAlign = TextAlign.Center, fontSize = 17.sp,
+                maxLines = 1, color = SecretWoodInk)
+            Row(Modifier.fillMaxWidth().height(38.dp), horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically) {
+                if(mode != "read") TextButton(onClick = uiTap { mode = "read" }, modifier = Modifier.weight(1f)) {
+                    Icon(Icons.Outlined.ArrowBack, null, Modifier.size(16.dp))
+                    Text("返回", fontSize = 12.sp, modifier = Modifier.padding(start = 4.dp)) }
                 if(mode == "read") {
-                    IconButton(onClick = uiTap { mode = "favorites" }, modifier = Modifier.size(40.dp)) {
-                        Icon(Icons.Outlined.FavoriteBorder, "收藏夹", Modifier.size(19.dp)) }
-                    IconButton(onClick = uiTap { mode = "write" }, modifier = Modifier.size(40.dp)) {
-                        Icon(Icons.Outlined.Create, "写纸条", Modifier.size(19.dp)) }
+                    TextButton(onClick = uiTap { mode = "favorites" }, modifier = Modifier.weight(1f)) {
+                        Icon(Icons.Outlined.FavoriteBorder, null, Modifier.size(16.dp))
+                        Text("收藏夹", fontSize = 12.sp, modifier = Modifier.padding(start = 4.dp)) }
+                    TextButton(onClick = uiTap { mode = "write" }, modifier = Modifier.weight(1f)) {
+                        Icon(Icons.Outlined.Create, null, Modifier.size(16.dp))
+                        Text("写一张", fontSize = 12.sp, modifier = Modifier.padding(start = 4.dp)) }
                 }
                 IconButton(onClick = uiTap(onDismiss), enabled = !busy, modifier = Modifier.size(40.dp)) {
                     Icon(Icons.Outlined.Close, "收起", Modifier.size(18.dp)) }
@@ -106,7 +113,9 @@ fun SecretPapersDialog(notes: List<String>, onDismiss: () -> Unit) {
                         color = MaterialTheme.colorScheme.onSurface)
                 }
             }
-            error?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = 11.sp, maxLines = 1) }
+            Box(Modifier.fillMaxWidth().height(18.dp), contentAlignment = Alignment.Center) {
+                error?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = 11.sp, maxLines = 1) }
+            }
             Row(Modifier.fillMaxWidth().height(48.dp), horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically) {
                 if(mode == "write") {
@@ -121,13 +130,13 @@ fun SecretPapersDialog(notes: List<String>, onDismiss: () -> Unit) {
                     TextButton(onClick = uiTap { mode = "write" }, modifier = Modifier.width(90.dp)) { Text("写一张") }
                 } else {
                     TextButton(onClick = uiTap { if(papers.isNotEmpty()) index = (index - 1 + papers.size) % papers.size },
-                        modifier = Modifier.width(72.dp),colors=ButtonDefaults.textButtonColors(contentColor=SecretWoodInk)) { Text("上一张", fontSize = 12.sp) }
+                        modifier = Modifier.weight(1f),colors=ButtonDefaults.textButtonColors(contentColor=SecretWoodInk)) { Text("上一张", fontSize = 12.sp) }
                     IconButton(onClick = uiTap { paper?.let { write { repository.toggleSecretPaper(it) } } },
-                        enabled = paper != null && !busy, modifier = Modifier.size(44.dp)) {
+                        enabled = paper != null && !busy, modifier = Modifier.width(44.dp).height(44.dp)) {
                         Icon(if(state.favoriteSecretPapers.any { it.id == paper?.id }) Icons.Outlined.Favorite else Icons.Outlined.FavoriteBorder,
                             "收藏纸条", Modifier.size(21.dp), tint = SecretWoodInk) }
                     TextButton(onClick = uiTap { if(papers.isNotEmpty()) index = (index + 1) % papers.size },
-                        modifier = Modifier.width(72.dp),colors=ButtonDefaults.textButtonColors(contentColor=SecretWoodInk)) { Text("下一张", fontSize = 12.sp) }
+                        modifier = Modifier.weight(1f),colors=ButtonDefaults.textButtonColors(contentColor=SecretWoodInk)) { Text("下一张", fontSize = 12.sp) }
                 }
             }
         }

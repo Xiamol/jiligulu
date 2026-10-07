@@ -102,7 +102,7 @@ fun MemoriesScreen(onBack: () -> Unit) {
         title = if(drawer == 0) "夹好的生活明信片" else "一张张生活照片",
         subtitle = if(drawer == 0) "${state.cards.size} 张，翻开就能重新遇见那一天。" else "${photos.size} 张，和记过的账一起收在这里。",
         onDismiss = { drawer = -1 },
-        actions = { TextButton(onClick = uiTap(com.jiligulu.app.core.audio.UiCue.PAPER) { drawer = 2 }) { Text("做周明信片") } }
+        actions = { TextButton(onClick = uiTap(com.jiligulu.app.core.audio.UiCue.PAPER) { drawer = 2 }, modifier = Modifier.weight(1f)) { Text("做周明信片") } }
     ) {
         if (drawer == 0) {
             if (state.cards.isEmpty()) item {
@@ -137,9 +137,9 @@ fun MemoriesScreen(onBack: () -> Unit) {
             }
         }
     }
-    if (drawer == 2) GuluDialog("这一周的生活", onDismiss = { drawer = -1 }, compact = true, dense = true,
+    if (drawer == 2 && !makeWeek) GuluDialog("这一周的生活", onDismiss = { drawer = -1 }, compact = true, dense = true,
         compactWidth = 280.dp, confirmLabel = "做张明信片", confirmEnabled = weekRows != null && categoryRows != null,
-        onConfirm = { makeWeek = true; drawer = -1 }) {
+        onConfirm = { makeWeek = true }) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             TextButton(onClick = uiTap(com.jiligulu.app.core.audio.UiCue.PAGE_TURN) { offset-- }) { Text("‹") }
             Text(dates, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center)
@@ -155,8 +155,8 @@ fun MemoriesScreen(onBack: () -> Unit) {
     if (makeWeek) MemoryPosterDialog(PosterData("${if (offset == -1) "上周" else if (offset == 0) "这周" else "那一周"}的生活小记", "认真过日子的证据，阿噜替你夹好啦。", dateMillis = range.first, week = summary), { makeWeek = false })
     selectedBill?.let { BillDetailSheet(it, { selectedBill = null }) }
     selectedCard?.let { ArchivedCardDialog(it, { selectedCard = null }) }
-    selectedPhoto?.let { photo -> GuluDialog(photo.detail.ifBlank { "这一页生活" },{selectedPhoto=null},compact=true,dense=true,
-        compactWidth=300.dp,confirmLabel="查看账单",onConfirm={selectedPhoto=null;selectedBill=photo.id}) {
+    selectedPhoto?.takeIf { selectedBill == null }?.let { photo -> GuluDialog(photo.detail.ifBlank { "这一页生活" },{selectedPhoto=null},compact=true,dense=true,
+        compactWidth=300.dp,confirmLabel="查看账单",onConfirm={selectedBill=photo.id}) {
         MemoryPhoto(photo.photoUri.orEmpty(),Modifier.fillMaxWidth().height(240.dp),androidx.compose.ui.layout.ContentScale.Fit)
         if(photo.note.isNotBlank()) Text(photo.note,style=MaterialTheme.typography.bodySmall)
         Text(Formatters.dayLabel(photo.timestamp),style=MaterialTheme.typography.labelSmall)

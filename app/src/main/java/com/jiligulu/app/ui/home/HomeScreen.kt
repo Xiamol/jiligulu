@@ -123,7 +123,7 @@ fun HomeScreen(
         }
     }
     androidx.compose.runtime.LaunchedEffect(refreshMessage) { if (refreshMessage != null) { kotlinx.coroutines.delay(2500); refreshMessage = null } }
-    selectedBillId?.let { BillDetailSheet(it) { selectedBillId = null } }
+    if (active) selectedBillId?.let { BillDetailSheet(it) { selectedBillId = null } }
 }
 
 /** Pure rendering makes previews independent of the database and keeps navigation in the route. */
@@ -146,7 +146,9 @@ internal fun HomeContent(
     onBillClick: (Long) -> Unit
 ) {
     var showStickers by rememberSaveable { mutableStateOf(false) }
-    if (showStickers) StickerDrawer(onDismiss = { showStickers = false }, onPick = { showStickers = false; onPickSticker(it) })
+    // Picking opens a child editor. Keep the wall on this back-stack entry so cancelling
+    // or saving returns to it, while the active route prevents it covering the editor.
+    if (active && showStickers) StickerDrawer(onDismiss = { showStickers = false }, onPick = onPickSticker)
     var typeFilter by rememberSaveable { mutableIntStateOf(0) }
     var sort by rememberSaveable { mutableIntStateOf(0) }
     val outer = androidx.compose.foundation.lazy.rememberLazyListState()

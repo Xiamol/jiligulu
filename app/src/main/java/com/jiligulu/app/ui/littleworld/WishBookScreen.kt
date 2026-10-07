@@ -48,7 +48,7 @@ import java.math.BigDecimal
 import java.math.RoundingMode
 
 @Composable
-fun WishBookScreen(onBack: () -> Unit, onRecordWaiting: (Sticker) -> Unit) {
+fun WishBookScreen(onBack: () -> Unit, onRecordWaiting: (Sticker) -> Unit, routeActive: Boolean = true) {
     val app = LocalContext.current.applicationContext as JiliguluApp
     val repository = app.container.littleWorld
     val state by rememberPageData(repository.state, LittleWorldState())
@@ -87,67 +87,77 @@ fun WishBookScreen(onBack: () -> Unit, onRecordWaiting: (Sticker) -> Unit) {
         }
     }
 
-    BoxWithConstraints(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).statusBarsPadding().navigationBarsPadding()) {
+    SceneSystemBars(lightIcons = false)
+    BoxWithConstraints(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         val roomHeight=maxHeight
-        SpringLazyColumn(Modifier.fillMaxSize(),contentPadding=PaddingValues(bottom=0.dp),
-            verticalArrangement=Arrangement.spacedBy(10.dp)) {
-            item {
                 val bottles=when(tab) {
                     0->active.map {ShelfWish(it.id,it.title,wishProgress(it),"${wishPercent(it)}%")}
                     1->waiting.map {ShelfWish(it.id,it.title,0f,"先留着喜欢")}
                     else->completed.map {ShelfWish(it.id,it.title,1f,"实现啦")}
                 }
                 WishShelfStage(bottles,tab,onBack,{if(tab==1) createWaiting=true else createWish=true},
-                    {tab=it;selected=null;selectedWaiting=null;selectedMemory=null},minHeight=roomHeight) { id ->
+                    {tab=it;selected=null;selectedWaiting=null;selectedMemory=null},minHeight=roomHeight,
+                    onArchived = if (tab == 1 && state.waiting.any { it.archived }) ({ showArchived = true }) else null) { id ->
                     when(tab) {0->selected=id;1->selectedWaiting=id;else->selectedMemory=id}
                 }
-            }
-            if(tab==1) {
-                val archived=state.waiting.filter {it.archived}
-                if(archived.isNotEmpty()) item { TextButton(onClick=uiTap(UiCue.TOGGLE) {showArchived=!showArchived}) {Text(if(showArchived) "收起已经放下的愿望" else "看看已经放下的愿望") } }
-                if(showArchived) items(archived,key={"archived-${it.id}"}) {wish->
+    }
+    if (routeActive) {
+    if (showArchived) GuluDialog("放下的愿望", { showArchived = false }, compact = true, dense = true, compactWidth = 280.dp) {
+        state.waiting.filter { it.archived }.forEach { wish ->
                     Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
                         Text(wish.title,Modifier.weight(1f),style=MaterialTheme.typography.bodySmall)
                         TextButton(onClick=uiTap {perform {repository.saveWaiting(wish.copy(archived=false))}}){Text("放回候场")}
                     }
-                }
-            }
         }
     }
-    current?.let {wish->GuluDialog(wish.title,{selected=null},compact=true,dense=true,compactWidth=280.dp,busy=busy,
-        confirmLabel="放颗星星",onConfirm={selected=null;depositWish=wish.id},dismissLabel="收起来") {
-        Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(14.dp)) {
-            StarWishJar(wishProgress(wish),Modifier.width(84.dp))
+    current?.takeIf { editWish == null && depositWish == null && recordsWish == null }?.let {wish->GuluDialog(wish.title,{selected=null},compact=true,dense=true,compactWidth=280.dp,busy=busy,
+        confirmLabel="放颗星星",onConfirm={depositWish=wish.id},dismissLabel="收起来") {
+        Row(Modifier.fillMaxWidth(), verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(12.dp)) {
+            StarWishJar(wishProgress(wish),Modifier.width(66.dp))
             Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(5.dp)) {
-                Text("已装满 ${wishPercent(wish)}%",color=MaterialTheme.colorScheme.primary)
-                Text("¥${Formatters.fenToYuanText(wish.savedFen)}",style=MaterialTheme.typography.titleMedium)
+                Text("${wishPercent(wish)}% · 正在攒",color=MaterialTheme.colorScheme.primary, style=MaterialTheme.typography.labelMedium)
+                Text("¥${Formatters.fenToYuanText(wish.savedFen)}",style=MaterialTheme.typography.titleLarge)
                 Text("目标 ¥${Formatters.fenToYuanText(wish.targetFen)}",style=MaterialTheme.typography.bodySmall)
                 Text("还差 ¥${Formatters.fenToYuanText((wish.targetFen-wish.savedFen).coerceAtLeast(0))}",style=MaterialTheme.typography.bodySmall)
             }
         }
         if(wish.caption.isNotBlank()) Text(wish.caption,style=MaterialTheme.typography.bodySmall)
         Row {
-            TextButton(onClick=uiTap {selected=null;editWish=wish},enabled=!busy){Text("编辑愿望")}
-            TextButton(onClick=uiTap(UiCue.PAPER) {selected=null;recordsWish=wish.id},enabled=!busy){Text("攒星记录")}
+            TextButton(onClick=uiTap {editWish=wish},enabled=!busy, modifier=Modifier.weight(1f)){Text("编辑")}
+            TextButton(onClick=uiTap(UiCue.PAPER) {recordsWish=wish.id},enabled=!busy, modifier=Modifier.weight(1f)){Text("攒星记录")}
         }
     } }
-    selectedWaiting?.let {id->waiting.firstOrNull {it.id==id}?.let {wish->GuluDialog(wish.title,{selectedWaiting=null},compact=true,dense=true,compactWidth=280.dp,busy=busy,
-        confirmLabel="开始攒",onConfirm={selectedWaiting=null;promotion=wish},dismissLabel="收起来") {
-        Text(if(wish.amountFen>0) "大约 ¥${Formatters.fenToYuanText(wish.amountFen)}" else "价格可以慢慢想，先留下喜欢。")
-        TextButton(onClick=uiTap(UiCue.NAVIGATE) {selectedWaiting=null;onRecordWaiting(Sticker(id="waiting:${wish.id}",title=wish.title,emoji=wish.emoji,amountFen=wish.amountFen))},enabled=!busy){Text("买到了 · 记一笔")}
+    selectedWaiting?.takeIf { editWaiting == null && promotion == null }?.let {id->waiting.firstOrNull {it.id==id}?.let {wish->GuluDialog(wish.title,{selectedWaiting=null},compact=true,dense=true,compactWidth=280.dp,busy=busy,
+        confirmLabel="开始攒",onConfirm={promotion=wish},dismissLabel="收起来") {
+        Row(Modifier.fillMaxWidth(), verticalAlignment=Alignment.CenterVertically, horizontalArrangement=Arrangement.spacedBy(12.dp)) {
+            StarWishJar(0f, Modifier.width(66.dp))
+            Column(Modifier.weight(1f), verticalArrangement=Arrangement.spacedBy(5.dp)) {
+                Text("候场愿望", style=MaterialTheme.typography.labelMedium, color=MaterialTheme.colorScheme.primary)
+                Text(if(wish.amountFen>0) "¥${Formatters.fenToYuanText(wish.amountFen)}" else "先留下喜欢", style=MaterialTheme.typography.titleMedium)
+                Text("想认真攒的时候，再给它放颗星星。", style=MaterialTheme.typography.bodySmall)
+            }
+        }
+        TextButton(onClick=uiTap(UiCue.NAVIGATE) {onRecordWaiting(Sticker(id="waiting:${wish.id}",title=wish.title,emoji=wish.emoji,amountFen=wish.amountFen))},enabled=!busy, modifier=Modifier.fillMaxWidth()){Text("买到了 · 记一笔")}
         Row {
-            TextButton(onClick=uiTap {selectedWaiting=null;editWaiting=wish},enabled=!busy){Text("编辑")}
-            TextButton(onClick=uiTap {perform {repository.archiveWaiting(wish.id);selectedWaiting=null}},enabled=!busy){Text("轻轻放下")}
+            TextButton(onClick=uiTap {editWaiting=wish},enabled=!busy,modifier=Modifier.weight(1f)){Text("编辑")}
+            TextButton(onClick=uiTap {perform {repository.archiveWaiting(wish.id);selectedWaiting=null}},enabled=!busy,modifier=Modifier.weight(1f)){Text("轻轻放下")}
         }
     } } }
-    selectedMemory?.let {id->completed.firstOrNull {it.id==id}?.let {wish->GuluDialog(wish.title,{selectedMemory=null},compact=true,dense=true,compactWidth=280.dp,busy=busy,
-        confirmLabel="攒星回忆",onConfirm={selectedMemory=null;recordsWish=wish.id},dismissLabel="收起来",confirmCue=UiCue.PAPER) {
-        Text("${Formatters.dayLabel(wish.completedAt ?: wish.createdAt)} · 实现啦",color=MaterialTheme.colorScheme.primary)
-        Text("攒下 ¥${Formatters.fenToYuanText(wish.savedFen)} · ${wish.deposits.size} 次记录",style=MaterialTheme.typography.bodySmall)
+    selectedMemory?.takeIf { editWish == null && recordsWish == null }?.let {id->completed.firstOrNull {it.id==id}?.let {wish->GuluDialog(wish.title,{selectedMemory=null},compact=true,dense=true,compactWidth=280.dp,busy=busy,
+        confirmLabel="攒星回忆",onConfirm={recordsWish=wish.id},dismissLabel="收起来",confirmCue=UiCue.PAPER) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment=Alignment.CenterVertically, horizontalArrangement=Arrangement.spacedBy(12.dp)) {
+            StarWishJar(1f, Modifier.width(66.dp), complete=true)
+            Column(Modifier.weight(1f), verticalArrangement=Arrangement.spacedBy(5.dp)) {
+                Text("愿望实现啦 ♡", style=MaterialTheme.typography.labelMedium, color=MaterialTheme.colorScheme.primary)
+                Text("¥${Formatters.fenToYuanText(wish.savedFen)}", style=MaterialTheme.typography.titleLarge)
+                Text(Formatters.dayLabel(wish.completedAt ?: wish.createdAt), style=MaterialTheme.typography.bodySmall)
+                Text("${wish.deposits.size} 次认真攒星", style=MaterialTheme.typography.bodySmall)
+            }
+        }
         if(wish.caption.isNotBlank()) Text(wish.caption)
-        if(wish.photoPath.isNotBlank()) MemoryPhoto(wish.photoPath,Modifier.fillMaxWidth().height(180.dp))
+        if(wish.photoPath.isNotBlank()) MemoryPhoto(wish.photoPath,Modifier.fillMaxWidth().height(124.dp))
         Row(verticalAlignment=Alignment.CenterVertically) {
-            TextButton(onClick=uiTap {selectedMemory=null;editWish=wish}){Text("编辑")}
+            TextButton(onClick=uiTap {editWish=wish}){Text("编辑")}
         }
         MemoryPosterButton(wish.title,wish.caption.ifBlank {"一颗一颗的小星星，终于装满了这个愿望。"},wish.photoPath,
             amountFen=wish.savedFen,dateMillis=wish.completedAt)
@@ -214,6 +224,7 @@ fun WishBookScreen(onBack: () -> Unit, onRecordWaiting: (Sticker) -> Unit) {
         Text("「$title」已经装满星星。阿噜把它好好留进纪念册啦 ♡")
     } }
     error?.let { message -> GuluDialog("小星星还没放好", { error = null }, compact = true, dense = true, compactWidth = 280.dp) { Text(message) } }
+    }
 }
 
 @Composable

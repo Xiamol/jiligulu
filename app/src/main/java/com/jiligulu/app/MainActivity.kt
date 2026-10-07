@@ -46,6 +46,7 @@ import com.jiligulu.app.data.reminder.WaterReminderNotifications
 import com.jiligulu.app.ui.add.AddBillScreen
 import com.jiligulu.app.ui.chat.ChatScreen
 import com.jiligulu.app.ui.main.MainScreen
+import com.jiligulu.app.ui.littleworld.ChessRoomInvite
 import com.jiligulu.app.ui.home.HomeViewModel
 import com.jiligulu.app.ui.onboarding.OnboardingScreen
 import com.jiligulu.app.ui.settings.SettingsScreen
@@ -82,6 +83,7 @@ class MainActivity : ComponentActivity() {
     private val windowRefresh by lazy { com.jiligulu.app.core.ui.WindowRefreshPreference(this) }
     private val futureNoteRequests = MutableStateFlow<String?>(null)
     private val waterRequests = MutableStateFlow(0)
+    private val chessRoomRequests = MutableStateFlow<ChessRoomInvite?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -91,6 +93,8 @@ class MainActivity : ComponentActivity() {
         }
         handleWaterIntent(intent)
         handleFutureNoteIntent(intent)
+        chessRoomRequests.value = ChessRoomInvite.parse(savedInstanceState?.getString("chess_room_invite"))
+        handleChessRoomIntent(intent)
         lifecycleScope.launch {
             lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
                 // A vendor may remove alarms while keeping this process alive. Cold-start-only
@@ -121,12 +125,16 @@ class MainActivity : ComponentActivity() {
                 initialValue = com.jiligulu.app.data.prefs.LittleWorldSkin.DEFAULT)
             val request by waterRequests.collectAsStateWithLifecycle()
             val futureNote by futureNoteRequests.collectAsStateWithLifecycle()
+            val chessRoomInvite by chessRoomRequests.collectAsStateWithLifecycle()
             val darkTheme = when (themeMode) {
                 UserPrefs.THEME_LIGHT -> false
                 UserPrefs.THEME_DARK -> true
                 else -> isSystemInDarkTheme()
             }
-            GuluTheme(darkTheme = darkTheme, skin = globalSkin) { JiliguluRoot(request, futureNote) { futureNoteRequests.value = null } }
+            GuluTheme(darkTheme = darkTheme, skin = globalSkin) {
+                JiliguluRoot(request, futureNote, onNoteConsumed = { futureNoteRequests.value = null },
+                    chessRoomInvite = chessRoomInvite, onRoomInviteConsumed = { chessRoomRequests.value = null })
+            }
         }
     }
 
@@ -135,6 +143,19 @@ class MainActivity : ComponentActivity() {
         setIntent(intent)
         handleWaterIntent(intent)
         handleFutureNoteIntent(intent)
+        handleChessRoomIntent(intent)
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putString("chess_room_invite", chessRoomRequests.value?.uri)
+        super.onSaveInstanceState(outState)
+    }
+
+    private fun handleChessRoomIntent(intent: Intent?) {
+        if (intent?.action != Intent.ACTION_VIEW) return
+        ChessRoomInvite.parse(intent.dataString)?.let { chessRoomRequests.value = it }
+        // Delivery is one-shot; Activity recreation restores only an unconsumed request.
+        intent.data = null
     }
 
     override fun onResume() {
@@ -164,7 +185,8 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun JiliguluRoot(waterRequest: Int, futureNoteId: String? = null, onNoteConsumed: () -> Unit = {}) {
+private fun JiliguluRoot(waterRequest: Int, futureNoteId: String? = null, onNoteConsumed: () -> Unit = {},
+    chessRoomInvite: ChessRoomInvite? = null, onRoomInviteConsumed: () -> Unit = {}) {
     val app = LocalContext.current.applicationContext as JiliguluApp
     val rootScope = androidx.compose.runtime.rememberCoroutineScope()
     val startup: StartupViewModel = viewModel(factory = viewModelFactory {
@@ -234,6 +256,15 @@ private fun JiliguluRoot(waterRequest: Int, futureNoteId: String? = null, onNote
                 if (futureNoteId != null && nickname.isNotBlank()) navController.navigate(Routes.MAIN) { popUpTo(Routes.MAIN) { inclusive = false }; launchSingleTop = true }
             }
             val navigation by navController.currentBackStackEntryAsState()
+            LaunchedEffect(chessRoomInvite, nickname) {
+                if (chessRoomInvite != null && nickname.isNotBlank()) {
+                    // Reuse the existing hub when a share link arrives from one of its children.
+                    if (navController.currentBackStackEntry?.destination?.route != Routes.SECRET_BASE &&
+                        !navController.popBackStack(Routes.SECRET_BASE, inclusive = false)) {
+                        navController.navigate(Routes.SECRET_BASE) { launchSingleTop = true }
+                    }
+                }
+            }
             val imageImport by com.jiligulu.app.ui.capture.ImageBillImport.pending.collectAsStateWithLifecycle()
             LaunchedEffect(imageImport) {
                 if (imageImport != null && nickname.isNotBlank()) navController.navigate(Routes.CHAT) { launchSingleTop = true }
@@ -265,6 +296,7 @@ private fun JiliguluRoot(waterRequest: Int, futureNoteId: String? = null, onNote
                     if (targetState.destination.route == Routes.SECRET_BASE) androidx.compose.animation.ExitTransition.None else null
                 }) {
                     MainScreen(
+                        active = navigation?.destination?.route == Routes.MAIN,
                         onAddBill = { navController.navigate(Routes.ADD_BILL) },
                         onOpenChat = { navController.navigate(Routes.CHAT) },
                         onOpenSettings = { navController.navigate(Routes.SETTINGS) },
@@ -311,7 +343,8 @@ private fun JiliguluRoot(waterRequest: Int, futureNoteId: String? = null, onNote
                             com.jiligulu.app.core.util.Formatters.yuanTextToFen(amount)?.let { recordSticker(com.jiligulu.app.data.littleworld.Sticker(title = "", amountFen = it)) }
                         })
                 }
-                composable(Routes.WISH_BOOK) { com.jiligulu.app.ui.littleworld.WishBookScreen(onBack = { navController.popBackStack() }, onRecordWaiting = recordSticker) }
+                composable(Routes.WISH_BOOK) { com.jiligulu.app.ui.littleworld.WishBookScreen(onBack = { navController.popBackStack() },
+                    onRecordWaiting = recordSticker, routeActive = navigation?.destination?.route == Routes.WISH_BOOK) }
                 composable(Routes.FUTURE_NOTES) { com.jiligulu.app.ui.futurenotes.FutureNotesScreen(onBack = { navController.popBackStack() }) }
                 composable(Routes.MEMORIES) { com.jiligulu.app.ui.memories.MemoriesScreen(onBack = { navController.popBackStack() }) }
                 composable(Routes.TIME_MACHINE) { com.jiligulu.app.ui.littleworld.TimeMachineScreen { navController.popBackStack() } }
@@ -321,7 +354,8 @@ private fun JiliguluRoot(waterRequest: Int, futureNoteId: String? = null, onNote
                     popEnterTransition = { androidx.compose.animation.EnterTransition.None },
                     popExitTransition = { androidx.compose.animation.ExitTransition.None }) { com.jiligulu.app.ui.littleworld.SecretBaseScreen(
                     onBack={navController.popBackStack()},onOpenNotes={navController.navigate(Routes.FUTURE_NOTES)},
-                    onOpenMemories={navController.navigate(Routes.MEMORIES)}) }
+                    onOpenMemories={navController.navigate(Routes.MEMORIES)},
+                    roomInvite = chessRoomInvite, onRoomInviteConsumed = onRoomInviteConsumed) }
                 composable(Routes.CHAT) {
                     ChatScreen(
                         onBack = { navController.popBackStack() },

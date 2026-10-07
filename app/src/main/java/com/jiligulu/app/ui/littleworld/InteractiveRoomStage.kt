@@ -87,24 +87,24 @@ fun InteractiveRoomStage(onWishes:()->Unit,onLetters:()->Unit,onAlbum:()->Unit,
         )
         Text("阿噜的小窝",Modifier.offset(sceneLeft+sceneWidth*.354f,sceneTop+sceneHeight*.037f)
             .size(sceneWidth*.285f,sceneHeight*.046f)
-            .combinedClickable(onClick={speak("小窝营业啦，今天也有一张椅子留给你 ♡")},onLongClick={onSecretLogo?.invoke()})
+            .sceneCombinedClickable(onClick={speak("小窝营业啦，今天也有一张椅子留给你 ♡")},onLongClick={onSecretLogo?.invoke()})
             .wrapContentSize(Alignment.Center),fontFamily=GuluBrandFont,fontSize=18.sp,color=Color(0xFF6A4C33))
         signs.forEach { sign ->
             val open = uiTap(sign.soundCue, sign.action)
             Box(Modifier.offset(sceneLeft+sceneWidth*sign.hitX,sceneTop+sceneHeight*sign.hitY)
                 .size(sceneWidth*sign.hitW,sceneHeight*sign.hitH)
-                .combinedClickable(onClickLabel=sign.text,onClick=open,onLongClick={speak(when(sign.text){
+                .sceneCombinedClickable(onClickLabel=sign.text,onClick=open,onLongClick={speak(when(sign.text){
                     "时光列车"->"阿噜把旧车票都替你收好啦，慢慢回去看看。"
                     "星星愿望"->"愿望慢慢攒，小星星不会催你 ♡"
                     "小算盘"->"拨拨小珠子，再难的数字也能慢慢算。"
                     else->"这里藏着一页小日子，阿噜替你保管着。"
                 })}).semantics {contentDescription=sign.text})
             Text(sign.text,Modifier.offset(sceneLeft+sceneWidth*(sign.x-sign.w/2),sceneTop+sceneHeight*(sign.y-sign.h/2))
-                .size(sceneWidth*sign.w,sceneHeight*sign.h).clickable(onClickLabel=sign.text,onClick=open)
+                .size(sceneWidth*sign.w,sceneHeight*sign.h).sceneClickable(onClickLabel=sign.text,onClick=open)
                 .wrapContentSize(Alignment.Center),fontSize=12.sp,fontWeight=FontWeight.Medium,color=Color(0xFF694F37),maxLines=1)
         }
         Box(Modifier.offset(sceneLeft+sceneWidth*.34f,sceneTop+sceneHeight*.713f).size(sceneWidth*.33f,sceneHeight*.190f)
-            .combinedClickable(onClickLabel="摸摸阿噜",onClick={
+            .sceneCombinedClickable(onClickLabel="摸摸阿噜",onClick={
                 UiSound.pet(contextForSound)
                 val lines=listOf("摸摸收到了，阿噜又精神一点啦 ♡","今天可以慢一点，我陪你。","偷偷说，阿噜刚刚给你留了一颗好运。","摸摸的好运，阿噜都替你收到了。")
                 speak(lines[petTaps++%lines.size])
@@ -120,7 +120,7 @@ fun InteractiveRoomStage(onWishes:()->Unit,onLetters:()->Unit,onAlbum:()->Unit,
             }
         }
         whisper?.let {text -> Surface(Modifier.offset(sceneLeft+sceneWidth*.25f,sceneTop+sceneHeight*.61f)
-            .width(sceneWidth*.5f).clickable {whisper=null},shape=MaterialTheme.shapes.medium,
+            .width(sceneWidth*.5f).sceneClickable {whisper=null},shape=MaterialTheme.shapes.medium,
             color=MaterialTheme.colorScheme.tertiaryContainer.copy(alpha=.94f)) {
             Text(text,Modifier.padding(10.dp),style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurface)
         } }
@@ -139,12 +139,12 @@ fun InteractiveRoomStage(onWishes:()->Unit,onLetters:()->Unit,onAlbum:()->Unit,
         }
         Box(Modifier.offset(split-controlWidth,controlTop).size(controlWidth,controlHeight)
             .then(if(controlsActive) Modifier.testTag("main-mailbox") else Modifier)
-            .clickable(enabled=controlsActive&&!mailboxLoading,role=Role.Button,
+            .sceneClickable(enabled=controlsActive&&!mailboxLoading,role=Role.Button,
                 onClickLabel="打开阿噜的小信箱",onClick=uiTap(UiCue.ENVELOPE,onMailbox))
             .semantics { contentDescription=mailboxDescription })
         Box(Modifier.offset(split,controlTop).size(controlWidth,controlHeight)
             .then(if(controlsActive) Modifier.testTag("room-settings") else Modifier)
-            .clickable(enabled=controlsActive&&onSettings!=null,role=Role.Button,
+            .sceneClickable(enabled=controlsActive&&onSettings!=null,role=Role.Button,
                 onClickLabel="打开设置",onClick=uiTap(UiCue.NAVIGATE){onSettings?.invoke()})
             .semantics { contentDescription="设置" })
         Text("信箱",Modifier.offset(sceneLeft+sceneWidth*.696f,sceneTop+sceneHeight*.081f)

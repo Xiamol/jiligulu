@@ -87,7 +87,8 @@ fun MainScreen(
     onOpenMemories: () -> Unit = {},
     onOpenTimeMachine: () -> Unit = {},
     onOpenSecretBase: () -> Unit = {},
-    onRecordAmount: (String) -> Unit = {}
+    onRecordAmount: (String) -> Unit = {},
+    active: Boolean = true
 ) {
     val app = LocalContext.current.applicationContext as JiliguluApp
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
@@ -224,7 +225,7 @@ fun MainScreen(
                                     enabled = { selectedTab == 0 }, onDrag = pageDrag, onDragEnd = pageDragEnd))
                             Spacer(Modifier.height(12.dp))
                             HomeScreen(onOpenChat = onOpenChat, onAddBill = onAddBill, vm = homeVm,
-                                active = selectedTab == 0, onOpenStats = { navigate(2) }, onPickSticker = onPickSticker,
+                                active = active && selectedTab == 0, onOpenStats = { navigate(2) }, onPickSticker = onPickSticker,
                                 onPageDrag = pageDrag, onPageDragEnd = pageDragEnd)
                         }
                         1 -> LittleWorldScreen(onBack = { navigate(0) }, onOpenWishBook = onOpenWishBook,
@@ -232,14 +233,14 @@ fun MainScreen(
                             onOpenTimeMachine=onOpenTimeMachine,onOpenSecretBase=onOpenSecretBase,
                             onSecretEntrance={ secretEntrance=it },
                             onOpenSettings=onOpenSettings,
-                            onRecordAmount = onRecordAmount, embedded = true, active = selectedTab == 1,
+                            onRecordAmount = onRecordAmount, embedded = true, active = active && selectedTab == 1,
                             onModalChanged = { worldModalOpen = it },
                             modifier = Modifier.fillMaxSize().forwardMainPageSwipe(
                                 enabled = { selectedTab == 1 && !worldModalOpen }, onDrag = pageDrag,
                                 onDragEnd = pageDragEnd, allowRight = true))
                         2 -> Column(Modifier.fillMaxSize()) {
                             MainPageHeader(app, selectedTab == 2, onOpenSettings) {secretEntrance=SecretEntrance.LOGO}
-                            Box(Modifier.weight(1f)) { StatsScreen(active = selectedTab == 2,
+                            Box(Modifier.weight(1f)) { StatsScreen(active = active && selectedTab == 2,
                                 onPageDrag = pageDrag, onPageDragEnd = pageDragEnd) }
                         }
                     }

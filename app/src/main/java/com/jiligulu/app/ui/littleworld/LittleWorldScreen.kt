@@ -222,10 +222,10 @@ private fun LifeDeskCorner(state: LittleWorldState, date: LocalDate, onOpenWishB
         }
         val progress = featured?.let { (it.savedFen.toDouble() / it.targetFen.coerceAtLeast(1)).toFloat().coerceIn(0f, 1f) } ?: 0f
         StarWishJar(progress, Modifier.width(66.dp).height(85.dp).align(Alignment.TopStart).offset(x = 18.dp, y = 43.dp)
-            .clickable(onClickLabel = "打开星星愿望册", onClick = onOpenWishBook), complete = featured?.completedAt != null)
+            .sceneClickable(onClickLabel = "打开星星愿望册", onClick = onOpenWishBook), complete = featured?.completedAt != null)
         val noteWidth = (maxWidth - 164.dp).coerceIn(108.dp, 148.dp)
         Box(Modifier.width(noteWidth).height(82.dp).align(Alignment.Center).offset(y = 6.dp).rotate(-3f)
-            .clickable(onClickLabel = "打开星星愿望册", onClick = onOpenWishBook)) {
+            .sceneClickable(onClickLabel = "打开星星愿望册", onClick = onOpenWishBook)) {
             StickerPaperArtwork(Modifier.matchParentSize(), Color(0xFFFFF6DF))
             Column(Modifier.fillMaxSize().padding(horizontal = 16.dp).padding(top = 16.dp, bottom = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -250,7 +250,7 @@ private fun LifeDeskCorner(state: LittleWorldState, date: LocalDate, onOpenWishB
 @Composable
 private fun WorldPaperTile(emoji: String, title: String, subtitle: String, angle: Float, tint: Color,
     onClick: () -> Unit, modifier: Modifier = Modifier, wishJar: Boolean = false, skin: LittleWorldSkin? = null) {
-    Box(modifier.height(112.dp).rotate(angle).clickable(onClickLabel = "打开$title", onClick = onClick)) {
+    Box(modifier.height(112.dp).rotate(angle).sceneClickable(onClickLabel = "打开$title", onClick = onClick)) {
         StickerPaperArtwork(Modifier.matchParentSize(), skin?.let { lerp(tint, it.noteColor, .3f) } ?: tint)
         Column(Modifier.fillMaxSize().padding(horizontal = 12.dp).padding(top = 13.dp, bottom = 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {

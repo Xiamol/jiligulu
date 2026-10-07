@@ -99,7 +99,7 @@ fun FutureNotesScreen(onBack: () -> Unit) {
         title = when(tab) { 0 -> "阿噜还在送信"; 1 -> "今天的收件箱"; else -> "收好的旧信笺" },
         subtitle = when(tab) { 0 -> "${rows.size} 封信，正走向未来的你。"; 1 -> "${rows.size} 封信，到了可以拆开的日子。"; else -> "${rows.size} 封信，藏着过去的心事。" },
         onDismiss = { drawer = false }, compact = true,
-        actions = { TextButton(onClick = uiTap(UiCue.LETTER) { editing = null; creating = true }) { Text("写一封") } }
+        actions = { TextButton(onClick = uiTap(UiCue.LETTER) { editing = null; creating = true }, modifier = Modifier.weight(1f)) { Text("写一封") } }
     ) {
         if (rows.isEmpty()) item {
             Text(when(tab) {
@@ -220,12 +220,13 @@ private fun PostPaperDialog(title: String, onDismiss: () -> Unit, height: androi
         LedgerCard(Modifier.widthIn(max = 280.dp).fillMaxWidth()
             .height(minOf(height, (LocalConfiguration.current.screenHeightDp * .65f).dp)), contentPadding = 12.dp) {
             Text(title, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary,
-                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.height(30.dp))
+                maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().height(30.dp))
             SpringScrollColumn(Modifier.fillMaxWidth().weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp), content = content)
             Row(Modifier.fillMaxWidth().height(42.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (dismissLabel != null) TextButton(onClick = uiTap(UiCue.PAPER, onDismiss), enabled = !busy, modifier = Modifier.weight(1f)) {
                     Text(dismissLabel, style = MaterialTheme.typography.labelMedium)
-                } else Spacer(Modifier.weight(1f))
+                }
                 TextButton(onClick = uiTap(confirmCue, onConfirm), enabled = !busy && confirmEnabled, modifier = Modifier.weight(1f)) {
                     if (busy) CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 1.5.dp)
                     else Text(confirmLabel, style = MaterialTheme.typography.labelMedium, maxLines = 1)

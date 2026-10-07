@@ -51,7 +51,7 @@ fun WorldSceneArt(scene:WorldScene,modifier:Modifier=Modifier,onClick:(()->Unit)
     Canvas(modifier.semantics { contentDescription=when(scene) {
         WorldScene.COURIER->"阿噜背着小包送信"; WorldScene.INBOX->"花园里的收件箱"; WorldScene.ARCHIVE->"存放旧信的木匣"
         WorldScene.ALBUM->"打开的生活纪念册"; WorldScene.TIME_MACHINE->"阿噜的时光列车"; WorldScene.SECRET->"阿噜的秘密基地"
-    } }.then(if(onClick!=null) Modifier.clickable(onClick=onClick) else Modifier)) {
+    } }.then(if(onClick!=null) Modifier.sceneClickable(onClick=onClick) else Modifier)) {
         val image=art;val crop=rect
         if(image!=null&&crop!=null) {
             val scale=min(size.width/crop.width,size.height/crop.height)
@@ -107,7 +107,7 @@ fun CountedTab(label:String,count:Int,selected:Boolean,onClick:()->Unit) {
 fun ScenePlaqueButton(label:String,modifier:Modifier=Modifier,selected:Boolean=false,enabled:Boolean=true,
     soundCue:com.jiligulu.app.core.audio.UiCue=com.jiligulu.app.core.audio.UiCue.NAVIGATE,onClick:()->Unit) {
     val accent=MaterialTheme.colorScheme.primary
-    Box(modifier.clickable(enabled=enabled,role=Role.Button,onClick=com.jiligulu.app.ui.components.uiTap(soundCue,onClick)).drawWithCache {
+    Box(modifier.sceneClickable(enabled=enabled,role=Role.Button,onClick=com.jiligulu.app.ui.components.uiTap(soundCue,onClick)).drawWithCache {
         val u=1.dp.toPx();val radius=CornerRadius(2*u)
         onDrawBehind {
             drawRoundRect(Color(0xFF3D2715).copy(alpha=.18f),Offset(1*u,2*u),size,radius)
@@ -139,9 +139,9 @@ fun WorldScenePanel(scene:WorldScene,title:String,onBack:()->Unit,
             WorldScene.SECRET->floatArrayOf(.36f,.30f,.50f,.51f)
         }
         Box(Modifier.offset(maxWidth*hotspot[0],maxHeight*hotspot[1])
-            .size(maxWidth*hotspot[2],maxHeight*hotspot[3]).clickable(onClickLabel=title,onClick=onObject)
+            .size(maxWidth*hotspot[2],maxHeight*hotspot[3]).sceneClickable(onClickLabel=title,onClick=onObject)
             .semantics {contentDescription=title})
-        ScenePlaqueButton("‹ 小窝",Modifier.align(Alignment.TopStart).padding(8.dp).rotate(-2f),onClick=onBack)
+        ScenePlaqueButton("‹ 返回",Modifier.align(Alignment.TopStart).padding(8.dp).rotate(-2f),onClick=onBack)
         action?.let { ScenePlaqueButton(it,Modifier.align(Alignment.TopEnd).padding(8.dp).rotate(2f),onClick=onAction) }
         if(tabs.isNotEmpty()) Row(Modifier.align(Alignment.BottomCenter).padding(8.dp),
             horizontalArrangement=Arrangement.spacedBy(6.dp)) {

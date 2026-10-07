@@ -199,7 +199,7 @@ fun TimeMachineScreen(onBack: () -> Unit) {
     }
     if (showLuggage && arrivedDay != null) DestinationDrawer("${stationDate(arrivedDay!!)}的行李", { showLuggage = false }, compact = true,
         subtitle = LocalDate.ofEpochDay(arrivedDay!!).toString() + if (challengeSolved) " · 回忆找回来啦 ♡" else " · 翻翻那天的小生活",
-        actions = { TextButton(onClick = uiTap { showChallenge = true }, enabled = memoryChoices.size >= 2) { Text("猜个小回忆") } }) {
+        actions = { TextButton(onClick = uiTap { showChallenge = true }, enabled = memoryChoices.size >= 2, modifier = Modifier.weight(1f)) { Text("猜个小回忆") } }) {
         when {
             rows == null -> item { Text("阿噜正在搬这一天的行李…", style = MaterialTheme.typography.bodySmall) }
             rows.isEmpty() -> item { Text("这一天留白了。空白也是一张时光车票 ♡", style = MaterialTheme.typography.bodySmall) }

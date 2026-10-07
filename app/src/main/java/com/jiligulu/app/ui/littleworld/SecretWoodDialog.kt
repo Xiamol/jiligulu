@@ -5,12 +5,15 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.imageResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
@@ -78,19 +81,38 @@ internal fun SecretWoodDialog(title: String, onDismiss: () -> Unit,
     Dialog(onDismissRequest = { if (!busy) onDismiss() }, properties = DialogProperties(
         usePlatformDefaultWidth = false, dismissOnBackPress = !busy, dismissOnClickOutside = !busy)) {
         com.jiligulu.app.ui.capture.DialogGlassBackdrop()
-        SecretWoodSurface(Modifier.widthIn(max = compactWidth).fillMaxWidth()
-            .heightIn(max = (configuration.screenHeightDp * .74f).dp), contentPadding = PaddingValues(18.dp, 20.dp)) {
-            Text(title, Modifier.padding(start = 46.dp, bottom = 10.dp), style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Medium, color = SecretWoodInk)
-            SpringScrollColumn(Modifier.weight(1f, fill = false), verticalArrangement = Arrangement.spacedBy(8.dp), content = content)
-            Row(Modifier.fillMaxWidth().padding(top = 9.dp), horizontalArrangement = Arrangement.End) {
-                dismissLabel?.let { label -> TextButton(onClick = { UiSound.play(context,closeCue); onDismiss() }, enabled = !busy,
-                    colors = ButtonDefaults.textButtonColors(contentColor = SecretWoodInk)) { Text(label) } }
-                TextButton(onClick = { UiSound.play(context,actionCue); onConfirm() }, enabled = !busy && confirmEnabled,
-                    colors = ButtonDefaults.textButtonColors(contentColor = SecretWoodInk)) {
-                    Text(if (busy) "等小桌落稳…" else confirmLabel)
+        SecretWoodSurface(Modifier.testTag("secret-wood-dialog").widthIn(max = compactWidth).fillMaxWidth()
+            .heightIn(max = (configuration.screenHeightDp * .74f).dp),
+            contentPadding = PaddingValues(start = 22.dp, end = 22.dp, top = 42.dp, bottom = 22.dp)) {
+            Text(title, Modifier.fillMaxWidth().padding(bottom = 12.dp), style = MaterialTheme.typography.titleMedium,
+                textAlign = TextAlign.Center, fontWeight = FontWeight.Medium, color = SecretWoodInk)
+            SpringScrollColumn(Modifier.weight(1f, fill = false).fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp), content = content)
+            Row(Modifier.fillMaxWidth().padding(top = 14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                dismissLabel?.let { label ->
+                    WoodDialogAction(label, Modifier.weight(1f).testTag("secret-wood-dismiss"), enabled = !busy) {
+                        UiSound.play(context, closeCue); onDismiss()
+                    }
+                }
+                WoodDialogAction(if (busy) "稍等…" else confirmLabel, Modifier.weight(1f).testTag("secret-wood-confirm"),
+                    enabled = !busy && confirmEnabled, emphasized = true) {
+                    UiSound.play(context, actionCue); onConfirm()
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun WoodDialogAction(label: String, modifier: Modifier, enabled: Boolean, emphasized: Boolean = false,
+    onClick: () -> Unit) {
+    Box(modifier.heightIn(min = 42.dp)
+        .sceneClickable(enabled = enabled, role = androidx.compose.ui.semantics.Role.Button, onClick = onClick),
+        contentAlignment = Alignment.Center) {
+        Text(label, Modifier.padding(horizontal = 3.dp, vertical = 8.dp),
+            textAlign = TextAlign.Center, style = MaterialTheme.typography.labelLarge,
+            fontWeight = if (emphasized) FontWeight.SemiBold else FontWeight.Normal,
+            color = SecretWoodInk.copy(alpha = if (!enabled) .4f else if (emphasized) 1f else .72f))
     }
 }

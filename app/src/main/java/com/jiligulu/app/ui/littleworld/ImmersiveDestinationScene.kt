@@ -117,7 +117,7 @@ fun ImmersiveDestinationScene(
             val bottom = (rawY + paintedHeight * prop.height).coerceAtMost(maxHeight)
             if (right > x && bottom > y) {
                 Box(Modifier.offset(x, y).size(right - x, bottom - y)
-                    .clickable(enabled = prop.enabled, role = Role.Button, onClickLabel = prop.label, onClick = uiTap(prop.soundCue, prop.onClick))
+                    .sceneClickable(enabled = prop.enabled, role = Role.Button, onClickLabel = prop.label, onClick = uiTap(prop.soundCue, prop.onClick))
                     .semantics { contentDescription = prop.label })
             }
         }
@@ -136,7 +136,7 @@ fun ImmersiveDestinationScene(
         val titleY = top + paintedHeight * (if(destination == ImmersiveDestination.TIME_TRAIN) .087f else .047f)
         Text(title, Modifier.offset(titleX, titleY).width(titleWidth), color = Color(0xFF5E4229),
             fontFamily = GuluBrandFont, fontSize = 17.sp, maxLines = 1, textAlign = TextAlign.Center)
-        ScenePlaqueButton("‹ 小窝", Modifier.align(Alignment.TopStart).statusBarsPadding().padding(start = 14.dp, top = 12.dp)
+        ScenePlaqueButton("‹ 返回", Modifier.align(Alignment.TopStart).statusBarsPadding().padding(start = 14.dp, top = 12.dp)
             .heightIn(min = 44.dp).rotate(-2f), onClick = uiTap(onBack))
         foreground()
     }
@@ -173,17 +173,18 @@ fun DestinationDrawer(
         properties = DialogProperties(usePlatformDefaultWidth = false)) {
         com.jiligulu.app.ui.capture.DialogGlassBackdrop()
         LedgerCard(Modifier.widthIn(max = if (compact) 280.dp else 300.dp).fillMaxWidth().height(height), contentPadding = 12.dp) {
-            Text(title, style = MaterialTheme.typography.titleMedium.copy(fontFamily = GuluBrandFont,
+            Text(title, Modifier.fillMaxWidth(), textAlign = TextAlign.Center,
+                style = MaterialTheme.typography.titleMedium.copy(fontFamily = GuluBrandFont,
                 fontWeight = FontWeight.Normal), color = MaterialTheme.colorScheme.primary)
             subtitle?.let { Text(it, style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp)) }
             SpringLazyColumn(Modifier.weight(1f).fillMaxWidth().padding(top = 8.dp),
                 contentPadding = PaddingValues(bottom = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp),
                 content = content)
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End,
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically) {
                 actions()
-                TextButton(onClick = uiTap(onDismiss)) { Text("收起来") }
+                TextButton(onClick = uiTap(onDismiss), modifier = Modifier.weight(1f)) { Text("收起来") }
             }
         }
     }
