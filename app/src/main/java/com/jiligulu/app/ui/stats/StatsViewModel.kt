@@ -33,7 +33,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
@@ -109,7 +108,8 @@ internal fun mergedCategoryLabel(categoryNames: Set<String>): String {
 class StatsViewModel(
     private val billRepository: BillRepository,
     private val categoryRepository: CategoryRepository,
-    private val budgetRepository: BudgetRepository
+    private val budgetRepository: BudgetRepository,
+    private val nowMillis: () -> Long = { System.currentTimeMillis() }
 ) : ViewModel() {
 
     // ---------- 用户交互状态 ----------
@@ -135,35 +135,30 @@ class StatsViewModel(
     val today: StateFlow<LocalDate> = flow {
         val zone = ZoneId.systemDefault()
         while (true) {
-            val now = Instant.now()
+            val now = Instant.ofEpochMilli(nowMillis())
             val day = now.atZone(zone).toLocalDate()
             emit(day)
             val next = day.plusDays(1).atStartOfDay(zone).toInstant()
             delay((Duration.between(now, next).toMillis() + 100L).coerceAtLeast(100L))
         }
-    }.distinctUntilChanged().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), LocalDate.now())
+    }.distinctUntilChanged().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), currentLocalDate())
 
-    /** The range refreshes when the calendar rolls over, including a resumed screen. */
-    @OptIn(ExperimentalCoroutinesApi::class)
-    private val displayedMonth: StateFlow<Pair<Long, Long>> = _selectedDay
-        .flatMapLatest { requested ->
-            if (requested == null) billRepository.observeMonthRange()
-            else {
-                val zone = ZoneId.systemDefault()
-                flowOf(monthStatsWindow(Instant.ofEpochMilli(requested).atZone(zone).toLocalDate()).millis(zone))
-            }
-        }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), Formatters.currentMonthRange())
+    /** Month and automatic selection share one date clock, including the exact month-boundary update. */
+    private val displayedMonth: StateFlow<Pair<Long, Long>> = combine(_selectedDay, today) { requested, now ->
+        val zone = ZoneId.systemDefault()
+        val date = requested?.let { Instant.ofEpochMilli(it).atZone(zone).toLocalDate() } ?: now
+        monthStatsWindow(date).millis(zone)
+    }.distinctUntilChanged().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000),
+        monthStatsWindow(currentLocalDate()).millis(ZoneId.systemDefault()))
 
-    val selectedDay: StateFlow<Long> = combine(_selectedDay, displayedMonth, today) { requestedDay, range, now ->
-        requestedDay ?: now.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli().takeIf { it in range.first until range.second }
-            ?: range.first
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), Formatters.dayStart(System.currentTimeMillis()))
+    val selectedDay: StateFlow<Long> = combine(_selectedDay, today) { requestedDay, now ->
+        requestedDay ?: now.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), Formatters.dayStart(nowMillis()))
 
-    internal val compactWindow: StateFlow<StatsDateWindow> = combine(_compactWindowStart, selectedDay, today) { first, day, now ->
+    internal val compactWindow: StateFlow<StatsDateWindow> = combine(_compactWindowStart, _selectedDay, today) { first, requested, now ->
         if (first != null) StatsDateWindow(first, first.plusDays(9))
-        else compactStatsWindow(Instant.ofEpochMilli(day).atZone(ZoneId.systemDefault()).toLocalDate(), now)
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), LocalDate.now().let { compactStatsWindow(it, it) })
+        else compactStatsWindow(requested?.let { Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDate() } ?: now, now)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), currentLocalDate().let { compactStatsWindow(it, it) })
 
     val selectedCategoryId: StateFlow<Long?> = combine(_selectedCategory, selectedDay) { selection, day ->
         selection?.takeIf { it.first == day }?.second
@@ -364,7 +359,7 @@ class StatsViewModel(
         if (_compactWindowStart.value == null) _compactWindowStart.value = currentCompactWindow().first
         val zone = ZoneId.systemDefault()
         val requestedMonth = YearMonth.from(Instant.ofEpochMilli(dayStartMillis).atZone(zone))
-        _monthOffset.value = ChronoUnit.MONTHS.between(YearMonth.now(zone), requestedMonth).toInt()
+        _monthOffset.value = ChronoUnit.MONTHS.between(YearMonth.from(currentLocalDate()), requestedMonth).toInt()
         _selectedDay.value = Formatters.dayStart(dayStartMillis)
         _selectedCategory.value = null
     }
@@ -372,6 +367,8 @@ class StatsViewModel(
     private fun currentCompactWindow(): StatsDateWindow = _compactWindowStart.value?.let {
         StatsDateWindow(it, it.plusDays(9))
     } ?: compactStatsWindow(Instant.ofEpochMilli(selectedDay.value).atZone(ZoneId.systemDefault()).toLocalDate(), today.value)
+
+    private fun currentLocalDate(): LocalDate = Instant.ofEpochMilli(nowMillis()).atZone(ZoneId.systemDefault()).toLocalDate()
 
     /** Calendar navigation only changes the statistics filter, never a bill's timestamp. */
     fun selectCalendarDate(dayStartMillis: Long) {

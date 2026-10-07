@@ -45,7 +45,7 @@ class StatsDateNavigationTest {
         val store = ViewModelStore()
         try {
             val nextMonthDay = YearMonth.now().plusMonths(1).atDay(1).millis()
-            var now = System.currentTimeMillis()
+            var now = nextMonthDay - 30_000L
             val bill = BillEntity(id = 1, amountFen = 900, type = BillType.EXPENSE, categoryId = 1,
                 detail = "跨月午饭", timestamp = nextMonthDay + 12 * 60 * 60 * 1000L)
             val oldBill = BillEntity(id = 3, amountFen = 500, type = BillType.EXPENSE, categoryId = 2,
@@ -61,7 +61,7 @@ class StatsDateNavigationTest {
             runCurrent()
             assertEquals(listOf(3L), vm.dayDetails.value.map { it.id })
             now = nextMonthDay
-            advanceTimeBy(60_000L)
+            advanceTimeBy(30_101L)
             runCurrent()
             assertEquals(0, vm.monthOffset.value)
             assertEquals(nextMonthDay, vm.selectedDay.value)
@@ -71,6 +71,51 @@ class StatsDateNavigationTest {
         } finally {
             store.clear()
         }
+    }
+
+    @Test fun midnightUpdatesTheDefaultMonthAndSelectionTogetherWithoutAnOldMonthFirstDay() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        val store = ViewModelStore()
+        try {
+            val lastDay = LocalDate.of(2026, 12, 31).millis()
+            val newYear = LocalDate.of(2027, 1, 1).millis()
+            var now = newYear - 30_000L
+            val vm = model(listOf(
+                BillEntity(id = 71, amountFen = 900, type = BillType.EXPENSE, categoryId = 1, detail = "年末午饭", timestamp = lastDay + 1000),
+                BillEntity(id = 72, amountFen = 1800, type = BillType.EXPENSE, categoryId = 1, detail = "新年午饭", timestamp = newYear + 1000)
+            )) { now }
+            store.put("stats", vm)
+            val selectedDates = mutableListOf<Long>()
+            val compactRanges = mutableListOf<StatsDateWindow>()
+            backgroundScope.launch { vm.selectedDay.collect { selectedDates += it } }
+            backgroundScope.launch { vm.compactWindow.collect { compactRanges += it } }
+            backgroundScope.launch { vm.cashFlowBars.collect {} }
+            backgroundScope.launch { vm.compactCashFlowBars.collect {} }
+            backgroundScope.launch { vm.monthLabel.collect {} }
+            backgroundScope.launch { vm.dayDetails.collect {} }
+            runCurrent()
+            assertEquals(lastDay, vm.selectedDay.value)
+            assertEquals(LocalDate.of(2026, 12, 1).millis(), vm.cashFlowBars.value.first().dayStartMillis)
+            assertEquals(listOf(71L), vm.dayDetails.value.map { it.id })
+
+            now = newYear
+            advanceTimeBy(30_101L); runCurrent()
+            assertEquals(newYear, vm.selectedDay.value)
+            assertEquals(Formatters.monthLabel(newYear), vm.monthLabel.value)
+            assertEquals(newYear, vm.cashFlowBars.value.first().dayStartMillis)
+            assertEquals(31, vm.cashFlowBars.value.size)
+            assertEquals(LocalDate.of(2026, 12, 23).millis(), vm.compactCashFlowBars.value.first().dayStartMillis)
+            assertEquals(newYear, vm.compactCashFlowBars.value.last().dayStartMillis)
+            assertEquals(2700L, vm.compactCashFlowBars.value.sumOf { it.amountFen })
+            assertEquals(listOf(72L), vm.dayDetails.value.map { it.id })
+            assertTrue(selectedDates.all { it == lastDay || it == newYear })
+            assertTrue(compactRanges.all { it == compactStatsWindow(LocalDate.of(2026, 12, 31), LocalDate.of(2026, 12, 31)) ||
+                it == compactStatsWindow(LocalDate.of(2027, 1, 1), LocalDate.of(2027, 1, 1)) })
+
+            val emissions = selectedDates.size to compactRanges.size
+            advanceTimeBy(60_000L); runCurrent()
+            assertEquals(emissions, selectedDates.size to compactRanges.size)
+        } finally { store.clear() }
     }
 
     @Test
@@ -241,7 +286,7 @@ class StatsDateNavigationTest {
 
     private fun model(bills: List<BillEntity>, categories: List<CategoryEntity> = emptyList(), now: () -> Long): StatsViewModel {
         val sources = repositories(bills, categories, now)
-        return StatsViewModel(sources.first, sources.second, sources.third)
+        return StatsViewModel(sources.first, sources.second, sources.third, nowMillis = now)
     }
     private fun repositories(bills: List<BillEntity>, categories: List<CategoryEntity> = emptyList(), now: () -> Long): Triple<BillRepository, CategoryRepository, BudgetRepository> {
         val billDao = object : BillDao {
