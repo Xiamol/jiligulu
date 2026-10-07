@@ -20,4 +20,34 @@ class CashFlowAxisTest {
         assertEquals("0", compactCashFlowAmount(0))
         assertEquals("0.01", compactCashFlowAmount(1))
     }
+    @Test fun selectedMonthDayAlwaysGetsADateLabelIncludingNonFiveDayTicks() {
+        for (days in 28..31) {
+            val ticks = cashFlowMonthDateTicks(days, 7)
+            assertTrue(7 in ticks)
+            assertTrue(1 in ticks)
+            assertTrue(5 in ticks)
+            assertTrue(10 in ticks)
+            assertTrue(days in ticks)
+        }
+    }
+    @Test fun selectedDayThirtyHidesTheAdjacentMonthEndLabel() {
+        val ticks = cashFlowMonthDateTicks(31, 30)
+        assertTrue(30 in ticks)
+        assertFalse(31 in ticks)
+        assertTrue(25 in ticks)
+        assertTrue(31 in cashFlowMonthDateTicks(31, 31))
+        assertFalse(30 in cashFlowMonthDateTicks(31, 31))
+    }
+    @Test fun dateLabelsKeepSpaceAtEveryPossibleMonthEndAndSelection() {
+        for (days in 28..31) {
+            for (selected in 1..days) {
+                val ticks = cashFlowMonthDateTicks(days, selected)
+                assertTrue(selected in ticks)
+                assertTrue(ticks.all { it in 1..days })
+                assertTrue(ticks.sorted().zipWithNext().all { (first, second) -> second - first >= 2 })
+            }
+            assertTrue(days in cashFlowMonthDateTicks(days, null))
+        }
+        assertEquals(setOf(1, 5, 10, 15, 20, 25, 31), cashFlowMonthDateTicks(31, null))
+    }
 }

@@ -40,6 +40,19 @@ internal fun cashFlowAxis(maxYuan: Double): CashFlowAxis {
 }
 internal fun cashFlowAxisTop(maxYuan: Double): Double = cashFlowAxis(maxYuan).top
 
+/** A selected date always stays visible; neighboring regular ticks leave room for its label. */
+internal fun cashFlowMonthDateTicks(daysInMonth: Int, selectedDay: Int?): Set<Int> {
+    if (daysInMonth < 1) return emptySet()
+    val selected = selectedDay?.takeIf { it in 1..daysInMonth }
+    val regular = buildSet {
+        add(1)
+        for (day in 5..daysInMonth step 5) if (daysInMonth - day >= 2) add(day)
+        add(daysInMonth)
+    }
+    return regular.filterTo(linkedSetOf()) { day -> selected == null || day == selected || abs(day - selected) > 1 }
+        .apply { if (selected != null) add(selected) }
+}
+
 /** All visible dates share the available width. Only the selected month bar displays its amount. */
 @Composable
 fun CashFlowBarChart(bars: List<DayBar>, selectedDayMillis: Long?, onSelectDay: (Long) -> Unit,
@@ -48,6 +61,10 @@ fun CashFlowBarChart(bars: List<DayBar>, selectedDayMillis: Long?, onSelectDay: 
     val maxYuan = (bars.maxOfOrNull { it.amountFen } ?: 0L) / 100.0
     val axis = cashFlowAxis(maxYuan)
     val top = axis.top
+    val monthTicks = remember(bars.firstOrNull()?.dayStartMillis, bars.lastOrNull()?.day, selectedDayMillis) {
+        cashFlowMonthDateTicks(bars.lastOrNull()?.day ?: 0,
+            bars.firstOrNull { it.dayStartMillis == selectedDayMillis }?.day)
+    }
     val currentShift by rememberUpdatedState(onShiftWindow)
     LaunchedEffect(bars.firstOrNull()?.dayStartMillis, bars.lastOrNull()?.dayStartMillis) {
         if (bars.isNotEmpty()) onVisibleRange(bars.first().dayStartMillis, bars.last().dayStartMillis)
@@ -78,8 +95,7 @@ fun CashFlowBarChart(bars: List<DayBar>, selectedDayMillis: Long?, onSelectDay: 
                 Row(Modifier.fillMaxWidth()) {
                     bars.forEach { bar ->
                         val selectedBar = bar.dayStartMillis == selectedDayMillis
-                        val showDate = !compressedMonth || bar.day == 1 ||
-                            (bar.day % 5 == 0 && bars.last().day - bar.day >= 2) || bar == bars.last()
+                        val showDate = !compressedMonth || bar.day in monthTicks
                         Column(Modifier.width(slot).clickable { onSelectDay(bar.dayStartMillis) }
                             .semantics { contentDescription = "${bar.day}日，${Formatters.fenToYuanText(bar.amountFen)}元${if (selectedBar) "，已选中" else ""}" }, horizontalAlignment = Alignment.CenterHorizontally) {
                             Box(Modifier.height(174.dp).width((slot - 1.dp).coerceAtLeast(1.dp)).background(if (selectedBar) MaterialTheme.colorScheme.primaryContainer.copy(alpha = .3f) else Color.Transparent, RoundedCornerShape(22.dp)), contentAlignment = Alignment.BottomCenter) {
