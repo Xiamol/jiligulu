@@ -62,6 +62,7 @@ internal object AppGlassBackdrop {
         handler.removeCallbacks(refreshTask);handler.removeCallbacks(drawTask)
         refreshPending=false;queued=false
     }
+    private fun forgetPublishedFrame() {publishedBitmap=null;publishedRect=null}
     /** Coalesce only requested work. There is no timer while the scene and bubble are idle. */
     private fun deferRefresh() {
         refreshPending=true
@@ -76,7 +77,7 @@ internal object AppGlassBackdrop {
     }
     private fun switchWindow(window:Window?) {
         cancelRefresh()
-        publishedBitmap=null;publishedRect=null
+        forgetPublishedFrame()
         source.get()?.let {old ->drawListener?.let {if(old.decorView.viewTreeObserver.isAlive) old.decorView.viewTreeObserver.removeOnDrawListener(it)}}
         drawListener=null;source=WeakReference(window);watched.get()?.clearBackdrop()
         if(window!=null) GlobalGlassBackdrop.clearFrame()
@@ -92,7 +93,7 @@ internal object AppGlassBackdrop {
     fun available()=source.get()?.decorView?.isShown==true
     fun copyBehind(view:View,callback:(Bitmap?,Float,Float)->Unit) {
         val window=source.get()
-        if(window==null||!window.decorView.isShown) {callback(null,0f,0f);return}
+        if(window==null||!window.decorView.isShown) {forgetPublishedFrame();callback(null,0f,0f);return}
         if(view.width<=0 || !view.isAttachedToWindow || !view.isShown) return
         if(inFlight || SystemClock.uptimeMillis()-lastRequest<MIN_COPY_INTERVAL_MS) {deferRefresh();return}
         view.getLocationOnScreen(viewLocation);window.decorView.getLocationOnScreen(windowLocation)
@@ -100,7 +101,7 @@ internal object AppGlassBackdrop {
         val pad=(view.width*.28f).roundToInt()
         val rect=Rect((x-pad).coerceAtLeast(0),(y-pad).coerceAtLeast(0),
             (x+view.width+pad).coerceAtMost(window.decorView.width),(y+view.height+pad).coerceAtMost(window.decorView.height))
-        if(rect.width()<=0||rect.height()<=0) {callback(null,0f,0f);return}
+        if(rect.width()<=0||rect.height()<=0) {forgetPublishedFrame();callback(null,0f,0f);return}
         // A suppressed identical sample must not make the next request overwrite the
         // bitmap still held by the visible shader. Advance only after publishing.
         val index=nextBuffer
@@ -125,10 +126,10 @@ internal object AppGlassBackdrop {
                 // No callback means no shader rebind or overlay invalidate when a page
                 // redraw changed only pixels outside this small lens region.
             }
-            else {callback(null,0f,0f);if(source.get()!==window) handler.post {watched.get()?.refreshBackdrop()}}
+            else {forgetPublishedFrame();callback(null,0f,0f);if(source.get()!==window) handler.post {watched.get()?.refreshBackdrop()}}
             if(refreshPending) deferRefresh()
         },handler) } catch (_:Exception) {
-            inFlight=false;callback(null,0f,0f)
+            inFlight=false;forgetPublishedFrame();callback(null,0f,0f)
             if(refreshPending) deferRefresh()
         }
     }
