@@ -131,7 +131,8 @@ open class GomokuRoomSession protected constructor(private val context: Context?
             }.onFailure { fail(if(it is RoomVersionMismatchException)"棋友版本不兼容，请双方升级至1.0.3"else "收到无效五子棋数据，连接已关闭") } },
             recovering = { if (token == generation && initialized) { refreshUndoDeadline(); mutable.value = mutable.value.copy(reconnecting = true, status = "正在恢复连接，棋局为你留着…"); refreshUndoDeadline() } },
             recovered = { if (token == generation) { refreshUndoDeadline(); lastPacket = SystemClock.uptimeMillis(); mutable.value = mutable.value.copy(reconnecting = false, error = null, status = turnStatus(mutable.value.game)); refreshUndoDeadline(); sendPresence() } },
-            failure = { if (token == generation) fail(it) },
+            failure = { if (token == generation) fail(if(!initialized&&!mutable.value.connected)
+                "连接未建立，请确认双方已升级 1.0.3" else it) },
         )
         wire = wireFactory?.invoke(address, host, events) ?: if (online) GomokuOnlineWire(requireNotNull(context), address, host, events) else GomokuLanWire(events).also {
             if (host) it.host() else it.join(address)
