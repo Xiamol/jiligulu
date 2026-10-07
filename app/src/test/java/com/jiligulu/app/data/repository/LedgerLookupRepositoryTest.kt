@@ -20,7 +20,7 @@ import java.time.ZoneId
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [28], manifest = Config.NONE, application = Application::class)
 class LedgerLookupRepositoryTest {
-    private val context get() = RuntimeEnvironment.getApplication<Application>()
+    private val context: android.content.Context get() = RuntimeEnvironment.getApplication()
     private val opened = mutableListOf<AppDatabase>()
     private val names = mutableListOf<String>()
     private val zone = ZoneId.of("Asia/Tokyo")

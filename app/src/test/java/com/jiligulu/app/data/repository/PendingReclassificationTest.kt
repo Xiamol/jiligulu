@@ -21,7 +21,7 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [28], manifest = Config.NONE, application = Application::class)
 class PendingReclassificationTest {
-    private val context get() = RuntimeEnvironment.getApplication<Application>()
+    private val context: Context get() = RuntimeEnvironment.getApplication()
     private val opened = mutableListOf<AppDatabase>()
     private val names = mutableListOf<String>()
     private fun db(): AppDatabase {

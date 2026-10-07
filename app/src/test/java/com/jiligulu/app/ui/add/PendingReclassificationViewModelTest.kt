@@ -25,7 +25,7 @@ import org.robolectric.annotation.Config
 @Config(sdk = [28], manifest = Config.NONE, application = Application::class)
 @OptIn(ExperimentalCoroutinesApi::class)
 class PendingReclassificationViewModelTest {
-    private val context get() = RuntimeEnvironment.getApplication<Application>()
+    private val context: android.content.Context get() = RuntimeEnvironment.getApplication()
     private val opened = mutableListOf<AppDatabase>()
     private val names = mutableListOf<String>()
     private val stores = mutableListOf<ViewModelStore>()
