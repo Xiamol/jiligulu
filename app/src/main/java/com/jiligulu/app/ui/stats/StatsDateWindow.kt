@@ -18,7 +18,10 @@ internal data class StatsDateWindow(val first: LocalDate, val last: LocalDate) {
     fun shifted(days: Long) = StatsDateWindow(first.plusDays(days), last.plusDays(days))
 }
 
-internal fun compactStatsWindow(anchor: LocalDate) = StatsDateWindow(anchor.minusDays(4), anchor.plusDays(5))
+/** Today uses the last ten days; other dates stay centered. This is an initial placement, never a navigation limit. */
+internal fun compactStatsWindow(anchor: LocalDate, today: LocalDate) =
+    if (anchor == today) StatsDateWindow(today.minusDays(9), today)
+    else StatsDateWindow(anchor.minusDays(4), anchor.plusDays(5))
 internal fun monthStatsWindow(anchor: LocalDate): StatsDateWindow = YearMonth.from(anchor).let {
     StatsDateWindow(it.atDay(1), it.atEndOfMonth())
 }

@@ -10,7 +10,7 @@ import java.time.ZoneId
 
 class StatsDateWindowTest {
     @Test fun tenDaysCrossDecemberAndJanuaryInsteadOfClampingToAMonth() {
-        val window = compactStatsWindow(LocalDate.of(2026, 12, 31))
+        val window = compactStatsWindow(LocalDate.of(2026, 12, 31), LocalDate.of(2026, 10, 7))
         assertEquals(LocalDate.of(2026, 12, 27), window.first)
         assertEquals(LocalDate.of(2027, 1, 5), window.last)
         assertEquals(10, window.dates.size)
@@ -29,7 +29,7 @@ class StatsDateWindowTest {
 
     @Test fun crossMonthBarsUseActualBillDatesAmountsAndTypeWithZeroDaysIncluded() {
         val zone = ZoneId.of("Asia/Tokyo")
-        val window = compactStatsWindow(LocalDate.of(2026, 12, 31))
+        val window = compactStatsWindow(LocalDate.of(2026, 12, 31), LocalDate.of(2026, 10, 7))
         fun date(day: String) = LocalDate.parse(day).atStartOfDay(zone).toInstant().toEpochMilli()
         val bills = listOf(
             BillEntity(id = 1, amountFen = 1299, type = BillType.EXPENSE, categoryId = 1, detail = "午饭", timestamp = date("2026-12-31") + 1000),
@@ -53,5 +53,24 @@ class StatsDateWindowTest {
         val range = window.millis(zone)
         assertEquals(23 * 60 * 60 * 1000L, range.second - range.first)
         assertEquals(LocalDate.of(2026, 3, 9).atStartOfDay(zone).toInstant().toEpochMilli(), range.second)
+    }
+
+    @Test fun todaysInitialWindowShowsTenRecentDaysAcrossTheNewYear() {
+        val today = LocalDate.of(2027, 1, 1)
+        val window = compactStatsWindow(today, today)
+        assertEquals(LocalDate.of(2026, 12, 23), window.first)
+        assertEquals(today, window.last)
+        assertEquals(10, window.dates.size)
+        // Initial placement does not forbid moving beyond today or crossing another month.
+        assertEquals(LocalDate.of(2027, 1, 2), window.shifted(10).first)
+        assertEquals(LocalDate.of(2027, 1, 11), window.shifted(10).last)
+    }
+
+    @Test fun historicalSelectionStaysCenteredAndDoesNotRepositionAtMidnight() {
+        val selected = LocalDate.of(2026, 12, 28)
+        val beforeMidnight = compactStatsWindow(selected, LocalDate.of(2027, 1, 1))
+        assertEquals(LocalDate.of(2026, 12, 24), beforeMidnight.first)
+        assertEquals(LocalDate.of(2027, 1, 2), beforeMidnight.last)
+        assertEquals(beforeMidnight, compactStatsWindow(selected, LocalDate.of(2027, 1, 2)))
     }
 }

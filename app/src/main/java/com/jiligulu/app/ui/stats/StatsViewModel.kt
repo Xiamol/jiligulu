@@ -160,10 +160,10 @@ class StatsViewModel(
             ?: range.first
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), Formatters.dayStart(System.currentTimeMillis()))
 
-    internal val compactWindow: StateFlow<StatsDateWindow> = combine(_compactWindowStart, selectedDay) { first, day ->
+    internal val compactWindow: StateFlow<StatsDateWindow> = combine(_compactWindowStart, selectedDay, today) { first, day, now ->
         if (first != null) StatsDateWindow(first, first.plusDays(9))
-        else compactStatsWindow(Instant.ofEpochMilli(day).atZone(ZoneId.systemDefault()).toLocalDate())
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), compactStatsWindow(LocalDate.now()))
+        else compactStatsWindow(Instant.ofEpochMilli(day).atZone(ZoneId.systemDefault()).toLocalDate(), now)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), LocalDate.now().let { compactStatsWindow(it, it) })
 
     val selectedCategoryId: StateFlow<Long?> = combine(_selectedCategory, selectedDay) { selection, day ->
         selection?.takeIf { it.first == day }?.second
@@ -354,7 +354,7 @@ class StatsViewModel(
         val next = com.jiligulu.app.ui.components.shiftLocalDay(selectedDay.value, delta.toLong())
         val date = Instant.ofEpochMilli(next).atZone(ZoneId.systemDefault()).toLocalDate()
         if (date < currentCompactWindow().first || date > currentCompactWindow().last)
-            _compactWindowStart.value = compactStatsWindow(date).first
+            _compactWindowStart.value = compactStatsWindow(date, today.value).first
         selectDay(next)
     }
 
@@ -371,12 +371,12 @@ class StatsViewModel(
 
     private fun currentCompactWindow(): StatsDateWindow = _compactWindowStart.value?.let {
         StatsDateWindow(it, it.plusDays(9))
-    } ?: compactStatsWindow(Instant.ofEpochMilli(selectedDay.value).atZone(ZoneId.systemDefault()).toLocalDate())
+    } ?: compactStatsWindow(Instant.ofEpochMilli(selectedDay.value).atZone(ZoneId.systemDefault()).toLocalDate(), today.value)
 
     /** Calendar navigation only changes the statistics filter, never a bill's timestamp. */
     fun selectCalendarDate(dayStartMillis: Long) {
         val zone = ZoneId.systemDefault()
-        _compactWindowStart.value = compactStatsWindow(Instant.ofEpochMilli(dayStartMillis).atZone(zone).toLocalDate()).first
+        _compactWindowStart.value = compactStatsWindow(Instant.ofEpochMilli(dayStartMillis).atZone(zone).toLocalDate(), today.value).first
         selectDay(Formatters.dayStart(dayStartMillis))
     }
 

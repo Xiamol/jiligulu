@@ -183,8 +183,12 @@ class StatsDateNavigationTest {
             assertEquals(28, vm.cashFlowBars.value.size)
             vm.showToday(); runCurrent()
             assertEquals(LocalDate.now().millis(), vm.selectedDay.value)
-            assertEquals(compactStatsWindow(LocalDate.now()).first.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli(),
+            assertEquals(compactStatsWindow(LocalDate.now(), LocalDate.now()).first.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli(),
                 vm.compactCashFlowBars.value.first().dayStartMillis)
+            vm.shiftCompactWindow(10); runCurrent()
+            assertEquals(LocalDate.now().plusDays(1).millis(), vm.compactCashFlowBars.value.first().dayStartMillis)
+            assertEquals(LocalDate.now().plusDays(10).millis(), vm.compactCashFlowBars.value.last().dayStartMillis)
+            assertEquals(LocalDate.now().plusDays(10).millis(), vm.selectedDay.value)
         } finally { store.clear() }
     }
 
