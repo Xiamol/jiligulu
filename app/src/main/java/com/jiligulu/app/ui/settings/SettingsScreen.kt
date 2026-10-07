@@ -113,6 +113,9 @@ fun SettingsScreen(
     // Permission launchers belong to the UI; preference writes and scheduling belong to the VM.
     var settingsTab by rememberSaveable { mutableStateOf(if (checkUpdatesOnOpen) "关于" else "日常") }
     val context = LocalContext.current
+    val settingsPrefs = remember(context.applicationContext) { UserPrefs(context.applicationContext) }
+    val selectedSkin by settingsPrefs.littleWorldSkin.collectAsStateWithLifecycle(initialValue = null)
+    var showSkinSelector by rememberSaveable { mutableStateOf(false) }
     var feedbackSound by remember(context) { mutableStateOf(UiSound.enabled(context)) }
     var showSoundSamples by remember { mutableStateOf(false) }
     LaunchedEffect(context) { UiSound.warmup(context) }
@@ -224,8 +227,6 @@ fun SettingsScreen(
                 }
 
                 if (state.isLoaded) {
-                    if (settingsTab == "日常") SettingsCompanionHeader(state.nickname, state.suffix)
-
                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     if (settingsTab == "日常") SettingsSection("你的称呼", "💌") {
                         ProfileSettingRow("名字",state.nickname,editable) { edit(ProfileSettingField.NAME,state.nickname) }
@@ -251,8 +252,10 @@ fun SettingsScreen(
                                 )
                             }
                         }
-                        LittleWorldSkinSettings(enabled = editable)
                         DisplayPerformanceSettings(enabled = editable)
+                        ProfileSettingRow("全局皮肤", selectedSkin?.title?.let { "$it · 预览" } ?: "打开预览", editable) {
+                            showSkinSelector = true
+                        }
                         StatsDisplaySettings(enabled = editable)
                         Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
                             Text("按键与棋子音效",Modifier.weight(1f),style=MaterialTheme.typography.bodyMedium)
@@ -384,6 +387,7 @@ fun SettingsScreen(
                             TextButton(onClick = uiTap { showFontLicense = true }) { Text("字体与开源许可") }
                         }
                     }
+                    if (settingsTab == "关于") SettingsCompanionHeader(state.nickname, state.suffix)
                     if (settingsTab == "关于") SettingsSection("版本与更新", "🎁") { UpdateSettingsCard(checkOnOpen = checkUpdatesOnOpen) }
                     }
                     Text("慢慢记，日子也会慢慢发光 ♡", modifier = Modifier.align(Alignment.CenterHorizontally).padding(bottom = 8.dp),
@@ -393,6 +397,10 @@ fun SettingsScreen(
         }
     }
 
+    if (showSkinSelector) GuluDialog("小世界换装", { showSkinSelector = false }, compact = true,
+        dense = true, compactWidth = 320.dp, confirmLabel = "好啦") {
+        LittleWorldSkinSettings(enabled = editable)
+    }
     if (showSoundSamples) GuluDialog("听听小声音", { showSoundSamples=false }, compact=true,
         dense=true, compactWidth=260.dp) {
         // 2026-10-06 细分后：纸张拆成三种材质分别试听（拆信/翻页/信笺），
