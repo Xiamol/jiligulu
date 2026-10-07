@@ -8,6 +8,23 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class GomokuTacticalSearchTest {
+    @Test fun aSingleStoneHasANonemptyLegalFrontierAtTheCenterAndCornerOfBothBoardSizes() {
+        for (size in listOf(15, 19)) {
+            for ((stone, expectedEmptyNeighbours) in listOf(GridCell(size / 2, size / 2) to 24, GridCell(size - 1, 0) to 8)) {
+                val state = GomokuEngine.play(GomokuEngine.newGame(size), stone.x, stone.y)
+                val position = GomokuThreatPosition(state) {}
+                assertEquals(expectedEmptyNeighbours, position.cells.indices.count {
+                    position.cells[it] == 0 && position.neighbours[it] > 0
+                })
+                val before = state.board.toList()
+                val move = requireNotNull(GomokuStrongMoveHelper.chooseMove(state, 100))
+                assertEquals(0, state.cellAt(move.x, move.y))
+                assertTrue(kotlin.math.abs(move.x - stone.x) <= 2 && kotlin.math.abs(move.y - stone.y) <= 2)
+                assertEquals(before, state.board)
+            }
+        }
+    }
+
     @Test fun takesItsOwnFiveEvenWhenTheOpponentHasTwoSeparateWinningPoints() {
         val state = board(1, listOf(3 to 3, 4 to 3, 6 to 3, 7 to 3),
             listOf(2 to 10, 3 to 10, 4 to 10, 5 to 10))

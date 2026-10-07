@@ -23,13 +23,15 @@ internal class GomokuThreatPosition(state: GomokuState, private val checkBudget:
     }
     private val affected = Array(cells.size) { index -> lines[index].flatMap { it.asIterable() }.filter { it >= 0 }.distinct().toIntArray() }
     private val nearby = Array(cells.size) { index ->
-        val x = index % size
-        val y = index / size
+        // Inside buildList, an unqualified size names the list's current length.
+        val boardSize = size
+        val x = index % boardSize
+        val y = index / boardSize
         buildList {
             for (dy in -2..2) for (dx in -2..2) {
                 val nx = x + dx
                 val ny = y + dy
-                if (nx in 0 until size && ny in 0 until size) add(ny * size + nx)
+                if (nx in 0 until boardSize && ny in 0 until boardSize) add(ny * boardSize + nx)
             }
         }.toIntArray()
     }
