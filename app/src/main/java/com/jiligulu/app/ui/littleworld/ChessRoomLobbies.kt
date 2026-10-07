@@ -203,7 +203,7 @@ internal fun ColumnScope.OnlineChessLobby(active: Boolean, busy: Boolean, code: 
                 }
                 if (error != null || busy) LobbyStatus(error ?: status, error != null)
             }
-            Text("棋桌保留 5 分钟", Modifier.padding(top = 12.dp),
+            if (!compact) Text("棋桌保留 5 分钟", Modifier.padding(top = 12.dp),
                 style = MaterialTheme.typography.bodySmall, color = ChessLobbyColors.muted)
             Spacer(Modifier.height(4.dp).onGloballyPositioned { onControlsBottom(it.boundsInRoot().bottom) })
         }
