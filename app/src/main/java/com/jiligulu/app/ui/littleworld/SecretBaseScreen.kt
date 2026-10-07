@@ -987,6 +987,9 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
                 }
             }
         }
+        val showXiangqiClock = toy == SecretActivity.XIANGQI && !choosingOpponent &&
+            (xiangqiMode == XiangqiPlayMode.CPU || xiangqiMode == XiangqiPlayMode.HOTSEAT ||
+                visibleNetwork.connected || visibleNetwork.reconnecting)
         if (fullGame) SecretGamePage(title, { leaveNetworkSafely(::closeToy) },
             boardAspect = if (toy == SecretActivity.XIANGQI) 1.13f else 1f,
             reservedHeight = when (toy) {
@@ -995,7 +998,7 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
                 else -> 270
             },
             headerTrailing = {
-                if (toy == SecretActivity.XIANGQI&&!choosingOpponent) {
+                if (showXiangqiClock) {
                     val networkMode = xiangqiMode == XiangqiPlayMode.ONLINE || xiangqiMode == XiangqiPlayMode.LAN
                     val game = when (xiangqiMode) {
                         XiangqiPlayMode.ONLINE -> online.game
@@ -1013,7 +1016,7 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
                         } })
                 }
             },
-            centeredHeader = toy == SecretActivity.XIANGQI&&!choosingOpponent,
+            centeredHeader = showXiangqiClock,
             gameDecor = !choosingOpponent&&(toy == SecretActivity.XIANGQI || toy == SecretActivity.GOMOKU),
             decorEnabled = !helpBusy && when (toy) {
                 SecretActivity.XIANGQI -> eligibleXiangqiTurn()

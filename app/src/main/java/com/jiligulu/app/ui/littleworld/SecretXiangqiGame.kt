@@ -120,10 +120,12 @@ internal fun ColumnScope.SecretXiangqiGame(state: XiangqiState, mode: XiangqiPla
     var resignConfirm by remember(mode, lan.round) { mutableStateOf(false) }
     val modeNames = remember { mapOf(XiangqiPlayMode.CPU to "和阿噜下", XiangqiPlayMode.ONLINE to "创建房间",
         XiangqiPlayMode.LAN to "附近的人", XiangqiPlayMode.HOTSEAT to "同屏双人") }
-    Row(Modifier.width(boardWidth).height(42.dp), verticalAlignment = Alignment.CenterVertically) {
+    val showTurnInfo = !networkMode || lan.connected || lan.reconnecting
+    Row((if (showTurnInfo) Modifier.width(boardWidth) else Modifier.fillMaxWidth()).height(if (showTurnInfo) 42.dp else 36.dp),
+        verticalAlignment = Alignment.CenterVertically) {
         Box {
             TextButton(onClick = { UiSound.select(soundContext); onModalOpened(); modeMenu = true }, enabled=!finished, contentPadding = PaddingValues(horizontal = 8.dp)) {
-                Text(modeNames.getValue(mode), color = Color(0xFF766A7F))
+                Text(modeNames.getValue(mode), color = Color(0xFF766A7F), style = MaterialTheme.typography.bodySmall)
                 Icon(Icons.Outlined.ExpandMore, "选择对局方式", Modifier.size(18.dp), tint = Color(0xFF928497))
             }
             if(modeMenu) SecretWoodDialog("和谁下？",{modeMenu=false},confirmLabel="返回棋盘") {
@@ -135,7 +137,7 @@ internal fun ColumnScope.SecretXiangqiGame(state: XiangqiState, mode: XiangqiPla
             }
         }
         Spacer(Modifier.weight(1f))
-        Text(if (state.outcome != XiangqiOutcome.PLAYING) "本局结束" else if (paused && mode != XiangqiPlayMode.ONLINE && mode != XiangqiPlayMode.LAN)
+        if (showTurnInfo) Text(if (state.outcome != XiangqiOutcome.PLAYING) "本局结束" else if (paused && mode != XiangqiPlayMode.ONLINE && mode != XiangqiPlayMode.LAN)
             "已暂停" else if (state.turnSide == XiangqiSide.RED) "红方回合" else "黑方回合",
             style = MaterialTheme.typography.bodySmall,
             color = if (state.turnSide == XiangqiSide.RED) Color(0xFFAF766A) else Color(0xFF766A7F))
