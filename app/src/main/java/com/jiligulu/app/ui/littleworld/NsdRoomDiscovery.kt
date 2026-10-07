@@ -56,7 +56,7 @@ class NsdRoomDiscovery(context: Context, private val gameKind: NearbyGameKind, p
             serviceName = "Gulu-${gameKind.tag}-$selfId"
             serviceType = TYPE
             port = gameKind.port
-            setAttribute("version", "3"); setAttribute("kind", gameKind.tag); setAttribute("id", selfId)
+            setAttribute("version", "4"); setAttribute("kind", gameKind.tag); setAttribute("id", selfId)
             setAttribute("name", playerName.filter { !it.isISOControl() }.trim().take(16).ifEmpty { "阿噜的朋友" })
             setAttribute("avatar", RoomRoundRules.avatar(avatarId))
         }
@@ -170,7 +170,7 @@ class NsdRoomDiscovery(context: Context, private val gameKind: NearbyGameKind, p
                     val address = addresses.firstOrNull { it is Inet4Address && it.isSiteLocalAddress &&
                         !it.isLoopbackAddress && !it.isAnyLocalAddress }
                     if (found.contains(service.serviceName) && id != null && id != selfId &&
-                        id.matches(Regex("[a-f0-9]{12}")) && attr("version") == "3" && attr("kind") == gameKind.tag &&
+                        id.matches(Regex("[a-f0-9]{12}")) && attr("version") == "4" && attr("kind") == gameKind.tag &&
                         serviceInfo.serviceName.matches(Regex("Gulu-${gameKind.tag}-$id(?: \\(\\d+\\))?")) &&
                         serviceInfo.port == gameKind.port && address is Inet4Address && address.isSiteLocalAddress &&
                         !address.isLoopbackAddress && !address.isAnyLocalAddress) {

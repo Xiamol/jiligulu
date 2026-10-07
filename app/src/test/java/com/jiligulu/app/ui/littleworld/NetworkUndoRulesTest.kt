@@ -93,9 +93,9 @@ class NetworkUndoRulesTest {
             val wire = XiangqiLanProtocol.encode(packet)
             assertTrue(wire.length <= 1_024); assertEquals(packet, XiangqiLanProtocol.decode(wire))
         }
-        for (wire in listOf("XQ1|UNDO_REQUEST|2|0|RED", "XQ1|UNDO_REQUEST|-1|2|RED", "XQ1|UNDO_REQUEST|2|1|UNKNOWN",
-            "XQ1|UNDO_RESPONSE|2|1|2", "XQ1|UNDO_RESPONSE|2|1|RED|2", "XQ1|UNDO_RESPONSE|2|1|UNKNOWN|1",
-            "XQ1|UNDO_RESPONSE|2|1|1|EXTRA", "XQ1|UNDO_RESULT|2|1|RED|YES")) rejects { XiangqiLanProtocol.decode(wire) }
+        for (wire in listOf("XQ2|UNDO_REQUEST|2|0|RED", "XQ2|UNDO_REQUEST|-1|2|RED", "XQ2|UNDO_REQUEST|2|1|UNKNOWN",
+            "XQ2|UNDO_RESPONSE|2|1|2", "XQ2|UNDO_RESPONSE|2|1|RED|2", "XQ2|UNDO_RESPONSE|2|1|UNKNOWN|1",
+            "XQ2|UNDO_RESPONSE|2|1|1|EXTRA", "XQ2|UNDO_RESULT|2|1|RED|YES")) rejects { XiangqiLanProtocol.decode(wire) }
     }
 
     @Test fun gomokuSnapshotsCheckCountsAndOneLegalStepAndKeepGameNamespacesSeparate() {
@@ -109,8 +109,8 @@ class NetworkUndoRulesTest {
         assertFalse(GomokuRoomProtocol.acceptsSnapshot(1, one, true, GomokuRoomMessage.Snapshot(3, two)))
         rejects { GomokuRoomProtocol.decode(XiangqiLanProtocol.encode(XiangqiLanMessage.Hello)) }
         rejects { GomokuRoomProtocol.decode(GomokuRoomProtocol.encode(GomokuRoomMessage.Snapshot(1, one.copy(currentPlayer = 1)))) }
-        rejects { GomokuRoomProtocol.decode("GO1|MOVE|1|225") }
-        rejects { GomokuRoomProtocol.decode("GO1|STATE|1|2|PLAYING|0|" + List(225) { 2 }.joinToString(",")) }
+        rejects { GomokuRoomProtocol.decode("GO2|MOVE|1|225") }
+        rejects { GomokuRoomProtocol.decode("GO2|STATE|1|2|PLAYING|0|" + List(225) { 2 }.joinToString(",")) }
     }
 
     @Test fun gomokuUndoAlsoRequiresOpponentConsentAndCannotRewriteOrReplay() {

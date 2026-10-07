@@ -46,7 +46,27 @@ open class XiangqiRoomSession protected constructor(private val context: Context
     private var targetId = ""
     private var foreground = true
     private var localResignationIntent = false
-    private fun canLocalUndo(): Boolean = mutable.value.localSide?.let { history.canUndo(it) } == true && mutable.value.resignedBy == null
+    private fun canLocalUndo(): Boolean = mutable.value.localSide?.let { history.canUndo(it) } == true && mutable.value.resignedBy == null && !mutable.value.agreedDraw
+    private val draw by lazy { RoomDrawNegotiation(
+        hosting={hosting},player={mutable.value.localSide?.let {if(it==XiangqiSide.RED)1 else 2}},round={assignment?.round},
+        revision={mutable.value.revision},playing={mutable.value.game.outcome==XiangqiOutcome.PLAYING},
+        available={mutable.value.let {it.connected&&!it.localBackground&&!it.remoteBackground&&!it.reconnecting&&!it.awaitingAck&&it.pendingUndoRequest==null&&it.rematchRequestedBy==null}},
+        suspended=::negotiationSuspended,send={send(XiangqiLanMessage.Control(it))},
+        present={offer,mine->mutable.value=mutable.value.copy(pendingDrawRequest=offer?.player?.let(::side),pendingDrawId=offer?.id?:0,myDrawRequested=mine,
+            canUndo=offer==null&&canLocalUndo(),status=if(offer==null)turnStatus(mutable.value.game)else if(mine)"等待棋友同意和棋"else"棋友想和棋")},
+        finish=::commitDraw) }
+    fun requestDraw()=draw.request()
+    fun respondToDraw(accept:Boolean)=draw.respond(accept)
+    fun cancelDraw()=draw.cancel()
+    private fun commitDraw(nextRevision:Int) {
+        val current=mutable.value
+        if(current.game.outcome!=XiangqiOutcome.PLAYING||current.revision==Int.MAX_VALUE||nextRevision!=current.revision+1)return
+        clearUndo();clearAck();clearVotes();history.cancelPending()
+        mutable.value=mutable.value.copy(game=current.game.copy(outcome=XiangqiOutcome.DRAW),revision=nextRevision,
+            pendingDrawRequest=null,myDrawRequested=false,agreedDraw=true,pendingUndoRequest=null,canUndo=false,awaitingAck=false,
+            resignedBy=null,remoteSelection=null,error=null,status="双方同意和棋")
+        enterResult()
+    }
 
     fun host(code: String = "", playerName: String = "棋友", avatarId: String = "aru") {
         val target = if (online) if(code.isBlank()) RoomRoundRules.randomCode() else RoomRoundRules.code(code) else ""
@@ -86,7 +106,7 @@ open class XiangqiRoomSession protected constructor(private val context: Context
                 if (mutable.value.reconnecting) mutable.value = mutable.value.copy(reconnecting = false, error = null, status = turnStatus(mutable.value.game))
                 receive(message)
                 refreshUndoDeadline()
-            }.onFailure { fail("收到无效象棋数据，连接已关闭") } },
+            }.onFailure { fail(if(it is RoomVersionMismatchException)"棋友版本不兼容，请双方升级至1.0.3"else "收到无效象棋数据，连接已关闭") } },
             recovering = { if (token == generation && initialized) { refreshUndoDeadline(); mutable.value = mutable.value.copy(reconnecting = true, status = "正在恢复连接，棋局为你留着…"); refreshUndoDeadline() } },
             recovered = { if (token == generation) { refreshUndoDeadline(); lastPacket = SystemClock.uptimeMillis(); mutable.value = mutable.value.copy(reconnecting = false, error = null, status = turnStatus(mutable.value.game)); refreshUndoDeadline(); sendPresence() } },
             failure = { if (token == generation) fail(it) },
@@ -99,7 +119,7 @@ open class XiangqiRoomSession protected constructor(private val context: Context
 
     fun submitMove(move: XiangqiMove) {
         val current = mutable.value
-        if (!initialized || !current.connected || current.localBackground || current.remoteBackground || current.reconnecting || current.awaitingAck || current.pendingUndoRequest != null ||
+        if (!initialized || !current.connected || current.localBackground || current.remoteBackground || current.reconnecting || current.awaitingAck || current.pendingUndoRequest != null || current.pendingDrawRequest!=null ||
             current.rematchRequestedBy!=null || current.game.turnSide != current.localSide) return
         val next = XiangqiEngine.play(current.game, move)
         if (next === current.game) return
@@ -131,7 +151,7 @@ open class XiangqiRoomSession protected constructor(private val context: Context
     fun requestRematch() = respondToRematch(true)
     fun respondToRematch(accept:Boolean) {
         val round=assignment ?: return;val current=mutable.value
-        if(!current.connected || current.pendingUndoRequest!=null || current.awaitingAck || accept && current.myRematchRequested) return
+        if(!current.connected || current.pendingUndoRequest!=null || current.pendingDrawRequest!=null || current.awaitingAck || accept && current.myRematchRequested) return
         if(hosting) receiveVote(RoomControl.Vote(round.round,current.revision,accept),fromHost=true)
         else {
             if(localVoteSequence==Int.MAX_VALUE) {fail("协商次数过多，请重新创建房间");return}
@@ -143,8 +163,8 @@ open class XiangqiRoomSession protected constructor(private val context: Context
     fun requestUndo() {
         val current = mutable.value
         val player = current.localSide ?: return
-        if (!initialized || !current.connected || current.localBackground || current.remoteBackground || current.reconnecting || current.awaitingAck || current.pendingUndoRequest != null || current.rematchRequestedBy!=null) return
-        if (current.resignedBy != null) return
+        if (!initialized || !current.connected || current.localBackground || current.remoteBackground || current.reconnecting || current.awaitingAck || current.pendingUndoRequest != null || current.pendingDrawRequest!=null || current.rematchRequestedBy!=null) return
+        if (current.resignedBy != null || current.agreedDraw) return
         val request = history.beginLocal(current.revision, current.game, player) ?: return
         showUndo(request); send(XiangqiLanMessage.UndoRequest(request))
     }
@@ -170,7 +190,7 @@ open class XiangqiRoomSession protected constructor(private val context: Context
             XiangqiLanMessage.Pong -> Unit
             is XiangqiLanMessage.Move -> {
                 if (!hosting || !current.connected) throw LanProtocolException()
-                val next = if (message.revision == current.revision && current.pendingUndoRequest == null &&
+                val next = if (message.revision == current.revision && current.pendingUndoRequest == null && current.pendingDrawRequest==null &&
                     current.rematchRequestedBy==null && current.game.turnSide == requireNotNull(current.localSide).opponent) XiangqiEngine.play(current.game, message.move) else current.game
                 if (next === current.game) send(XiangqiLanMessage.Reject(XiangqiLanRejection.ILLEGAL)) else publish(next)
             }
@@ -183,7 +203,7 @@ open class XiangqiRoomSession protected constructor(private val context: Context
                 if(!valid || start==null && advancing && !(current.game.turnSide != current.localSide ||
                     pendingGuestMove?.let {XiangqiEngine.play(current.game,it)==message.game}==true)) throw LanProtocolException()
                 if (message.revision != current.revision && !history.recordAdvance(current.game, message.game)) throw LanProtocolException()
-                if (message.revision != current.revision) { clearUndo(); clearVotes() }
+                if (message.revision != current.revision) { clearUndo(); clearVotes();draw.clear() }
                 initialized = true; handshake.validatedState(); clearWaiting()
                 if(start!=null || advancing) clearAck()
                 if(start!=null) {localVoteSequence=0;guestVoteSequence=0;assignment=start;pendingStart=null;history=XiangqiUndoHistory();clearRound();hostReady=false;guestReady=false;localResignationIntent=false}
@@ -192,6 +212,8 @@ open class XiangqiRoomSession protected constructor(private val context: Context
                     canUndo = canLocalUndo() && (start!=null || advancing || !current.awaitingAck),
                     pendingUndoRequest = history.pending?.requester,localSide=side(3-requireNotNull(assignment).hostPlayer),remoteSelection=null,
                     round=assignment!!.round,resignedBy=if(start!=null) null else current.resignedBy,awaitingMatch=false,pendingMatchName=null,roomEnded=false,
+                    pendingDrawRequest=if(start!=null||advancing)null else mutable.value.pendingDrawRequest,
+                    myDrawRequested=if(start!=null||advancing)false else mutable.value.myDrawRequested,agreedDraw=if(start!=null)false else current.agreedDraw,
                     resultSecondsLeft=if(start!=null) 0 else current.resultSecondsLeft,
                     rematchRequestedBy=mutable.value.rematchRequestedBy,myRematchRequested=mutable.value.myRematchRequested)
                 if(start!=null) sendPresence()
@@ -203,6 +225,7 @@ open class XiangqiRoomSession protected constructor(private val context: Context
                     error = "棋局已更新，这一步没有落下", status = turnStatus(current.game))
             }
             is XiangqiLanMessage.UndoRequest -> {
+                if(current.pendingDrawRequest!=null){if(hosting)send(XiangqiLanMessage.UndoResult(message.request,XiangqiUndoResolution.BUSY));return}
                 val player = current.localSide ?: return
                 if (!current.connected || message.request.requester != player.opponent) throw LanProtocolException()
                 when (val offered = history.receiveOffer(message.request, current.revision, current.game, player, hosting)) {
@@ -266,7 +289,7 @@ open class XiangqiRoomSession protected constructor(private val context: Context
     }
     private fun negotiationSuspended(): Boolean = mutable.value.localBackground || mutable.value.remoteBackground ||
         mutable.value.reconnecting || SystemClock.uptimeMillis() - lastPacket >= RoomRoundRules.CONNECTION_QUIET_MILLIS
-    private fun refreshUndoDeadline() { undoDeadline?.tick(SystemClock.uptimeMillis(), negotiationSuspended()) }
+    private fun refreshUndoDeadline() { undoDeadline?.tick(SystemClock.uptimeMillis(), negotiationSuspended());draw.refreshDeadline() }
     private fun cancelUndo(request: XiangqiUndoRequest, resolution: XiangqiUndoResolution, notify: Boolean) {
         if (!history.cancelIfMatches(request)) return
         clearUndo()
@@ -289,6 +312,7 @@ open class XiangqiRoomSession protected constructor(private val context: Context
     private fun turnStatus(game: XiangqiState): String = when (game.outcome) {
         XiangqiOutcome.RED_WON -> "红方获胜"
         XiangqiOutcome.BLACK_WON -> "黑方获胜"
+        XiangqiOutcome.DRAW -> "双方同意和棋"
         XiangqiOutcome.PLAYING -> if (game.turnSide == mutable.value.localSide) "轮到你落子" else "等待伙伴落子"
     }
     /** A short trip to another app pauses both desks without declaring a loser. */
@@ -311,7 +335,7 @@ open class XiangqiRoomSession protected constructor(private val context: Context
     fun resign() {
         val current = mutable.value; val player = current.localSide?.let { if(it == XiangqiSide.RED) 1 else 2 } ?: return
         val round = assignment ?: return
-        if (!current.connected || current.reconnecting || current.awaitingAck || current.game.outcome != XiangqiOutcome.PLAYING) return
+        if (!current.connected || current.reconnecting || current.awaitingAck || current.pendingDrawRequest!=null || current.game.outcome != XiangqiOutcome.PLAYING) return
         if (hosting) commitResignation(player)
         else { localResignationIntent = true; send(XiangqiLanMessage.Control(RoomControl.Resign(round.round, current.revision, player))) }
     }
@@ -359,7 +383,7 @@ open class XiangqiRoomSession protected constructor(private val context: Context
         if(notify!=null && wire!=null) send(XiangqiLanMessage.Control(RoomControl.Close(assignment?.round ?: 0,mutable.value.revision,notify)))
         val notifyPeer = notify != null && (initialized || mutable.value.awaitingMatch)
         val old=wire;wire=null
-        generation++; handshake.close(); clearWaiting(); clearAck(); clearUndo(); clearSelection(); heartbeat?.let(main::removeCallbacks); heartbeat = null
+        generation++; handshake.close(); clearWaiting(); clearAck(); clearUndo();draw.reset(); clearSelection(); heartbeat?.let(main::removeCallbacks); heartbeat = null
         clearRound();initialized = false; history = XiangqiUndoHistory();localVoteSequence=0;guestVoteSequence=0;pendingStart=null;nearbyId=null
         if(!notifyPeer) old?.close() else main.postDelayed({old?.close()},200)
         mutable.value = mutable.value.copy(localSide = if(assignment!=null) mutable.value.localSide else null, hostAddress = "", connected = false, sessionActive = false,
@@ -370,6 +394,7 @@ open class XiangqiRoomSession protected constructor(private val context: Context
     private fun receiveControl(control:RoomControl) {
         val current=mutable.value
         when(control) {
+            is RoomControl.DrawRequest,is RoomControl.DrawPending,is RoomControl.DrawResponse,is RoomControl.DrawResult -> draw.receive(control)
             is RoomControl.Hello -> {
                 if (peerProfileReceived || initialized || assignment!=null || current.pendingMatchName!=null) throw LanProtocolException()
                 if (!hosting) {
@@ -444,11 +469,11 @@ open class XiangqiRoomSession protected constructor(private val context: Context
     }
     private fun beginRound(next:RoomAssignment) {
         val current=mutable.value
-        clearWaiting();handshake.close();clearAck();clearUndo();clearRound();clearSelection()
+        clearWaiting();handshake.close();clearAck();clearUndo();draw.reset();clearRound();clearSelection()
         history=XiangqiUndoHistory();localVoteSequence=0;guestVoteSequence=0;assignment=next;initialized=true;pendingStart=null;nearbyId=null;localResignationIntent=false
         mutable.value=current.copy(game=XiangqiEngine.newGame(),revision=next.revision,localSide=side(next.hostPlayer),remoteSelection=null,
             round=next.round,isHost=true,connected=true,awaitingMatch=false,pendingMatchName=null,busy=false,awaitingAck=false,
-            pendingUndoRequest=null,canUndo=false,rematchRequestedBy=null,myRematchRequested=false,resultSecondsLeft=0,roomEnded=false,resignedBy=null,error=null,status="棋友已就位，红方先行")
+            pendingUndoRequest=null,pendingDrawRequest=null,myDrawRequested=false,agreedDraw=false,canUndo=false,rematchRequestedBy=null,myRematchRequested=false,resultSecondsLeft=0,roomEnded=false,resignedBy=null,error=null,status="棋友已就位，红方先行")
         if (next.round==1) send(XiangqiLanMessage.Control(RoomControl.Hello(playerName,avatarId=avatarId)))
         send(XiangqiLanMessage.Control(RoomControl.Start(next)))
         send(XiangqiLanMessage.Snapshot(next.revision,XiangqiEngine.newGame()))
@@ -461,7 +486,7 @@ open class XiangqiRoomSession protected constructor(private val context: Context
             if(vote.sequence<=guestVoteSequence) {sendVotes();return}
             guestVoteSequence=vote.sequence
         }
-        if(current.pendingUndoRequest!=null) {sendVotes();return}
+        if(current.pendingUndoRequest!=null || current.pendingDrawRequest!=null) {sendVotes();return}
         if(!vote.accept) {
             if(current.game.outcome!=XiangqiOutcome.PLAYING) finishRoom(RoomCloseReason.NO_REMATCH.hint,RoomCloseReason.NO_REMATCH)
             else {clearVotes();showVotes();sendVotes()}
@@ -512,7 +537,7 @@ open class XiangqiRoomSession protected constructor(private val context: Context
     private var selection:GridCell?=null
     fun selectPiece(cell:GridCell?) {
         val current=mutable.value;val local=current.localSide ?: return
-        if(!current.connected || current.awaitingAck || current.pendingUndoRequest!=null || current.rematchRequestedBy!=null ||
+        if(!current.connected || current.awaitingAck || current.pendingUndoRequest!=null || current.pendingDrawRequest!=null || current.rematchRequestedBy!=null ||
             !XiangqiSelectionRules.canSelect(current.game,local,cell)) return
         selection=cell
         if(selectionTask!=null) return

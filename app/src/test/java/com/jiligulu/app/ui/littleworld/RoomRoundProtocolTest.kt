@@ -54,7 +54,10 @@ class RoomRoundProtocolTest {
             RoomControl.Start(RoomAssignment(2, 2, 67)), RoomControl.Vote(2, 67, true),
             RoomControl.Votes(2, 67, true, false), RoomControl.Close(2, 67, RoomCloseReason.RESULT_TIMEOUT),
             RoomControl.Presence(2,67,1,true),RoomControl.Presence(2,67,2,false),
-            RoomControl.Resign(2,67,1),RoomControl.Resigned(2,68,1))
+            RoomControl.Resign(2,67,1),RoomControl.Resigned(2,68,1),
+            RoomControl.DrawRequest(RoomDrawOffer(2,67,3,1)),RoomControl.DrawPending(RoomDrawOffer(2,67,3,1)),
+            RoomControl.DrawResponse(RoomDrawOffer(2,67,3,1),true),
+            RoomControl.DrawResult(RoomDrawOffer(2,67,3,1),RoomDrawResolution.ACCEPTED,68))
         for (message in messages) {
             assertEquals(XiangqiLanMessage.Control(message), XiangqiLanProtocol.decode(XiangqiLanProtocol.encode(XiangqiLanMessage.Control(message))))
             assertEquals(GomokuRoomMessage.Control(message), GomokuRoomProtocol.decode(GomokuRoomProtocol.encode(GomokuRoomMessage.Control(message))))
@@ -66,7 +69,9 @@ class RoomRoundProtocolTest {
             "HELLO_NAME|5qOL5Y-L|000000000002|-", "HELLO_NAME|5qOL5Y-L|000000000001|000000000001",
             "START|0|1|0", "START|1|3|0", "VOTE|1|0|2", "VOTES|1|0|1|1|extra",
             "CLOSE|1|2147483648|LEFT", "PRESENCE|1|0|1|2", "PRESENCE|0|0|1|0",
-            "RESIGN|1|0|3", "RESIGNED|1|0|1", "RESIGNED|1|1|2|extra")) {
+            "RESIGN|1|0|3", "RESIGNED|1|0|1", "RESIGNED|1|1|2|extra",
+            "DRAW_REQUEST|0|1|2|1","DRAW_PENDING|1|0|0|2","DRAW_RESPONSE|1|0|1|2|2",
+            "DRAW_RESULT|1|0|1|2|ACCEPTED|2147483648","DRAW_RESULT|1|0|1|2|WIN|1")) {
             assertThrows(LanProtocolException::class.java) { RoomControlCodec.decode(bad) }
         }
     }
@@ -83,6 +88,25 @@ class RoomRoundProtocolTest {
         assertFalse(GomokuRoomProtocol.acceptsSnapshot(1, go, true, GomokuRoomMessage.Snapshot(2, GomokuEngine.newGame()), allowRestart = false))
         val xq = XiangqiEngine.play(XiangqiEngine.newGame(), XiangqiMove(GridCell(0, 6), GridCell(0, 5)))
         assertFalse(XiangqiSnapshotRules.accepts(1, xq, true, XiangqiLanMessage.Snapshot(2, XiangqiEngine.newGame()), allowRestart = false))
+        assertFalse(XiangqiSnapshotRules.accepts(1,xq,true,XiangqiLanMessage.Snapshot(2,xq.copy(outcome=XiangqiOutcome.DRAW)),allowRestart=false))
+        assertFalse(GomokuRoomProtocol.acceptsSnapshot(1,go,true,GomokuRoomMessage.Snapshot(2,go.copy(outcome=GomokuOutcome.DRAW)),allowRestart=false))
+    }
+
+    @Test fun obsoleteRoomProtocolsAreAnExplicitVersionMismatch() {
+        assertThrows(RoomVersionMismatchException::class.java){XiangqiLanProtocol.decode("XQ1|HELLO")}
+        assertThrows(RoomVersionMismatchException::class.java){GomokuRoomProtocol.decode("GO1|HELLO")}
+    }
+
+    @Test fun drawConsentCannotCrossNonceRoundRevisionOrBeForged() {
+        val offer=RoomDrawOffer(2,7,4,2)
+        val result=RoomControl.DrawResult(offer,RoomDrawResolution.ACCEPTED,8)
+        assertTrue(RoomDrawRules.acceptsResult(2,7,offer,true,result))
+        assertFalse(RoomDrawRules.acceptsResult(2,7,offer,false,result))
+        assertFalse(RoomDrawRules.acceptsResult(3,7,offer,true,result))
+        assertFalse(RoomDrawRules.acceptsResult(2,8,offer,true,result))
+        assertFalse(RoomDrawRules.acceptsResult(2,7,offer,true,result.copy(offer=offer.copy(id=5))))
+        assertFalse(RoomDrawRules.acceptsResult(2,7,offer,true,result.copy(resultingRevision=9)))
+        assertFalse(RoomDrawRules.accepts(2,Int.MAX_VALUE,offer.copy(revision=Int.MAX_VALUE)))
     }
 
     @Test fun invitationProfilesAreOptionalButAvatarIdsMustComeFromTheBundledCatalogue() {

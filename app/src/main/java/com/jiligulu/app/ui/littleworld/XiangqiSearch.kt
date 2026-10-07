@@ -320,6 +320,7 @@ private class XiangqiSearch(shouldCancel: () -> Boolean, timeBudgetMillis: Long?
         XiangqiOutcome.PLAYING -> null
         XiangqiOutcome.RED_WON -> if (state.turnSide == XiangqiSide.RED) mate - ply else -mate + ply
         XiangqiOutcome.BLACK_WON -> if (state.turnSide == XiangqiSide.BLACK) mate - ply else -mate + ply
+        XiangqiOutcome.DRAW -> 0
     }
 
     private fun evaluate(state: XiangqiState): Int {

@@ -45,8 +45,8 @@ class XiangqiLanProtocolTest {
             assertTrue(line.length <= XiangqiLanProtocol.MAX_LINE_BYTES)
             assertEquals(hint, XiangqiLanProtocol.decode(line))
         }
-        for (line in listOf("XQ1|SELECT|0|-2", "XQ1|SELECT|0|90", "XQ1|SELECT|-1|0",
-            "XQ1|SELECT|0|1|EXTRA", "XQ1|SELECT|2147483648|0")) {
+        for (line in listOf("XQ2|SELECT|0|-2", "XQ2|SELECT|0|90", "XQ2|SELECT|-1|0",
+            "XQ2|SELECT|0|1|EXTRA", "XQ2|SELECT|2147483648|0")) {
             expectProtocolFailure { XiangqiLanProtocol.decode(line) }
         }
         for (cell in listOf(GridCell(-1, 0), GridCell(9, 9), GridCell(0, 10))) {
@@ -59,10 +59,10 @@ class XiangqiLanProtocolTest {
 
     @Test fun rejectsUnversionedMessagesExtraFieldsBadMovesAndUnknownCommands() {
         for (line in listOf(
-            "XQ2|HELLO", "XQ1|HELLO|EXTRA", "XQ1|LAUNCH|anything",
-            "XQ1|MOVE|-1|54|45", "XQ1|MOVE|1|90|45", "XQ1|MOVE|1|54|54",
-            "XQ1|MOVE|2147483648|54|45", "XQ1|MOVE|1|54|45|EXTRA",
-            "XQ1|REJECT|UNKNOWN", "XQ1|PING\u0000",
+            "XQ3|HELLO", "XQ2|HELLO|EXTRA", "XQ2|LAUNCH|anything",
+            "XQ2|MOVE|-1|54|45", "XQ2|MOVE|1|90|45", "XQ2|MOVE|1|54|54",
+            "XQ2|MOVE|2147483648|54|45", "XQ2|MOVE|1|54|45|EXTRA",
+            "XQ2|REJECT|UNKNOWN", "XQ2|PING\u0000",
         )) expectProtocolFailure { XiangqiLanProtocol.decode(line) }
     }
 
@@ -83,7 +83,7 @@ class XiangqiLanProtocolTest {
             field(initial, 6, "54"),
             field(initial, 7, "90"),
         )) expectProtocolFailure { XiangqiLanProtocol.decode(line) }
-        expectProtocolFailure { XiangqiWireCodec.decodeState("XQ1|PING") }
+        expectProtocolFailure { XiangqiWireCodec.decodeState("XQ2|PING") }
         expectProtocolFailure { XiangqiWireCodec.decodeMove(initial) }
     }
 
@@ -105,7 +105,7 @@ class XiangqiLanProtocolTest {
     }
 
     @Test fun fragmentedLineSurvivesAReadTimeoutAndNextLineStartsCleanly() {
-        val bytes = "XQ1|MOVE|3|27|36\nXQ1|PING\n".toByteArray(Charsets.US_ASCII)
+        val bytes = "XQ2|MOVE|3|27|36\nXQ2|PING\n".toByteArray(Charsets.US_ASCII)
         val input = object : InputStream() {
             var position = 0
             var timedOut = false
@@ -124,8 +124,8 @@ class XiangqiLanProtocolTest {
         } catch (_: SocketTimeoutException) {
             // A subsequent read must resume the same line, not parse the suffix as a new message.
         }
-        assertEquals("XQ1|MOVE|3|27|36", reader.readLine())
-        assertEquals("XQ1|PING", reader.readLine())
+        assertEquals("XQ2|MOVE|3|27|36", reader.readLine())
+        assertEquals("XQ2|PING", reader.readLine())
         assertNull(reader.readLine())
     }
 
@@ -133,7 +133,7 @@ class XiangqiLanProtocolTest {
         for (bytes in listOf(
             ("A".repeat(XiangqiLanProtocol.MAX_LINE_BYTES + 1) + "\n").toByteArray(),
             byteArrayOf('X'.code.toByte(), 255.toByte(), '\n'.code.toByte()),
-            "XQ1|MOVE|1|54".toByteArray(),
+            "XQ2|MOVE|1|54".toByteArray(),
         )) expectProtocolFailure { BoundedLanLineReader(ByteArrayInputStream(bytes)).readLine() }
         expectProtocolFailure {
             XiangqiLanProtocol.decode("A".repeat(XiangqiLanProtocol.MAX_LINE_BYTES + 1))

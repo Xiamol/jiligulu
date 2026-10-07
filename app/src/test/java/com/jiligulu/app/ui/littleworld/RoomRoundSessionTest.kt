@@ -71,6 +71,100 @@ class RoomRoundSessionTest {
         assertEquals(2, host.state.value.revision)
     }
 
+    @Test fun gomokuDrawNeedsConsentAndThenSupportsAnOrdinarySwappedRematch() {
+        val(host,guest)=gomoku(1)
+        host.submitMove(GridCell(7,7));drain()
+        val before=host.state.value.game;val revision=host.state.value.revision
+        host.requestDraw();drain()
+        assertEquals(1,guest.state.value.pendingDrawRequest)
+        guest.submitMove(GridCell(8,7));host.requestUndo();drain()
+        assertEquals(before,host.state.value.game)
+        guest.respondToDraw(false);drain()
+        assertNull(host.state.value.pendingDrawRequest);assertEquals(revision,guest.state.value.revision)
+        host.requestDraw();drain();guest.respondToDraw(true);drain()
+        assertEquals(GomokuOutcome.DRAW,host.state.value.game.outcome)
+        assertEquals(host.state.value.game,guest.state.value.game)
+        assertEquals(before.board,guest.state.value.game.board)
+        assertEquals(revision+1,guest.state.value.revision);assertTrue(guest.state.value.agreedDraw)
+        host.requestRematch();drain();guest.respondToRematch(true);drain()
+        assertEquals(2,host.state.value.round);assertEquals(2,host.state.value.localPlayer)
+        assertFalse(guest.state.value.agreedDraw);assertNull(guest.state.value.pendingDrawRequest)
+        assertEquals(GomokuEngine.newGame(),guest.state.value.game)
+        host.close();guest.close()
+    }
+
+    @Test fun cancelledAndReplayedDrawRequestsNeverCancelANewerNonce() {
+        val(host,guest,channel)=gomoku(1)
+        guest.requestDraw();drain()
+        val oldRequest=channel.guest.sent.last {it.contains("|DRAW_REQUEST|")}
+        guest.cancelDraw();drain()
+        val oldResult=channel.host.sent.last {it.contains("|DRAW_RESULT|")}
+        assertNull(host.state.value.pendingDrawRequest)
+        guest.requestDraw();drain();val id=host.state.value.pendingDrawId
+        channel.guest.send(oldRequest);channel.host.send(oldResult);drain()
+        assertEquals(id,host.state.value.pendingDrawId);assertEquals(id,guest.state.value.pendingDrawId)
+        host.respondToDraw(false);drain()
+        assertEquals(GomokuOutcome.PLAYING,host.state.value.game.outcome)
+        assertNull(guest.state.value.pendingDrawRequest)
+        host.close();guest.close()
+    }
+
+    @Test fun simultaneousDrawRequestsAgreeOnceAndDoNotDeadlock() {
+        val(host,guest)=gomoku(1)
+        host.requestDraw();guest.requestDraw();drain()
+        assertEquals(GomokuOutcome.DRAW,host.state.value.game.outcome)
+        assertEquals(host.state.value.game,guest.state.value.game)
+        assertEquals(1,host.state.value.revision);assertEquals(1,guest.state.value.revision)
+        assertNull(host.state.value.pendingDrawRequest);assertNull(guest.state.value.pendingDrawRequest)
+        host.close();guest.close()
+    }
+
+    @Test fun cancellationAndAcceptanceRaceResolvesByHostOrderOnBothDesks() {
+        val(host,guest)=gomoku(1)
+        host.requestDraw();drain();guest.respondToDraw(true);host.cancelDraw();drain()
+        assertEquals(GomokuOutcome.PLAYING,guest.state.value.game.outcome)
+        assertNull(guest.state.value.pendingDrawRequest)
+        guest.requestDraw();drain();host.respondToDraw(true);guest.cancelDraw();drain()
+        assertEquals(GomokuOutcome.DRAW,guest.state.value.game.outcome)
+        assertEquals(host.state.value.game,guest.state.value.game)
+        host.close();guest.close()
+    }
+
+    @Test fun drawTimeoutPausesInBackgroundAndDepartureKeepsTheOriginalBoard() {
+        val(host,guest)=gomoku(1)
+        host.requestDraw();drain()
+        guest.setForeground(false);drain()
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(60))
+        assertNotNull(host.state.value.pendingDrawRequest)
+        guest.setForeground(true);drain()
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(21))
+        assertNull(host.state.value.pendingDrawRequest);assertNull(guest.state.value.pendingDrawRequest)
+        assertEquals(GomokuOutcome.PLAYING,host.state.value.game.outcome)
+        host.requestDraw();drain();val board=guest.state.value.game
+        host.close();drain();assertTrue(guest.state.value.peerLeft)
+        assertEquals(board,guest.state.value.game);assertNull(guest.state.value.pendingDrawRequest)
+        guest.close()
+    }
+
+    @Test fun xiangqiDrawPreservesAllPiecesAndRejectsOldRoundReplay() {
+        val host=XiangqiLanSession();val guest=XiangqiLanSession();val channel=Channel()
+        host.wireFactory=channel.factory;guest.wireFactory=channel.factory;host.firstPlayer={1}
+        host.host();guest.join("192.168.1.8");channel.connect();host.respondToMatch(true);drain()
+        host.submitMove(XiangqiMove(GridCell(0,6),GridCell(0,5)));drain()
+        val before=host.state.value.game
+        guest.requestDraw();drain();val oldRequest=channel.guest.sent.last {it.contains("|DRAW_REQUEST|")}
+        host.respondToDraw(false);drain();assertEquals(before,guest.state.value.game)
+        guest.requestDraw();drain();host.respondToDraw(true);drain()
+        assertEquals(XiangqiOutcome.DRAW,host.state.value.game.outcome)
+        assertEquals(before.board,guest.state.value.game.board);assertEquals(before.ply,guest.state.value.game.ply)
+        assertEquals(host.state.value.game,guest.state.value.game)
+        host.requestRematch();drain();guest.respondToRematch(true);drain()
+        channel.guest.send(oldRequest);drain()
+        assertTrue(host.state.value.connected);assertEquals(2,host.state.value.round)
+        assertEquals(XiangqiOutcome.PLAYING,guest.state.value.game.outcome)
+        host.close();guest.close()
+    }
+
     @Test fun rematchNeverRestartsUnilaterallyAndSwapsEveryTime() {
         val (host, guest, channel) = gomoku(1)
         host.submitMove(GridCell(7, 7)); drain()
@@ -371,7 +465,7 @@ class RoomRoundSessionTest {
             else { channel.host.events.recovering(); channel.guest.events.recovering() }
             channel.host.hold = true
             host.respondToUndo(true); drain()
-            val approval = channel.host.sent.last { it.startsWith("GO1|UNDO_STATE|") }
+            val approval = channel.host.sent.last { it.startsWith("GO2|UNDO_STATE|") }
             shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(45))
             assertTrue(guest.state.value.connected); assertEquals(2, guest.state.value.pendingUndoRequest)
             if(background) guest.setForeground(true)
@@ -398,7 +492,7 @@ class RoomRoundSessionTest {
         assertEquals(XiangqiSide.RED,guest.state.value.pendingUndoRequest)
         guest.setForeground(true);drain()
         channel.host.hold=true;guest.respondToUndo(true);drain()
-        val approval=channel.host.sent.last {it.startsWith("XQ1|UNDO_STATE|")}
+        val approval=channel.host.sent.last {it.startsWith("XQ2|UNDO_STATE|")}
         channel.guest.events.recovering()
         shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(45))
         assertEquals(XiangqiSide.RED,guest.state.value.pendingUndoRequest)
@@ -410,7 +504,7 @@ class RoomRoundSessionTest {
     @Test fun staleRevisionResignationStillEndsTheSameLiveRoundAndDoesNotLeakIntoRematch() {
         val (host,guest,channel)=gomoku(1)
         channel.guest.hold=true;guest.resign()
-        val resignation=channel.guest.sent.last {it.startsWith("GO1|ROOM|RESIGN|")}
+        val resignation=channel.guest.sent.last {it.startsWith("GO2|ROOM|RESIGN|")}
         host.submitMove(GridCell(7,7));drain()
         assertEquals(1,guest.state.value.revision)
         channel.guest.hold=false;channel.guest.send(resignation);drain()
@@ -431,7 +525,7 @@ class RoomRoundSessionTest {
         host.wireFactory=channel.factory;guest.wireFactory=channel.factory;host.firstPlayer={1}
         host.host();guest.join("192.168.1.8");channel.connect();host.respondToMatch(true);drain()
         channel.guest.hold=true;guest.resign()
-        val resignation=channel.guest.sent.last {it.startsWith("XQ1|ROOM|RESIGN|")}
+        val resignation=channel.guest.sent.last {it.startsWith("XQ2|ROOM|RESIGN|")}
         host.submitMove(XiangqiMove(GridCell(0,6),GridCell(0,5)));drain()
         channel.guest.hold=false;channel.guest.send(resignation);drain()
         assertTrue(guest.state.value.connected);assertEquals(XiangqiOutcome.RED_WON,guest.state.value.game.outcome)

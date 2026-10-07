@@ -18,6 +18,10 @@ internal sealed interface RoomControl {
     data class Presence(val round: Int, val revision: Int, val player: Int, val background: Boolean) : RoomControl
     data class Resign(val round: Int, val revision: Int, val player: Int) : RoomControl
     data class Resigned(val round: Int, val revision: Int, val player: Int) : RoomControl
+    data class DrawRequest(val offer: RoomDrawOffer) : RoomControl
+    data class DrawPending(val offer: RoomDrawOffer) : RoomControl
+    data class DrawResponse(val offer: RoomDrawOffer, val accept: Boolean) : RoomControl
+    data class DrawResult(val offer: RoomDrawOffer, val resolution: RoomDrawResolution, val resultingRevision: Int) : RoomControl
 }
 
 /** Host identity and playing color are independent. Consent belongs to a single round/revision. */
@@ -55,10 +59,15 @@ internal object RoomControlCodec {
         is RoomControl.Presence -> "PRESENCE|${control.round}|${control.revision}|${control.player}|${if(control.background) 1 else 0}"
         is RoomControl.Resign -> "RESIGN|${control.round}|${control.revision}|${control.player}"
         is RoomControl.Resigned -> "RESIGNED|${control.round}|${control.revision}|${control.player}"
+        is RoomControl.DrawRequest -> "DRAW_REQUEST|${control.offer.wire}"
+        is RoomControl.DrawPending -> "DRAW_PENDING|${control.offer.wire}"
+        is RoomControl.DrawResponse -> "DRAW_RESPONSE|${control.offer.wire}|${if(control.accept) 1 else 0}"
+        is RoomControl.DrawResult -> "DRAW_RESULT|${control.offer.wire}|${control.resolution.name}|${control.resultingRevision}"
     }
     fun decode(line: String): RoomControl {
         val p=line.split('|')
         fun number(at:Int, range:IntRange):Int { require(p[at].matches(Regex("\\d{1,10}")));return p[at].toInt().also {require(it in range)} }
+        fun drawOffer() = RoomDrawOffer(number(1,1..RoomRoundRules.MAX_ROUND),number(2,0..Int.MAX_VALUE),number(3,1..Int.MAX_VALUE),number(4,1..2))
         return try { when(p.firstOrNull()) {
             "HELLO_NAME" -> {require(p.size in 4..5 && p[1].matches(Regex("[A-Za-z0-9_-]{1,86}")))
                 val bytes=Base64.getUrlDecoder().decode(p[1]);require(bytes.size<=64)
@@ -75,6 +84,10 @@ internal object RoomControlCodec {
             "PRESENCE" -> {require(p.size==5);RoomControl.Presence(number(1,1..RoomRoundRules.MAX_ROUND),number(2,0..Int.MAX_VALUE),number(3,1..2),number(4,0..1)==1)}
             "RESIGN" -> {require(p.size==4);RoomControl.Resign(number(1,1..RoomRoundRules.MAX_ROUND),number(2,0..Int.MAX_VALUE),number(3,1..2))}
             "RESIGNED" -> {require(p.size==4);RoomControl.Resigned(number(1,1..RoomRoundRules.MAX_ROUND),number(2,1..Int.MAX_VALUE),number(3,1..2))}
+            "DRAW_REQUEST" -> {require(p.size==5);RoomControl.DrawRequest(drawOffer())}
+            "DRAW_PENDING" -> {require(p.size==5);RoomControl.DrawPending(drawOffer())}
+            "DRAW_RESPONSE" -> {require(p.size==6);RoomControl.DrawResponse(drawOffer(),number(5,0..1)==1)}
+            "DRAW_RESULT" -> {require(p.size==7);RoomControl.DrawResult(drawOffer(),RoomDrawResolution.valueOf(p[5]),number(6,0..Int.MAX_VALUE))}
             else -> throw LanProtocolException()
         } } catch(_:Exception) {throw LanProtocolException()}
     }

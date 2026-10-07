@@ -17,6 +17,7 @@ import androidx.compose.material.icons.outlined.Extension
 import androidx.compose.material.icons.outlined.HelpOutline
 import androidx.compose.material.icons.outlined.Logout
 import androidx.compose.material.icons.outlined.Flag
+import androidx.compose.material.icons.outlined.Handshake
 import androidx.compose.material.icons.outlined.PauseCircleOutline
 import androidx.compose.material.icons.outlined.PlayCircleOutline
 import androidx.compose.material.icons.outlined.Refresh
@@ -83,6 +84,7 @@ internal fun ColumnScope.SecretXiangqiGame(state: XiangqiState, mode: XiangqiPla
     nearby: NearbyRoomsState? = null, onNearbyRetry: () -> Unit = {},
     onMatchResponse: (Boolean) -> Unit = {}, onRematchResponse: (Boolean) -> Unit = {}, onExit: () -> Unit = onDisconnect,
     onResign: () -> Unit = {},
+    onDraw: () -> Unit = {}, onDrawResponse: (Boolean) -> Unit = {}, onCancelDraw: () -> Unit = {},
     onModalOpened: () -> Unit = {}, onControlsBottom: (Float) -> Unit = {},
     presentationEpoch: Int = 0,
     onPresentationSkipped: (epoch: Int, position: XiangqiState) -> Unit = { _, _ -> },
@@ -91,7 +93,9 @@ internal fun ColumnScope.SecretXiangqiGame(state: XiangqiState, mode: XiangqiPla
     val finished = state.outcome!=XiangqiOutcome.PLAYING
     val networkMode = mode == XiangqiPlayMode.LAN || mode == XiangqiPlayMode.ONLINE
     val finish = remember(state, mode, lan.localSide, humanSide, lan.resignedBy) {
-        if (networkMode && finished && lan.resignedBy != null) {
+        if(networkMode&&finished&&lan.agreedDraw) {
+            GameFinishPresentation("握手言和","这局平手，下次再战 ♡",FinishMood.DRAW,"和棋")
+        } else if (networkMode && finished && lan.resignedBy != null) {
             val lost = lan.resignedBy == lan.localSide
             GameFinishPresentation(if (lost) "这局先让一步" else "你赢啦", if (lost) "认输也可以，再下一盘吧" else "棋友认输，这一局收好啦",
                 if (lost) FinishMood.LOSE else FinishMood.WIN, if (lost) "认输" else "胜出")
@@ -110,7 +114,7 @@ internal fun ColumnScope.SecretXiangqiGame(state: XiangqiState, mode: XiangqiPla
     var promptRequest by remember(presentationKey) { mutableIntStateOf(0) }
     LaunchedEffect(state, presentationKey, lan.resignedBy) {
         if (state.outcome == XiangqiOutcome.PLAYING) revealedFinish = null
-        else if (networkMode && lan.resignedBy != null && revealedFinish != state) {
+        else if (networkMode && (lan.resignedBy != null || lan.agreedDraw) && revealedFinish != state) {
             // Resigning changes no piece position, so it has no move animation to release the result.
             finishEvent++; revealedFinish = state
         }
@@ -170,9 +174,12 @@ internal fun ColumnScope.SecretXiangqiGame(state: XiangqiState, mode: XiangqiPla
         suppressPrompt = networkMode && lan.rematchRequestedBy != null &&
             lan.rematchRequestedBy != lan.localSide && !lan.myRematchRequested,
     )
-    if (networkMode && resignConfirm && !finished) GameResignDialog(
-        onDismiss = { resignConfirm = false },
-        onConfirm = { resignConfirm = false; onResign() })
+    var drawResponseSent by remember(mode,lan.round,lan.revision,lan.pendingDrawRequest,lan.pendingDrawId){mutableStateOf(false)}
+    if(networkMode&&lan.pendingDrawRequest!=null&&lan.pendingDrawRequest!=lan.localSide) {
+        fun respondDraw(accept:Boolean){if(!drawResponseSent){drawResponseSent=true;onDrawResponse(accept)}}
+        SecretWoodDialog("棋友想和棋",{respondDraw(false)},confirmLabel="同意",onConfirm={respondDraw(true)},
+            dismissLabel="继续下",busy=drawResponseSent,compactWidth=270.dp) { }
+    }
     val playerName = if (state.turnSide == XiangqiSide.RED) "红方" else "黑方"
     val inCheck = remember(state) { state.outcome == XiangqiOutcome.PLAYING && XiangqiEngine.isInCheck(state, state.turnSide) }
     var peerDepartureDismissed by remember(mode, lan.round, lan.hostAddress) { mutableStateOf(false) }
@@ -185,12 +192,14 @@ internal fun ColumnScope.SecretXiangqiGame(state: XiangqiState, mode: XiangqiPla
     val status = when (state.outcome) {
         XiangqiOutcome.RED_WON -> "红方胜出"
         XiangqiOutcome.BLACK_WON -> "黑方胜出"
+        XiangqiOutcome.DRAW -> "双方同意和棋"
         XiangqiOutcome.PLAYING -> when {
             networkMode && lan.reconnecting -> "棋局还在，正在重新连接…"
             networkMode && lan.remoteBackground -> "棋友暂时离开，棋局替你们留着"
             !networkMode && paused -> "棋局已暂停"
             networkMode && lan.awaitingAck -> "正在等另一张棋桌回应…"
             networkMode && lan.pendingUndoRequest != null -> "等棋友商量这一步…"
+            networkMode && lan.pendingDrawRequest != null -> "等待棋友回应和棋"
             !networkMode && thinkingClock.expired && thinkingClock.side == state.turnSide -> "提醒时间到啦，继续慢慢想也可以 ♡"
             mode == XiangqiPlayMode.CPU && state.turnSide != humanSide -> "阿噜在想下一步…"
             inCheck -> "$playerName 被将军了，先保护将帅"
@@ -201,7 +210,7 @@ internal fun ColumnScope.SecretXiangqiGame(state: XiangqiState, mode: XiangqiPla
     // 状态更新在动画的 LaunchedEffect 里（drawscope 拿不到回调，所以提到上一层）。
     var boardAnimating by remember(presentationKey) { mutableStateOf(false) }
     val roomAvailable = lan.connected && !lan.awaitingAck && !lan.localBackground && !lan.remoteBackground &&
-        !lan.reconnecting && lan.pendingUndoRequest == null
+        !lan.reconnecting && lan.pendingUndoRequest == null && lan.pendingDrawRequest==null
     val canMove = !helpBusy && !boardAnimating && state.outcome == XiangqiOutcome.PLAYING && when (mode) {
         XiangqiPlayMode.CPU -> !paused && state.turnSide == humanSide
         XiangqiPlayMode.HOTSEAT -> !paused
@@ -256,8 +265,9 @@ internal fun ColumnScope.SecretXiangqiGame(state: XiangqiState, mode: XiangqiPla
                 enabled = canUndo && !helpBusy && (!networkMode || roomAvailable),
                 cue = UiCue.TOUCH)
             if (networkMode) {
-                GameIconTool(Icons.Outlined.Flag, "认输", { resignConfirm = true }, Modifier.weight(1f),
-                    enabled = roomAvailable)
+                GameIconTool(Icons.Outlined.Handshake, if(lan.myDrawRequested)"取消和棋"else"和棋",
+                    if(lan.myDrawRequested)onCancelDraw else onDraw, Modifier.weight(1f),
+                    enabled = roomAvailable || lan.myDrawRequested)
                 GameIconTool(Icons.Outlined.Logout, "离开", onDisconnect, Modifier.weight(1f))
             } else {
                 GameIconTool(if (paused) Icons.Outlined.PlayCircleOutline else Icons.Outlined.PauseCircleOutline,

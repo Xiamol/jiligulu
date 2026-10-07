@@ -8,7 +8,7 @@ enum class XiangqiSide(val sign: Int) {
     val opponent: XiangqiSide get() = if (this == RED) BLACK else RED
 }
 
-enum class XiangqiOutcome { PLAYING, RED_WON, BLACK_WON }
+enum class XiangqiOutcome { PLAYING, RED_WON, BLACK_WON, DRAW }
 
 data class XiangqiMove(val from: GridCell, val to: GridCell)
 

@@ -60,6 +60,10 @@ data class XiangqiLanUiState(
     val remoteAvatarId: String = "aru",
     val remoteName: String = "棋友",
     val peerLeft: Boolean = false,
+    val pendingDrawRequest: XiangqiSide? = null,
+    val pendingDrawId: Int = 0,
+    val myDrawRequested: Boolean = false,
+    val agreedDraw: Boolean = false,
 )
 
 /** The room creator is the board authority, independent of randomly assigned red/black. */
@@ -107,7 +111,7 @@ internal object XiangqiWireCodec {
 /** Small versioned ASCII protocol: no DNS, Java serialization, remote code, or unbounded reads. */
 internal object XiangqiLanProtocol {
     const val MAX_LINE_BYTES = 1_024
-    private const val VERSION = "XQ1"
+    private const val VERSION = "XQ2"
     private const val MAX_PLY = 1_000_000
 
     fun encode(message: XiangqiLanMessage): String = when (message) {
@@ -134,6 +138,7 @@ internal object XiangqiLanProtocol {
     fun decode(line: String): XiangqiLanMessage {
         if (line.length > MAX_LINE_BYTES || line.any { it.code !in 32..126 }) throw LanProtocolException()
         val parts = line.split('|')
+        if(parts.firstOrNull()=="XQ1")throw RoomVersionMismatchException()
         if (parts.size < 2 || parts[0] != VERSION) throw LanProtocolException()
         return try {
             when (parts[1]) {
@@ -192,7 +197,7 @@ internal object XiangqiLanProtocol {
                     val board = parts[8].split(',').map { integer(it, -7..7) }
                     require(board.size == 90)
                     require(board.count { it == 1 } <= 1 && board.count { it == -1 } <= 1)
-                    if (outcome == XiangqiOutcome.PLAYING) {
+                    if (outcome == XiangqiOutcome.PLAYING || outcome == XiangqiOutcome.DRAW) {
                         require(board.count { it == 1 } == 1 && board.count { it == -1 } == 1)
                     } else {
                         require(board.count { it == if (outcome == XiangqiOutcome.RED_WON) 1 else -1 } == 1)
@@ -277,5 +282,6 @@ private fun isPrivateIpv4(address: InetAddress): Boolean {
         bytes[0] == 172 && bytes[1] in 16..31
 }
 
-internal class LanProtocolException : IOException("Invalid Xiangqi LAN protocol")
+internal open class LanProtocolException(message:String="Invalid Xiangqi LAN protocol") : IOException(message)
+internal class RoomVersionMismatchException : LanProtocolException("Chess room version is incompatible")
 private class LanConnectionException(message: String) : IOException(message)
