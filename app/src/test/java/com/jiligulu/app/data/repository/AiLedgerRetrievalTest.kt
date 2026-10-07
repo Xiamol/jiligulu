@@ -127,4 +127,17 @@ class AiLedgerRetrievalTest {
         assertEquals("在呀，阿噜～", fixture.ai.parse("早上好", now, zone).getOrThrow().reply)
         assertEquals(1, fixture.requests.size)
     }
+
+    @Test fun referringToAnEarlierBillDoesNotAuthorizeAnAccidentalUpdateOrDeletion() = runBlocking {
+        val fixture = Fixture(AiParseResult(ledgerQuery = AiLedgerQuery(keywords = listOf("苹果"))),
+            AiParseResult(reply = "苹果那笔是12.8元", bills = listOf(
+                AiBillDraft(action = "update", targetId = 1, amountYuan = 1.0),
+                AiBillDraft(action = "delete", targetId = 1))))
+        val id = fixture.oldBill()
+        val parsed = fixture.ai.parse("之前那笔苹果花多少钱？提醒我一下", now, zone).getOrThrow()
+        assertTrue(parsed.bills.isEmpty())
+        assertTrue(fixture.ai.toTurn(parsed, "之前那笔苹果花多少钱？提醒我一下", now, zone, null) is AiTurn.Chat)
+        assertEquals(1280L, fixture.billRepository.getById(id)!!.amountFen)
+        assertNull(fixture.billRepository.getById(id)!!.deletedAt)
+    }
 }

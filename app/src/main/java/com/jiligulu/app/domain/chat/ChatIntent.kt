@@ -25,10 +25,13 @@ object ChatIntent {
 
     private val LEDGER_QUESTION = Regex("查询|查一查|查一下|帮我查|帮我找|找找.{0,12}(账|消费|支出|收入)|统计.{0,12}(账|消费|支出|收入)|花了多少|花费多少|支出多少|收入多少|多少钱|几笔|几次|哪些账|什么账|账单.{0,12}(查|哪些|哪里)")
 
+    // References/settings words require online understanding, but are not instructions to change bills.
+    private val LEDGER_MUTATION = Regex("修改|改成|改为|改到|改一下|改下|更正为|纠正为|调整到|换成|换为|删掉|删除|删一下|删下|移进回收站|移到回收站|重新分类|重新归类|归类")
+
     fun requiresOnlineAction(s: String) = ONLINE_ACTION.containsMatchIn(s) || LEDGER_QUESTION.containsMatchIn(s)
 
     /** Query words require a connection, but never themselves authorize a mutation proposal. */
-    fun isLedgerMutationRequest(s: String) = ONLINE_ACTION.containsMatchIn(s)
+    fun isLedgerMutationRequest(s: String) = LEDGER_MUTATION.containsMatchIn(s)
 
     fun needsCandidates(s: String) = CANDIDATE.containsMatchIn(s)
 

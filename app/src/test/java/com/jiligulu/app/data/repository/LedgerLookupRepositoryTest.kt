@@ -93,4 +93,23 @@ class LedgerLookupRepositoryTest {
         val query = LedgerLookup.from(AiLedgerQuery(startDate = "2026-03-08", endDate = "2026-03-09"), dst)
         assertEquals(23 * 3600000L, query.endMillis!! - query.startMillis!!)
     }
+
+    @Test fun displayLabelsAndLegacyNamesResolveEveryMatchingCategoryIdWithoutRenamingRows() = runBlocking {
+        val db = db()
+        val chinese = db.categoryDao().findByName("吃饭")!!.id
+        val legacy = CategoryRepository(db.categoryDao()).createCategory("eating")
+        val drinking = db.categoryDao().findByName("饮品")!!.id
+        val chineseBill = db.billDao().insert(BillEntity(amountFen = 100, type = BillType.EXPENSE,
+            categoryId = chinese, detail = "午饭", timestamp = 123))
+        val legacyBill = db.billDao().insert(BillEntity(amountFen = 200, type = BillType.EXPENSE,
+            categoryId = legacy, detail = "晚饭", timestamp = 456))
+        db.billDao().insert(BillEntity(amountFen = 300, type = BillType.EXPENSE,
+            categoryId = drinking, detail = "咖啡", timestamp = 789))
+        val repo = LedgerLookupRepository(db)
+        val expected = setOf(chineseBill, legacyBill)
+        assertEquals(expected, repo.search(LedgerLookup(categories = listOf("吃饭"))).bills.map { it.id }.toSet())
+        assertEquals(expected, repo.search(LedgerLookup(categories = listOf("EATING"))).bills.map { it.id }.toSet())
+        assertEquals(0, repo.search(LedgerLookup(categories = listOf("不存在的分类"))).count)
+        assertEquals("eating", db.categoryDao().findByName("eating")!!.name)
+    }
 }

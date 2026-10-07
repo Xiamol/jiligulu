@@ -5,6 +5,7 @@ import com.jiligulu.app.data.local.AppDatabase
 import androidx.room.withTransaction
 import com.jiligulu.app.domain.chat.LedgerLookup
 import com.jiligulu.app.domain.chat.LedgerLookupResult
+import com.jiligulu.app.domain.category.CategoryLabels
 
 class LedgerLookupRepository(private val database: AppDatabase) {
     private val dao get() = database.ledgerLookupDao()
@@ -15,8 +16,15 @@ class LedgerLookupRepository(private val database: AppDatabase) {
         lookup.endMillis?.let { clauses += "b.timestamp < ?"; args += it }
         if (lookup.type.isNotBlank()) { clauses += "b.type = ?"; args += lookup.type }
         if (lookup.categories.isNotEmpty()) {
-            clauses += "c.name IN (${lookup.categories.joinToString { "?" }})"
-            args.addAll(lookup.categories)
+            // The model sees display labels; old IDs/raw names must remain searchable as aliases.
+            val ids = database.categoryDao().findAllOnce().filter { category ->
+                lookup.categories.any { requested -> category.name.equals(requested, true) ||
+                    CategoryLabels.displayName(category.name).equals(CategoryLabels.displayName(requested), true) }
+            }.map { it.id }
+            if (ids.isEmpty()) clauses += "0" else {
+                clauses += "b.categoryId IN (${ids.joinToString { "?" }})"
+                args.addAll(ids)
+            }
         }
         if (lookup.keywords.isNotEmpty()) {
             // INSTR treats %, _ and apostrophes literally. Never interpolate model text into SQL.
