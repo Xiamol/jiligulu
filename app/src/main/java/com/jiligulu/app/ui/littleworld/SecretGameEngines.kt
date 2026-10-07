@@ -148,9 +148,9 @@ object GomokuEngine {
         if (empty.isEmpty()) return null
 
         // Check the whole board for forced moves before applying the nearby heuristic.
-        val winning = empty.filter { wouldWin(state, it, 2) }
+        val winning = empty.filter { wouldWin(state, it, state.currentPlayer) }
         if (winning.isNotEmpty()) return bestCandidate(state, winning)
-        val blocking = empty.filter { wouldWin(state, it, 1) }
+        val blocking = empty.filter { wouldWin(state, it, 3 - state.currentPlayer) }
         if (blocking.isNotEmpty()) return bestCandidate(state, blocking)
 
         val occupied = buildList {
@@ -166,7 +166,7 @@ object GomokuEngine {
 
     private fun bestCandidate(state: GomokuState, candidates: List<GridCell>): GridCell? =
         candidates.maxWithOrNull(
-            compareBy<GridCell> { lineScore(state, it, 2) * 11 / 10 + lineScore(state, it, 1) }
+            compareBy<GridCell> { lineScore(state, it, state.currentPlayer) * 11 / 10 + lineScore(state, it, 3 - state.currentPlayer) }
                 .thenBy { -(abs(it.x - state.size / 2) + abs(it.y - state.size / 2)) }
                 .thenBy { -(it.y * state.size + it.x) },
         )
