@@ -188,6 +188,9 @@ internal object XiangqiLanProtocol {
                     val revision = integer(parts[2], 0..Int.MAX_VALUE)
                     val side = XiangqiSide.valueOf(parts[3])
                     val outcome = XiangqiOutcome.valueOf(parts[4])
+                    // An agreed draw has no move snapshot. Only an exact, consent-bound
+                    // DRAW_RESULT may end a live round; ordinary STATE never carries it.
+                    require(outcome != XiangqiOutcome.DRAW)
                     val ply = integer(parts[5], 0..MAX_PLY)
                     require(side == if (ply % 2 == 0) XiangqiSide.RED else XiangqiSide.BLACK)
                     val from = integer(parts[6], -1..89)
@@ -197,7 +200,7 @@ internal object XiangqiLanProtocol {
                     val board = parts[8].split(',').map { integer(it, -7..7) }
                     require(board.size == 90)
                     require(board.count { it == 1 } <= 1 && board.count { it == -1 } <= 1)
-                    if (outcome == XiangqiOutcome.PLAYING || outcome == XiangqiOutcome.DRAW) {
+                    if (outcome == XiangqiOutcome.PLAYING) {
                         require(board.count { it == 1 } == 1 && board.count { it == -1 } == 1)
                     } else {
                         require(board.count { it == if (outcome == XiangqiOutcome.RED_WON) 1 else -1 } == 1)

@@ -77,6 +77,7 @@ class XiangqiLanProtocolTest {
             field(initial, 8, missingBlackGeneral),
             field(initial, 3, "PURPLE"),
             field(initial, 4, "DRAW"),
+            field(initial, 4, "UNKNOWN_OUTCOME"),
             field(initial, 5, "-1"),
             field(initial, 5, "1000001"),
             field(initial, 3, "BLACK"),
@@ -85,6 +86,23 @@ class XiangqiLanProtocolTest {
         )) expectProtocolFailure { XiangqiLanProtocol.decode(line) }
         expectProtocolFailure { XiangqiWireCodec.decodeState("XQ2|PING") }
         expectProtocolFailure { XiangqiWireCodec.decodeMove(initial) }
+    }
+
+    @Test fun anOrdinaryStateNeverEndsAChessRoundWithoutDrawConsent() {
+        val initial=XiangqiEngine.newGame()
+        val played=XiangqiEngine.play(initial,XiangqiMove(GridCell(0,6),GridCell(0,5)))
+        for(game in listOf(initial,played)) {
+            val wire=XiangqiWireCodec.encodeState(7,game.copy(outcome=XiangqiOutcome.DRAW))
+            expectProtocolFailure { XiangqiLanProtocol.decode(wire) }
+            assertFalse(XiangqiSnapshotRules.accepts(6,game,true,
+                XiangqiLanMessage.Snapshot(7,game.copy(outcome=XiangqiOutcome.DRAW)),allowRestart=false))
+        }
+        val offer=RoomDrawOffer(1,6,1,1)
+        val accepted=RoomControl.DrawResult(offer,RoomDrawResolution.ACCEPTED,7)
+        assertEquals(XiangqiLanMessage.Control(accepted),
+            XiangqiLanProtocol.decode(XiangqiLanProtocol.encode(XiangqiLanMessage.Control(accepted))))
+        assertFalse(RoomDrawRules.acceptsResult(1,6,offer,false,accepted))
+        assertTrue(RoomDrawRules.acceptsResult(1,6,offer,true,accepted))
     }
 
     @Test fun acceptsOnlyPrivateNumericIpv4AndTheRoomsFixedPort() {
