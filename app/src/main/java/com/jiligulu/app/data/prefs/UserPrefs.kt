@@ -228,12 +228,13 @@ class UserPrefs(private val context: Context) {
         require(com.jiligulu.app.domain.persona.CompanionMemoryPolicy.validValue(text)) { "请写一条简短的小记忆" }
         context.dataStore.edit { prefs ->
             val existing = com.jiligulu.app.domain.persona.CompanionMemoryPolicy.decode(prefs[KEY_COMPANION_MEMORY_FACTS].orEmpty())
+            // Even a stale editor expresses a user action: invalidate replies already in flight.
+            prefs[KEY_COMPANION_MEMORY_REVISION] = (prefs[KEY_COMPANION_MEMORY_REVISION] ?: 0) + 1
             val old = existing.firstOrNull { it.id == id } ?: return@edit
             val updated = old.copy(id = com.jiligulu.app.domain.persona.CompanionMemoryPolicy.id(old.kind, text), value = text,
                 evidence = "", updatedAt = System.currentTimeMillis(), editedByUser = true)
             prefs[KEY_COMPANION_MEMORY_FACTS] = com.jiligulu.app.domain.persona.CompanionMemoryPolicy.encode(
                 com.jiligulu.app.domain.persona.CompanionMemoryPolicy.merge(existing.filter { it.id != id }, listOf(updated)))
-            prefs[KEY_COMPANION_MEMORY_REVISION] = (prefs[KEY_COMPANION_MEMORY_REVISION] ?: 0) + 1
         }
     }
 

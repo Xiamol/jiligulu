@@ -45,6 +45,10 @@ class CompanionMemoryPreferenceTest {
         prefs.clearCompanionMemories()
         assertFalse(prefs.rememberCompanionFactsIfCurrent(snapshot.revision, fact()))
         assertTrue(prefs.companionMemory.first().facts.isEmpty())
+        val afterClear = prefs.companionMemory.first()
+        prefs.correctCompanionMemory("interest:already-removed", "骑车")
+        assertFalse(prefs.rememberCompanionFactsIfCurrent(afterClear.revision, fact()))
+        assertTrue(prefs.companionMemory.first().facts.isEmpty())
     }
 
     @Test fun disablingAndReenablingStillInvalidatesOlderReplies() = runBlocking {
