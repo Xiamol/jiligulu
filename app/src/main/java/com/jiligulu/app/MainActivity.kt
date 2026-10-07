@@ -80,7 +80,7 @@ object Routes {
 }
 
 class MainActivity : ComponentActivity() {
-    private val windowRefresh by lazy { com.jiligulu.app.core.ui.WindowRefreshPreference(this) }
+    private val windowRefresh by lazy { com.jiligulu.app.core.ui.RefreshRateController(this) }
     private val futureNoteRequests = MutableStateFlow<String?>(null)
     private val waterRequests = MutableStateFlow(0)
     private val chessRoomRequests = MutableStateFlow<ChessRoomInvite?>(null)

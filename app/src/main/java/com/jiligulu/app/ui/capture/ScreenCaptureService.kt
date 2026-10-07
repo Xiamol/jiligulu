@@ -189,7 +189,9 @@ class ScreenCaptureService : Service() {
         if (!screenUsable()) { pauseGlass("屏幕锁定或关闭，采样暂停", release = true); return }
         if (!projectionVisible) { pauseGlass("共享画面不可见，采样暂停", release = true); return }
         if (!fullDisplayShared()) { pauseGlass("请选择共享整个屏幕后再启用", release = true); return }
-        if (AppGlassBackdrop.available()) { pauseGlass("应用内使用本应用背景，整屏采样暂停"); nextGlass(250); return }
+        // Activity/dialog resume/pause already calls refreshEnvironment. Polling every
+        // 250 ms here needlessly woke the main thread even while the app was motionless.
+        if (AppGlassBackdrop.available()) { pauseGlass("应用内使用本应用背景，整屏采样暂停"); return }
         val target = GlobalGlassBackdrop.settledTarget()
         if (target == null) { pauseGlass("浮球移动或隐藏，稳定后继续"); nextGlass(150); return }
         if (awaitingGlassFrame) {

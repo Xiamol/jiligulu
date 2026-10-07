@@ -14,6 +14,9 @@ import kotlin.math.roundToInt
 
 /** Only our resumed Activity window; never captures another app or starts screen sharing. */
 internal object AppGlassBackdrop {
+    // The small decorative lens does not need to copy an Activity at the page's
+    // 60–120 Hz cadence. It remains event-driven and is completely idle at rest.
+    private const val MIN_COPY_INTERVAL_MS = 67L
     private var source=WeakReference<Window>(null)
     private var owner=WeakReference<Window>(null)
     private val dialogs=ArrayList<WeakReference<Window>>()
@@ -57,7 +60,7 @@ internal object AppGlassBackdrop {
     private fun deferRefresh() {
         refreshPending=true
         handler.removeCallbacks(refreshTask)
-        if(!inFlight) handler.postDelayed(refreshTask,(24-(SystemClock.uptimeMillis()-lastRequest)).coerceAtLeast(0))
+        if(!inFlight) handler.postDelayed(refreshTask,(MIN_COPY_INTERVAL_MS-(SystemClock.uptimeMillis()-lastRequest)).coerceAtLeast(0))
     }
     fun resume(window:Window) {owner=WeakReference(window);switchWindow(dialogs.lastOrNull()?.get() ?: window)}
     fun dialog(window:Window,visible:Boolean) {
@@ -84,7 +87,7 @@ internal object AppGlassBackdrop {
         val window=source.get()
         if(window==null||!window.decorView.isShown) {callback(null,0f,0f);return}
         if(view.width<=0 || !view.isAttachedToWindow || !view.isShown) return
-        if(inFlight || SystemClock.uptimeMillis()-lastRequest<24) {deferRefresh();return}
+        if(inFlight || SystemClock.uptimeMillis()-lastRequest<MIN_COPY_INTERVAL_MS) {deferRefresh();return}
         view.getLocationOnScreen(viewLocation);window.decorView.getLocationOnScreen(windowLocation)
         val x=viewLocation[0]-windowLocation[0];val y=viewLocation[1]-windowLocation[1]
         val pad=(view.width*.28f).roundToInt()

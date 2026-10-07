@@ -184,8 +184,12 @@ fun MainScreen(
     BackHandler(enabled = showDrinking, onBack = personaVm::cancelDrinking)
     BackHandler(enabled = secretEntrance!=null) {secretEntrance=null}
 
-    LaunchedEffect(lifecycleOwner, personaVm) {
-        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+    LaunchedEffect(lifecycleOwner, personaVm, active, selectedTab) {
+        if (!active || selectedTab != 0) {
+            personaVm.stopIdleTicker()
+            return@LaunchedEffect
+        }
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
             personaVm.onAppOpen()
             personaVm.startIdleTicker()
             try {
@@ -222,6 +226,7 @@ fun MainScreen(
                             // Switching tabs must not resize the outgoing ledger viewport.
                             GuluCompanionHeader(message = message,
                                 onRefresh = personaVm::onMascotClick, onWaterClick = personaVm::startDrinking,
+                                active = active && selectedTab == 0,
                                 modifier = Modifier.padding(horizontal = 20.dp).forwardMainPageSwipe(
                                     enabled = { selectedTab == 0 }, onDrag = pageDrag, onDragEnd = pageDragEnd))
                             Spacer(Modifier.height(12.dp))

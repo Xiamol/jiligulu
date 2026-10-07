@@ -4,10 +4,6 @@ import android.content.res.Resources
 import android.graphics.BitmapFactory
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -17,6 +13,7 @@ import androidx.compose.ui.semantics.onClick
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
@@ -26,7 +23,12 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import com.jiligulu.app.R
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.concurrent.ConcurrentHashMap
 
 enum class MascotMode { IDLE, WAITING, DRINKING }
@@ -36,14 +38,28 @@ enum class MascotMode { IDLE, WAITING, DRINKING }
 fun GuluMascot(
     modifier: Modifier = Modifier,
     mode: MascotMode = MascotMode.IDLE,
-    onClick: (() -> Unit)? = null
+    onClick: (() -> Unit)? = null,
+    active: Boolean = true
 ) {
-    val breathing = if (onClick != null || mode != MascotMode.IDLE) rememberInfiniteTransition(label = "mochiBreathing").animateFloat(
-        initialValue = 0.985f,
-        targetValue = 1.015f,
-        animationSpec = infiniteRepeatable(tween(2200, easing = FastOutSlowInEasing), RepeatMode.Reverse),
-        label = "softBreath"
-    ) else null
+    val breathing = remember { Animatable(1f) }
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    val welcomes = onClick != null || mode != MascotMode.IDLE
+    LaunchedEffect(active, lifecycle, welcomes, mode) {
+        if (!active || !welcomes) return@LaunchedEffect
+        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            try {
+                // A short hello retains the pet's character. Keeping an infinite breath on
+                // the retained, off-screen ledger kept the whole window rendering forever.
+                repeat(2) {
+                    breathing.animateTo(1.015f, tween(1100, easing = FastOutSlowInEasing))
+                    breathing.animateTo(.985f, tween(1100, easing = FastOutSlowInEasing))
+                }
+                breathing.animateTo(1f, tween(300))
+            } finally {
+                withContext(NonCancellable) { breathing.snapTo(1f) }
+            }
+        }
+    }
     val bounce = remember { Animatable(1f) }
     val tilt = remember { Animatable(0f) }
     val scope = rememberCoroutineScope()
@@ -81,7 +97,7 @@ fun GuluMascot(
         contentScale = ContentScale.Fit,
         modifier = modifier.then(click).graphicsLayer {
             scaleX = bounce.value
-            scaleY = (breathing?.value ?: 1f) * bounce.value
+            scaleY = breathing.value * bounce.value
             rotationZ = tilt.value
         }
     )
