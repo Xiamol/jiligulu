@@ -1,0 +1,13 @@
+services:
+  turn:
+    image: coturn/coturn:4.18.0-r0
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      TURN_REALM: ${TURN_REALM:?Set the public TURN hostname}
+      TURN_PUBLIC_IP: ${TURN_PUBLIC_IP:?Set the public IPv4 address}
+      TURN_SECRET: ${TURN_SECRET:?Set a random shared secret}
+    volumes:
+      - ./start-turn.sh:/start-turn.sh:ro
+      - ./certs:/certs:ro
+    entrypoint: ["/bin/sh", "/start-turn.sh"]

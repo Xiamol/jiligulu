@@ -1,28 +1,120 @@
 <!doctype html><meta charset="utf-8"><script src="https://appassets.androidplatform.net/peerjs.min.js"></script><script>
 'use strict';
-let peer=null,connection=null,host=false;
-function emit(type,value=''){if(window.GuluTransport)GuluTransport.event(type,String(value).slice(0,2048));}
-function bind(c){
-  if(connection){c.close();return;}
-  if(c.metadata?.protocol!=='gulu-xq-2'){c.close();if(!host)emit('error','protocol');return;}
-  connection=c;
-  c.on('open',()=>emit('connected'));
-  c.on('data',data=>{if(typeof data==='string'&&data.length<=1024)emit('data',data);else emit('error','invalid-data');});
-  c.on('close',()=>emit('closed'));
-  c.on('error',()=>emit('error','webrtc'));
+// The signal server reserves a code; only an open, validated data channel starts a game.
+let peer=null,connection=null,host=false,stopped=false,code='',peerIdentity='',remoteIdentity='',remoteToken='';
+let token='',everConnected=false,retryTimer=null,connectTimer=null,signalTimer=null;
+let outgoing=0,incoming=0,pending=new Map(),inbox=new Map(),hasRelay=false;
+const protocol='gulu-xq-3';
+function emit(type,value=''){if(!stopped&&window.GuluTransport)window.GuluTransport.event(type,String(value).slice(0,2048));}
+function nonce(){const b=new Uint8Array(16);crypto.getRandomValues(b);return Array.from(b,v=>v.toString(16).padStart(2,'0')).join('');}
+function validIce(value){
+  return Array.isArray(value)&&value.length>0&&value.length<=16&&value.every(server=>{
+    const urls=Array.isArray(server.urls)?server.urls:[server.urls];
+    return urls.length>0&&urls.length<=16&&urls.every(url=>typeof url==='string'&&url.length<=512&&/^(stun|turn|turns):[^\s]+$/.test(url))&&
+      (server.username===undefined||typeof server.username==='string'&&server.username.length<=256)&&
+      (server.credential===undefined||typeof server.credential==='string'&&server.credential.length<=512);
+  });
 }
-function guluStart(code,isHost){
-  host=isHost;
+function clearConnectionTimer(){clearTimeout(connectTimer);connectTimer=null;}
+function transmit(packet){if(connection?.open)connection.send(packet);}
+function receive(packet){
+  if(!packet||typeof packet!=='object'||packet.v!==3){emit('error','protocol');return;}
+  if(Number.isSafeInteger(packet.ack)&&packet.ack>=0&&packet.ack<=outgoing){
+    for(const n of pending.keys())if(n<=packet.ack)pending.delete(n);
+    return;
+  }
+  if(!Number.isSafeInteger(packet.n)||packet.n<1||typeof packet.line!=='string'||packet.line.length>1024||!/^[\x20-\x7e]*$/.test(packet.line)){
+    emit('error','invalid-data');return;
+  }
+  if(packet.n>incoming+128){emit('error','invalid-data');return;}
+  if(packet.n>incoming)inbox.set(packet.n,packet.line);
+  while(inbox.has(incoming+1)){const n=++incoming;const line=inbox.get(n);inbox.delete(n);emit('data',line);}
+  transmit({v:3,ack:incoming});
+}
+function recover(){
+  if(stopped)return;
+  if(everConnected)emit('recovering');
+  if(!host&&!retryTimer)retryTimer=setTimeout(()=>{
+    retryTimer=null;
+    if(!peer||peer.destroyed)return;
+    if(peer.disconnected){try{peer.reconnect();}catch(e){};recover();return;}
+    if(!connection)bind(peer.connect('gulu-xq-'+code,{serialization:'json',reliable:true,metadata:{protocol,token}}));
+  },1500);
+}
+function restoreSignal(){
+  if(stopped||signalTimer)return;
+  signalTimer=setTimeout(()=>{
+    signalTimer=null;
+    if(!peer||peer.destroyed||!peer.disconnected)return;
+    try{peer.reconnect();}catch(e){}
+    if(peer.disconnected)restoreSignal();
+  },1500);
+}
+function bind(c){
+  if(stopped){c.close();return;}
+  if(c.metadata?.protocol!==protocol){c.close();if(!host)emit('error','protocol');return;}
+  if(host&&(!/^[a-f0-9]{32}$/.test(c.metadata?.token||'')||(remoteIdentity&&(c.peer!==remoteIdentity||c.metadata.token!==remoteToken)))){c.close();return;}
+  if(connection){c.close();return;}
+  connection=c;
+  clearConnectionTimer();
+  connectTimer=setTimeout(()=>{
+    if(connection!==c||c.open)return;
+    c.close();connection=null;
+    if(!everConnected){emit('error',hasRelay?'webrtc':'relay-unavailable');}
+    else recover();
+  },35000);
+  c.on('open',()=>{
+    if(connection!==c||stopped)return;
+    clearConnectionTimer();clearTimeout(retryTimer);retryTimer=null;
+    if(host){remoteIdentity=c.peer;remoteToken=c.metadata.token;}
+    transmit({v:3,ack:incoming});
+    for(const [n,line] of pending)transmit({v:3,n,line});
+    if(everConnected)emit('recovered');else{everConnected=true;emit('connected');}
+  });
+  c.on('data',receive);
+  const dropped=()=>{if(connection!==c||stopped)return;connection=null;clearConnectionTimer();c.removeAllListeners();try{c.close();}catch(e){};recover();};
+  c.on('close',dropped);c.on('error',dropped);
+}
+async function guluStart(roomCode,isHost,configuration={}){
+  if(peer||stopped)return;
+  host=isHost;code=roomCode;token=nonce();
   if(typeof Peer!=='function'){emit('error','browser-incompatible');return;}
-  peer=new Peer(host?'gulu-xq-'+code:undefined,{secure:true,debug:0});
-  peer.on('open',()=>{
-    emit('ready');
-    if(!host){bind(peer.connect('gulu-xq-'+code,{serialization:'json',reliable:true,metadata:{protocol:'gulu-xq-2'}}));}
+  let ice=Array.isArray(configuration.iceServers)?configuration.iceServers:[];
+  const endpoint=configuration.credentialEndpoint;
+  if(typeof endpoint==='string'&&endpoint.startsWith('https://')){
+    const controller=new AbortController();const timeout=setTimeout(()=>controller.abort(),8000);
+    try{const response=await fetch(endpoint,{signal:controller.signal,cache:'no-store'});if(response.ok){const value=await response.json();if(validIce(value))ice=value;}}catch(e){}
+    finally{clearTimeout(timeout);}
+  }
+  if(stopped)return;
+  hasRelay=ice.some(s=>(Array.isArray(s.urls)?s.urls:[s.urls]).some(url=>typeof url==='string'&&/^turns?:/.test(url)));
+  peer=new Peer(host?'gulu-xq-'+code:undefined,{secure:true,debug:0,config:{iceServers:ice}});
+  peer.on('open',id=>{
+    peerIdentity=id;emit('ready');
+    if(!host&&!connection)bind(peer.connect('gulu-xq-'+code,{serialization:'json',reliable:true,metadata:{protocol,token}}));
   });
   peer.on('connection',c=>{if(host)bind(c);else c.close();});
-  peer.on('error',err=>{if(connection?.open&&err.type==='network')emit('warning');else emit('error',err.type||'network');});
-  peer.on('close',()=>emit('closed'));
+  peer.on('disconnected',restoreSignal);
+  peer.on('error',err=>{
+    if(stopped)return;
+    if(['network','server-error','socket-error','socket-closed'].includes(err.type)){restoreSignal();if(!connection?.open)recover();return;}
+    if(err.type==='peer-unavailable'&&everConnected){recover();return;}
+    emit('error',err.type||'network');
+  });
+  peer.on('close',()=>{if(!stopped)emit('error','disconnected');});
 }
-function guluSend(line){if(connection?.open)connection.send(line);else emit('error','disconnected');}
-function guluStop(){if(connection){connection.removeAllListeners();connection.close();connection=null;}if(peer){peer.removeAllListeners();peer.destroy();peer=null;}}
+function guluSend(line){
+  if(stopped||typeof line!=='string'||line.length>1024)return;
+  // Heartbeats do not accumulate while a background WebView has been suspended.
+  if(/\|(PING|PONG)$/.test(line)&&(!connection?.open||[...pending.values()].some(value=>/\|(PING|PONG)$/.test(value))))return;
+  if(pending.size>=128||outgoing>=Number.MAX_SAFE_INTEGER){emit('error','queue-full');return;}
+  const n=++outgoing;pending.set(n,line);transmit({v:3,n,line});
+}
+function guluForeground(value){if(value&&!stopped){if(!connection?.open)recover();else{for(const [n,line] of pending)transmit({v:3,n,line});}}}
+function guluStop(){
+  stopped=true;clearTimeout(retryTimer);clearTimeout(connectTimer);clearTimeout(signalTimer);
+  if(connection){connection.removeAllListeners();connection.close();connection=null;}
+  if(peer){peer.removeAllListeners();peer.destroy();peer=null;}
+  pending.clear();inbox.clear();
+}
 </script>

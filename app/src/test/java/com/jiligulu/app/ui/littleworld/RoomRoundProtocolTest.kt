@@ -52,7 +52,9 @@ class RoomRoundProtocolTest {
     @Test fun typedControlsRoundTripThroughBothBoundedGameCodecs() {
         val messages = listOf(RoomControl.Hello("阿噜 ♡", "000000000002", "000000000001"),
             RoomControl.Start(RoomAssignment(2, 2, 67)), RoomControl.Vote(2, 67, true),
-            RoomControl.Votes(2, 67, true, false), RoomControl.Close(2, 67, RoomCloseReason.RESULT_TIMEOUT))
+            RoomControl.Votes(2, 67, true, false), RoomControl.Close(2, 67, RoomCloseReason.RESULT_TIMEOUT),
+            RoomControl.Presence(2,67,1,true),RoomControl.Presence(2,67,2,false),
+            RoomControl.Resign(2,67,1),RoomControl.Resigned(2,68,1))
         for (message in messages) {
             assertEquals(XiangqiLanMessage.Control(message), XiangqiLanProtocol.decode(XiangqiLanProtocol.encode(XiangqiLanMessage.Control(message))))
             assertEquals(GomokuRoomMessage.Control(message), GomokuRoomProtocol.decode(GomokuRoomProtocol.encode(GomokuRoomMessage.Control(message))))
@@ -63,7 +65,8 @@ class RoomRoundProtocolTest {
         for (bad in listOf("HELLO_NAME|_w|000000000002|000000000001", // Invalid UTF-8.
             "HELLO_NAME|5qOL5Y-L|000000000002|-", "HELLO_NAME|5qOL5Y-L|000000000001|000000000001",
             "START|0|1|0", "START|1|3|0", "VOTE|1|0|2", "VOTES|1|0|1|1|extra",
-            "CLOSE|1|2147483648|LEFT")) {
+            "CLOSE|1|2147483648|LEFT", "PRESENCE|1|0|1|2", "PRESENCE|0|0|1|0",
+            "RESIGN|1|0|3", "RESIGNED|1|0|1", "RESIGNED|1|1|2|extra")) {
             assertThrows(LanProtocolException::class.java) { RoomControlCodec.decode(bad) }
         }
     }

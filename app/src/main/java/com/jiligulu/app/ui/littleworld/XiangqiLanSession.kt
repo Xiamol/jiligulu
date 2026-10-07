@@ -52,6 +52,10 @@ data class XiangqiLanUiState(
     val myRematchRequested: Boolean = false,
     val resultSecondsLeft: Int = 0,
     val roomEnded: Boolean = false,
+    val localBackground: Boolean = false,
+    val remoteBackground: Boolean = false,
+    val reconnecting: Boolean = false,
+    val resignedBy: XiangqiSide? = null,
 )
 
 /** The room creator is the board authority, independent of randomly assigned red/black. */

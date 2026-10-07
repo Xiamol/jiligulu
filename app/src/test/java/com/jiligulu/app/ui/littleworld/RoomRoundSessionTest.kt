@@ -59,12 +59,13 @@ class RoomRoundSessionTest {
         guest.submitMove(GridCell(7, 7)); drain()
         assertEquals(1, host.state.value.revision)
         assertEquals(host.state.value.game, guest.state.value.game)
-        host.requestUndo(); drain()
-        assertEquals(2, guest.state.value.pendingUndoRequest)
+        assertFalse(host.state.value.canUndo) // White has not yet made an own move.
+        guest.requestUndo(); drain()
+        assertEquals(1, host.state.value.pendingUndoRequest)
         assertEquals(1, host.state.value.game.cellAt(7, 7))
-        guest.respondToUndo(false); drain()
+        host.respondToUndo(false); drain()
         assertEquals(1, host.state.value.game.cellAt(7, 7))
-        host.requestUndo(); drain(); guest.respondToUndo(true); drain()
+        guest.requestUndo(); drain(); host.respondToUndo(true); drain()
         assertEquals(GomokuEngine.newGame(), host.state.value.game)
         assertEquals(host.state.value.game, guest.state.value.game)
         assertEquals(2, host.state.value.revision)
@@ -170,7 +171,7 @@ class RoomRoundSessionTest {
         guest.submitMove(XiangqiMove(GridCell(0, 6), GridCell(0, 5))); drain()
         assertEquals(1, host.state.value.revision); assertEquals(host.state.value.game, guest.state.value.game)
         assertNull(host.state.value.remoteSelection)
-        host.requestUndo(); drain(); guest.respondToUndo(true); drain()
+        guest.requestUndo(); drain(); host.respondToUndo(true); drain()
         assertEquals(XiangqiEngine.newGame(), host.state.value.game)
         guest.requestRematch(); drain(); host.respondToRematch(true); drain()
         assertEquals(XiangqiSide.RED, host.state.value.localSide)
@@ -264,5 +265,100 @@ class RoomRoundSessionTest {
         guest.joinNearby(NearbyGameRoom("000000000001", "甲", "192.168.1.8", 49762), "000000000002")
         channel.connect()
         assertTrue(host.state.value.connected); assertTrue(guest.state.value.connected)
+    }
+
+    @Test fun onlineInvitationWaitsFiveMinutesInsteadOfTwo() {
+        val host = GomokuOnlineSession(RuntimeEnvironment.getApplication()); val channel = Channel()
+        host.wireFactory = channel.factory; host.host("ALU2026")
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMinutes(2))
+        assertTrue(host.state.value.sessionActive)
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(179))
+        assertTrue(host.state.value.sessionActive)
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(2))
+        assertFalse(host.state.value.sessionActive); assertTrue(channel.host.closed)
+    }
+
+    @Test fun consecutiveUndoRollsBackTheRequestersMoveAndItsReplyInOneConsent() {
+        val (host, guest) = gomoku(1)
+        host.submitMove(GridCell(7,7)); drain(); guest.submitMove(GridCell(8,7)); drain()
+        host.submitMove(GridCell(7,8)); drain(); guest.submitMove(GridCell(8,8)); drain()
+        host.requestUndo(); drain(); guest.respondToUndo(true); drain()
+        assertEquals(2, host.state.value.game.board.count { it != 0 })
+        assertEquals(1, host.state.value.game.currentPlayer)
+        host.requestUndo(); drain(); guest.respondToUndo(true); drain()
+        assertEquals(GomokuEngine.newGame(), host.state.value.game)
+        assertEquals(host.state.value.game, guest.state.value.game)
+        assertFalse(host.state.value.canUndo)
+        guest.requestUndo(); drain(); assertNull(host.state.value.pendingUndoRequest)
+    }
+
+    @Test fun backgroundPresencePausesTheOpponentWithoutErasingOrLosingTheRound() {
+        val (host, guest, channel) = gomoku(1)
+        host.submitMove(GridCell(7,7)); drain()
+        guest.setForeground(false); drain()
+        assertTrue(host.state.value.remoteBackground); assertTrue(guest.state.value.localBackground)
+        host.submitMove(GridCell(8,8)); drain(); assertEquals(1, host.state.value.revision)
+        channel.host.hold = true; channel.guest.hold = true
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(125))
+        assertTrue(host.state.value.connected); assertTrue(guest.state.value.connected)
+        assertEquals(GomokuOutcome.PLAYING, host.state.value.game.outcome)
+        channel.host.hold = false; channel.guest.hold = false
+        guest.setForeground(true); drain()
+        assertFalse(host.state.value.remoteBackground)
+        guest.submitMove(GridCell(8,8)); drain()
+        assertEquals(2, host.state.value.revision); assertEquals(host.state.value.game, guest.state.value.game)
+    }
+
+    @Test fun aTransportPauseRetainsTheBoardAndRecoveryContinuesExactRevisions() {
+        val (host, guest, channel) = gomoku(1)
+        host.submitMove(GridCell(7,7)); drain()
+        channel.host.hold = true; channel.guest.hold = true
+        channel.host.events.recovering(); channel.guest.events.recovering()
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(25))
+        assertTrue(host.state.value.connected); assertTrue(host.state.value.reconnecting)
+        guest.submitMove(GridCell(8,8)); drain(); assertEquals(1, host.state.value.revision)
+        channel.host.hold = false; channel.guest.hold = false
+        channel.host.events.recovered(); channel.guest.events.recovered(); drain()
+        guest.submitMove(GridCell(8,8)); drain()
+        assertEquals(2, host.state.value.revision); assertEquals(host.state.value.game, guest.state.value.game)
+    }
+
+    @Test fun eitherColorCanResignAndAgreedRematchClearsResignation() {
+        for (hostColor in 1..2) {
+            val (host, guest) = gomoku(hostColor)
+            guest.resign(); drain()
+            assertEquals(3-hostColor, host.state.value.resignedBy)
+            assertEquals(host.state.value.game, guest.state.value.game)
+            assertEquals(if(hostColor==1) GomokuOutcome.HUMAN_WON else GomokuOutcome.CPU_WON, host.state.value.game.outcome)
+            host.requestRematch(); drain(); guest.respondToRematch(true); drain()
+            assertEquals(2, host.state.value.round); assertNull(host.state.value.resignedBy); assertNull(guest.state.value.resignedBy)
+            host.resign(); drain()
+            assertEquals(host.state.value.localPlayer, guest.state.value.resignedBy)
+            host.close(); guest.close()
+        }
+    }
+
+    @Test fun hostCannotForgeTheGuestsResignation() {
+        val (_, guest, channel) = gomoku(1)
+        channel.host.send(GomokuRoomProtocol.encode(GomokuRoomMessage.Control(RoomControl.Resigned(1,1,2)))); drain()
+        assertFalse(guest.state.value.connected)
+        assertEquals(GomokuOutcome.PLAYING, guest.state.value.game.outcome)
+        assertNull(guest.state.value.resignedBy)
+    }
+
+    @Test fun xiangqiUndoPresenceAndResignationShareTheSameSafeRoomSemantics() {
+        val host = XiangqiLanSession(); val guest = XiangqiLanSession(); val channel = Channel()
+        host.wireFactory = channel.factory; guest.wireFactory = channel.factory; host.firstPlayer = {1}
+        host.host(); guest.join("192.168.1.8"); channel.connect(); host.respondToMatch(true); drain()
+        host.submitMove(XiangqiMove(GridCell(0,6),GridCell(0,5))); drain()
+        guest.submitMove(XiangqiMove(GridCell(0,3),GridCell(0,4))); drain()
+        host.requestUndo(); drain(); guest.respondToUndo(true); drain()
+        assertEquals(XiangqiEngine.newGame(), host.state.value.game); assertEquals(host.state.value.game, guest.state.value.game)
+        guest.setForeground(false); drain(); assertTrue(host.state.value.remoteBackground)
+        host.submitMove(XiangqiMove(GridCell(0,6),GridCell(0,5))); drain(); assertEquals(3, host.state.value.revision)
+        guest.setForeground(true); drain(); host.resign(); drain()
+        assertEquals(XiangqiOutcome.BLACK_WON, guest.state.value.game.outcome)
+        assertEquals(XiangqiSide.RED, guest.state.value.resignedBy)
+        assertFalse(guest.state.value.canUndo)
     }
 }

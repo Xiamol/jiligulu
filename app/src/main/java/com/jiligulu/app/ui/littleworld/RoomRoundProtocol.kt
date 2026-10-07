@@ -15,12 +15,18 @@ internal sealed interface RoomControl {
     data class Vote(val round: Int, val revision: Int, val accept: Boolean, val sequence: Int = 1) : RoomControl
     data class Votes(val round: Int, val revision: Int, val hostReady: Boolean, val guestReady: Boolean, val guestSequence: Int = 0) : RoomControl
     data class Close(val round: Int, val revision: Int, val reason: RoomCloseReason) : RoomControl
+    data class Presence(val round: Int, val revision: Int, val player: Int, val background: Boolean) : RoomControl
+    data class Resign(val round: Int, val revision: Int, val player: Int) : RoomControl
+    data class Resigned(val round: Int, val revision: Int, val player: Int) : RoomControl
 }
 
 /** Host identity and playing color are independent. Consent belongs to a single round/revision. */
 internal object RoomRoundRules {
     const val RESULT_SECONDS = 30
     const val INVITE_MILLIS = 20_000L
+    const val WAITING_MILLIS = 300_000L
+    const val RECONNECT_GRACE_MILLIS = 300_000L
+    const val CONNECTION_QUIET_MILLIS = 20_000L
     const val MAX_ROUND = 10_000
     fun initial(hostPlayer: Int): RoomAssignment { require(hostPlayer in 1..2); return RoomAssignment(1, hostPlayer, 0) }
     fun next(current: RoomAssignment, revision: Int, hostReady: Boolean, guestReady: Boolean): RoomAssignment? =
@@ -45,6 +51,9 @@ internal object RoomControlCodec {
         is RoomControl.Vote -> "VOTE|${control.round}|${control.revision}|${if(control.accept) 1 else 0}|${control.sequence}"
         is RoomControl.Votes -> "VOTES|${control.round}|${control.revision}|${if(control.hostReady) 1 else 0}|${if(control.guestReady) 1 else 0}|${control.guestSequence}"
         is RoomControl.Close -> "CLOSE|${control.round}|${control.revision}|${control.reason.name}"
+        is RoomControl.Presence -> "PRESENCE|${control.round}|${control.revision}|${control.player}|${if(control.background) 1 else 0}"
+        is RoomControl.Resign -> "RESIGN|${control.round}|${control.revision}|${control.player}"
+        is RoomControl.Resigned -> "RESIGNED|${control.round}|${control.revision}|${control.player}"
     }
     fun decode(line: String): RoomControl {
         val p=line.split('|')
@@ -61,6 +70,9 @@ internal object RoomControlCodec {
             "VOTE" -> {require(p.size==5);RoomControl.Vote(number(1,1..RoomRoundRules.MAX_ROUND),number(2,0..Int.MAX_VALUE),number(3,0..1)==1,number(4,1..Int.MAX_VALUE))}
             "VOTES" -> {require(p.size==6);RoomControl.Votes(number(1,1..RoomRoundRules.MAX_ROUND),number(2,0..Int.MAX_VALUE),number(3,0..1)==1,number(4,0..1)==1,number(5,0..Int.MAX_VALUE))}
             "CLOSE" -> {require(p.size==4);RoomControl.Close(number(1,0..RoomRoundRules.MAX_ROUND),number(2,0..Int.MAX_VALUE),RoomCloseReason.valueOf(p[3]))}
+            "PRESENCE" -> {require(p.size==5);RoomControl.Presence(number(1,1..RoomRoundRules.MAX_ROUND),number(2,0..Int.MAX_VALUE),number(3,1..2),number(4,0..1)==1)}
+            "RESIGN" -> {require(p.size==4);RoomControl.Resign(number(1,1..RoomRoundRules.MAX_ROUND),number(2,0..Int.MAX_VALUE),number(3,1..2))}
+            "RESIGNED" -> {require(p.size==4);RoomControl.Resigned(number(1,1..RoomRoundRules.MAX_ROUND),number(2,1..Int.MAX_VALUE),number(3,1..2))}
             else -> throw LanProtocolException()
         } } catch(_:Exception) {throw LanProtocolException()}
     }

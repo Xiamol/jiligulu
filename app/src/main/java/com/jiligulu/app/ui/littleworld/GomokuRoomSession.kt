@@ -19,6 +19,8 @@ data class GomokuRoomUiState(
     val isHost: Boolean = false, val round: Int = 0, val pendingMatchName: String? = null,
     val awaitingMatch: Boolean = false, val rematchRequestedBy: Int? = null, val myRematchRequested: Boolean = false,
     val resultSecondsLeft: Int = 0, val roomEnded: Boolean = false,
+    val localBackground: Boolean = false, val remoteBackground: Boolean = false,
+    val reconnecting: Boolean = false, val resignedBy: Int? = null,
 )
 
 class GomokuLanSession : GomokuRoomSession(null, false)
@@ -58,6 +60,9 @@ open class GomokuRoomSession protected constructor(private val context: Context?
     private var nearbyId: String? = null
     private var guestId = ""
     private var targetId = ""
+    private var foreground = true
+    private var localResignationIntent = false
+    private fun canLocalUndo(): Boolean = mutable.value.localPlayer?.let { history.canUndo(it) } == true && mutable.value.resignedBy == null
 
     fun host(code: String = "", playerName: String = "棋友") {
         val target = if (online) if(code.isBlank()) RoomRoundRules.randomCode() else RoomRoundRules.code(code) else ""
@@ -76,11 +81,11 @@ open class GomokuRoomSession protected constructor(private val context: Context?
         close(); hosting = host
         val token = ++generation
         if (host && !online) handshake.close() // Active nearby radar may wait until the user cancels.
-        else handshake.begin(SystemClock.uptimeMillis(), if (host) 120_000 else 35_000)
+        else handshake.begin(SystemClock.uptimeMillis(), if (host) RoomRoundRules.WAITING_MILLIS else 45_000)
         mutable.value = GomokuRoomUiState(isHost=host, hostAddress = address,
-            sessionActive = true, busy = true, status = if (online) "正在连接互联网房间…" else "正在寻找附近伙伴…")
+            sessionActive = true, busy = true, localBackground = !foreground, status = if (online) "正在连接互联网房间…" else "正在寻找附近伙伴…")
         val events = GomokuWireEvents(
-            waiting = { if (token == generation) mutable.value = mutable.value.copy(hostAddress = it,
+            waiting = { if (token == generation && !initialized) mutable.value = mutable.value.copy(hostAddress = it,
                 status = if (host) "房间已准备好，等待伙伴加入" else "正在寻找房间…") },
             connected = { if (token == generation && !initialized && !mutable.value.connected && !handshake.waitingForState) {
                 clearWaiting(); lastPacket = SystemClock.uptimeMillis()
@@ -91,8 +96,12 @@ open class GomokuRoomSession protected constructor(private val context: Context?
                 startHeartbeat(token)
             } },
             data = { if (token == generation) runCatching {
-                val message = GomokuRoomProtocol.decode(it); lastPacket = SystemClock.uptimeMillis(); receive(message)
+                val message = GomokuRoomProtocol.decode(it); lastPacket = SystemClock.uptimeMillis();
+                if (mutable.value.reconnecting) mutable.value = mutable.value.copy(reconnecting = false, error = null, status = turnStatus(mutable.value.game))
+                receive(message)
             }.onFailure { fail("收到无效五子棋数据，连接已关闭") } },
+            recovering = { if (token == generation && initialized) mutable.value = mutable.value.copy(reconnecting = true, status = "正在恢复连接，棋局为你留着…") },
+            recovered = { if (token == generation) { lastPacket = SystemClock.uptimeMillis(); mutable.value = mutable.value.copy(reconnecting = false, error = null, status = turnStatus(mutable.value.game)); sendPresence() } },
             failure = { if (token == generation) fail(it) },
         )
         wire = wireFactory?.invoke(address, host, events) ?: if (online) GomokuOnlineWire(requireNotNull(context), address, host, events) else GomokuLanWire(events).also {
@@ -103,7 +112,7 @@ open class GomokuRoomSession protected constructor(private val context: Context?
 
     fun submitMove(cell: GridCell) {
         val current = mutable.value
-        if (!initialized || !current.connected || current.awaitingAck || current.pendingUndoRequest != null ||
+        if (!initialized || !current.connected || current.localBackground || current.remoteBackground || current.reconnecting || current.awaitingAck || current.pendingUndoRequest != null ||
             current.rematchRequestedBy!=null || current.game.currentPlayer != current.localPlayer) return
         val next = GomokuEngine.play(current.game, cell.x, cell.y)
         if (next === current.game) return
@@ -112,8 +121,11 @@ open class GomokuRoomSession protected constructor(private val context: Context?
             mutable.value = current.copy(awaitingAck = true, canUndo = false, error = null, status = "正在落子…")
             send(GomokuRoomMessage.Move(current.revision, cell))
             val token = generation
-            ackTask = Runnable { if (token == generation && mutable.value.awaitingAck) fail("落子确认超时，请重新连接") }
-                .also { main.postDelayed(it, 8_000) }
+            ackTask = object : Runnable { override fun run() {
+                if (token != generation || !mutable.value.awaitingAck) return
+                if (SystemClock.uptimeMillis() - lastPacket >= RoomRoundRules.RECONNECT_GRACE_MILLIS) fail("连接暂时未恢复，棋盘已保留")
+                else { mutable.value = mutable.value.copy(status = "等待伙伴回到棋桌，落子会继续同步…"); main.postDelayed(this, 5_000) }
+            }}.also { main.postDelayed(it, 8_000) }
         }
     }
 
@@ -144,7 +156,8 @@ open class GomokuRoomSession protected constructor(private val context: Context?
     fun requestUndo() {
         val current = mutable.value
         val player = current.localPlayer ?: return
-        if (!initialized || !current.connected || current.awaitingAck || current.pendingUndoRequest != null || current.rematchRequestedBy!=null) return
+        if (!initialized || !current.connected || current.localBackground || current.remoteBackground || current.reconnecting || current.awaitingAck || current.pendingUndoRequest != null || current.rematchRequestedBy!=null) return
+        if (current.resignedBy != null) return
         val request = history.begin(current.revision, current.game, player) ?: return
         showUndo(request); send(GomokuRoomMessage.UndoRequest(request))
     }
@@ -189,16 +202,17 @@ open class GomokuRoomSession protected constructor(private val context: Context?
                 if(start!=null) {localVoteSequence=0;guestVoteSequence=0;assignment=start;pendingStart=null;history=GomokuUndoHistory();clearRound();hostReady=false;guestReady=false}
                 mutable.value = current.copy(game = message.game, revision = message.revision, connected = true, busy = false,
                     awaitingAck = if(start!=null || advancing) false else current.awaitingAck, error = null, status = turnStatus(message.game),
-                    canUndo = history.canUndo && (start!=null || advancing || !current.awaitingAck),
+                    canUndo = canLocalUndo() && (start!=null || advancing || !current.awaitingAck),
                     pendingUndoRequest = history.pending?.requester,localPlayer=3-requireNotNull(assignment).hostPlayer,
-                    round=assignment!!.round,awaitingMatch=false,pendingMatchName=null,roomEnded=false,
+                    round=assignment!!.round,resignedBy=if(start!=null) null else current.resignedBy,awaitingMatch=false,pendingMatchName=null,roomEnded=false,
                     resultSecondsLeft=if(start!=null) 0 else current.resultSecondsLeft,
                     rematchRequestedBy=mutable.value.rematchRequestedBy,myRematchRequested=mutable.value.myRematchRequested)
+                if(start!=null) sendPresence()
                 if(message.game.outcome!=GomokuOutcome.PLAYING) enterResult()
             }
             GomokuRoomMessage.Reject -> {
                 if (hosting || !current.connected) throw LanProtocolException()
-                clearAck(); mutable.value = current.copy(awaitingAck = false, canUndo = history.canUndo,
+                clearAck(); mutable.value = current.copy(awaitingAck = false, canUndo = canLocalUndo(),
                     error = "棋局已更新，这一步没有落下", status = turnStatus(current.game))
             }
             is GomokuRoomMessage.UndoRequest -> {
@@ -229,7 +243,7 @@ open class GomokuRoomSession protected constructor(private val context: Context?
                 clearUndo(); clearAck()
                 if(message.snapshot.game.outcome==GomokuOutcome.PLAYING) clearRound()
                 mutable.value = current.copy(game = message.snapshot.game, revision = message.snapshot.revision, awaitingAck = false,
-                    pendingUndoRequest = null, canUndo = history.canUndo, error = null,
+                    pendingUndoRequest = null, canUndo = canLocalUndo(), error = null,
                     resultSecondsLeft=mutable.value.resultSecondsLeft,rematchRequestedBy=null,myRematchRequested=false,status = turnStatus(message.snapshot.game))
             }
             is GomokuRoomMessage.Control -> receiveControl(message.value)
@@ -243,7 +257,7 @@ open class GomokuRoomSession protected constructor(private val context: Context?
         clearVotes()
         val revision = current.revision + 1
         mutable.value = current.copy(game = game, revision = revision, error = null, status = turnStatus(game),
-            pendingUndoRequest = null, canUndo = history.canUndo,rematchRequestedBy=null,myRematchRequested=false)
+            pendingUndoRequest = null, canUndo = canLocalUndo(),rematchRequestedBy=null,myRematchRequested=false)
         send(GomokuRoomMessage.Snapshot(revision, game))
         if(game.outcome!=GomokuOutcome.PLAYING) enterResult()
     }
@@ -258,7 +272,7 @@ open class GomokuRoomSession protected constructor(private val context: Context?
     private fun cancelUndo(request: GomokuUndoRequest, resolution: XiangqiUndoResolution, notify: Boolean) {
         if (!history.cancel(request)) return
         clearUndo()
-        mutable.value = mutable.value.copy(pendingUndoRequest = null, canUndo = mutable.value.connected && !mutable.value.awaitingAck && history.canUndo,
+        mutable.value = mutable.value.copy(pendingUndoRequest = null, canUndo = mutable.value.connected && !mutable.value.awaitingAck && canLocalUndo(),
             error = resolution.hint, status = turnStatus(mutable.value.game))
         if (notify) send(GomokuRoomMessage.UndoResult(request, resolution))
     }
@@ -267,7 +281,7 @@ open class GomokuRoomSession protected constructor(private val context: Context?
         val target = history.commitHost(request, responder, current.revision, current.game) ?: return
         clearUndo();clearVotes()
         val revision = current.revision + 1
-        mutable.value = current.copy(game = target, revision = revision, canUndo = history.canUndo,
+        mutable.value = current.copy(game = target, revision = revision, canUndo = canLocalUndo(),
             pendingUndoRequest = null, error = null,rematchRequestedBy=null,myRematchRequested=false,
             resultSecondsLeft=if(target.outcome==GomokuOutcome.PLAYING) 0 else current.resultSecondsLeft,status = turnStatus(target))
         send(GomokuRoomMessage.UndoSnapshot(request, GomokuRoomMessage.Snapshot(revision, target)))
@@ -280,10 +294,48 @@ open class GomokuRoomSession protected constructor(private val context: Context?
         GomokuOutcome.DRAW -> "这一局平分秋色"
         GomokuOutcome.PLAYING -> if (game.currentPlayer == mutable.value.localPlayer) "轮到你落子" else "等待伙伴落子"
     }
+    /** A short trip to another app pauses both desks without declaring a loser. */
+    fun setForeground(value: Boolean) {
+        foreground = value
+        wire?.foreground(value)
+        val current = mutable.value
+        if (!current.sessionActive) return
+        lastPacket = SystemClock.uptimeMillis()
+        mutable.value = current.copy(localBackground = !value, status = if(!value) "棋局暂存，回来继续下" else turnStatus(current.game))
+        sendPresence()
+    }
+    private fun sendPresence() {
+        val current = mutable.value
+        val player = current.localPlayer ?: return
+        assignment?.let { send(GomokuRoomMessage.Control(RoomControl.Presence(it.round, current.revision, player, !foreground))) }
+    }
+    fun resign() {
+        val current = mutable.value; val player = current.localPlayer ?: return
+        val round = assignment ?: return
+        if (!current.connected || current.reconnecting || current.awaitingAck || current.game.outcome != GomokuOutcome.PLAYING) return
+        if (hosting) commitResignation(player)
+        else { localResignationIntent = true; send(GomokuRoomMessage.Control(RoomControl.Resign(round.round, current.revision, player))) }
+    }
+    private fun commitResignation(player: Int) {
+        val current = mutable.value; val round = assignment ?: return
+        if (current.game.outcome != GomokuOutcome.PLAYING || current.revision == Int.MAX_VALUE) return
+        val revision = current.revision + 1
+        clearUndo(); clearAck(); clearVotes()
+        history.pending?.let { history.cancel(it) }
+        val game = current.game.copy(outcome = if(player==1) GomokuOutcome.CPU_WON else GomokuOutcome.HUMAN_WON)
+        mutable.value = current.copy(game = game, revision = revision, resignedBy = player, pendingUndoRequest = null,
+            canUndo = false, awaitingAck = false, error = null, rematchRequestedBy = null, myRematchRequested = false,
+            status = if (player == 1) "黑棋已认输" else "白棋已认输")
+        send(GomokuRoomMessage.Control(RoomControl.Resigned(round.round, revision, player)))
+        enterResult()
+    }
     private fun startHeartbeat(token: Int) {
         heartbeat = object : Runnable { override fun run() {
             if (token != generation || wire == null) return
-            if (SystemClock.uptimeMillis() - lastPacket > 20_000) { fail("伙伴的连接已断开，可以重新创建房间"); return }
+            val quiet = SystemClock.uptimeMillis() - lastPacket
+            if (quiet >= RoomRoundRules.RECONNECT_GRACE_MILLIS && foreground) { fail("连接暂时未恢复，棋盘已保留，可以重新约一局"); return }
+            if (quiet > RoomRoundRules.CONNECTION_QUIET_MILLIS && !mutable.value.localBackground && !mutable.value.remoteBackground)
+                mutable.value = mutable.value.copy(reconnecting = true, status = "正在恢复连接，棋局为你留着…")
             send(GomokuRoomMessage.Ping); main.postDelayed(this, 5_000)
         } }.also { main.postDelayed(it, 5_000) }
     }
@@ -313,8 +365,8 @@ open class GomokuRoomSession protected constructor(private val context: Context?
         if(!notifyPeer) old?.close() else main.postDelayed({old?.close()},200)
         mutable.value = mutable.value.copy(localPlayer = if(assignment!=null) mutable.value.localPlayer else null, hostAddress = "", connected = false, sessionActive = false,
             awaitingAck = false, busy = false, canUndo = false, pendingUndoRequest = null, status = message, error = null,
-            pendingMatchName=null,awaitingMatch=false,roomEnded=assignment!=null,myRematchRequested=false,rematchRequestedBy=null)
-        assignment=null
+            pendingMatchName=null,awaitingMatch=false,roomEnded=assignment!=null,myRematchRequested=false,rematchRequestedBy=null,localBackground=false,remoteBackground=false,reconnecting=false)
+        assignment=null; localResignationIntent=false
     }
     private fun receiveControl(control:RoomControl) {
         val current=mutable.value
@@ -347,6 +399,28 @@ open class GomokuRoomSession protected constructor(private val context: Context?
                 }
                 showVotes()
             }
+            is RoomControl.Presence -> {
+                val round = assignment ?: return; val player = current.localPlayer ?: return
+                if (control.round != round.round || control.revision > current.revision) return
+                if (control.player != 3 - player) throw LanProtocolException()
+                mutable.value = current.copy(remoteBackground = control.background, status = if(control.background) "伙伴暂时离开棋桌，回来继续下" else turnStatus(current.game))
+            }
+            is RoomControl.Resign -> {
+                val round = assignment ?: return; val player = current.localPlayer ?: return
+                if (!hosting || control.player != 3 - player) throw LanProtocolException()
+                if(control.round == round.round && control.revision == current.revision) commitResignation(control.player)
+            }
+            is RoomControl.Resigned -> {
+                val round = assignment ?: return; val player = current.localPlayer ?: return
+                if (hosting || (control.player == player && !localResignationIntent)) throw LanProtocolException()
+                if (control.round != round.round || current.revision == Int.MAX_VALUE || control.revision != current.revision + 1 || current.game.outcome != GomokuOutcome.PLAYING) return
+                clearUndo(); clearAck(); clearVotes(); history.pending?.let { history.cancel(it) }
+                val resignedPlayer = control.player
+                mutable.value = current.copy(game = current.game.copy(outcome = if(resignedPlayer==1) GomokuOutcome.CPU_WON else GomokuOutcome.HUMAN_WON), revision = control.revision,
+                    resignedBy = resignedPlayer, pendingUndoRequest = null, canUndo = false, awaitingAck = false,
+                    rematchRequestedBy = null, myRematchRequested = false, error = null, status = if(control.player == 1) "黑棋已认输" else "白棋已认输")
+                localResignationIntent = false; enterResult()
+            }
             is RoomControl.Close -> {
                 if(control.round < (assignment?.round ?: 0) || control.revision<current.revision) return
                 finishRoom(control.reason.hint,null)
@@ -359,9 +433,10 @@ open class GomokuRoomSession protected constructor(private val context: Context?
         history=GomokuUndoHistory();localVoteSequence=0;guestVoteSequence=0;assignment=next;initialized=true;pendingStart=null;nearbyId=null
         mutable.value=current.copy(game=GomokuEngine.newGame(),revision=next.revision,localPlayer=next.hostPlayer,
             round=next.round,isHost=true,connected=true,awaitingMatch=false,pendingMatchName=null,busy=false,awaitingAck=false,
-            pendingUndoRequest=null,canUndo=false,rematchRequestedBy=null,myRematchRequested=false,resultSecondsLeft=0,roomEnded=false,error=null,status="棋友已就位，黑棋先行")
+            pendingUndoRequest=null,canUndo=false,rematchRequestedBy=null,myRematchRequested=false,resultSecondsLeft=0,roomEnded=false,resignedBy=null,error=null,status="棋友已就位，黑棋先行")
         send(GomokuRoomMessage.Control(RoomControl.Start(next)))
         send(GomokuRoomMessage.Snapshot(next.revision,GomokuEngine.newGame()))
+        sendPresence()
     }
     private fun receiveVote(vote:RoomControl.Vote,fromHost:Boolean) {
         val round=assignment ?: return;val current=mutable.value
@@ -390,7 +465,7 @@ open class GomokuRoomSession protected constructor(private val context: Context?
         val current=mutable.value;val round=assignment ?: return
         val who=if(hostReady) round.hostPlayer else if(guestReady || !hosting && localRematchIntent) 3-round.hostPlayer else null
         mutable.value=current.copy(rematchRequestedBy=who,myRematchRequested=if(hosting) hostReady else localRematchIntent,
-            canUndo=who==null && history.canUndo,status=if(who==null) turnStatus(current.game) else "等棋友同意，再摆一盘")
+            canUndo=who==null && canLocalUndo(),status=if(who==null) turnStatus(current.game) else "等棋友同意，再摆一盘")
     }
     private fun sendVotes() {assignment?.let {send(GomokuRoomMessage.Control(RoomControl.Votes(it.round,mutable.value.revision,hostReady,guestReady,guestVoteSequence)))}}
     private fun enterResult() {
@@ -399,6 +474,7 @@ open class GomokuRoomSession protected constructor(private val context: Context?
         val token=generation
         roundTask=object:Runnable {override fun run() {
             if(token!=generation || resultDeadline==0L) return
+            if (mutable.value.localBackground || mutable.value.remoteBackground || mutable.value.reconnecting) { resultDeadline += 1_000; main.postDelayed(this,1_000); return }
             val left=((resultDeadline-SystemClock.uptimeMillis()+999)/1000).coerceAtLeast(0).toInt()
             mutable.value=mutable.value.copy(resultSecondsLeft=left)
             if(left==0) finishRoom(RoomCloseReason.RESULT_TIMEOUT.hint,RoomCloseReason.RESULT_TIMEOUT)
@@ -514,16 +590,28 @@ internal class GomokuUndoHistory {
     var pending: GomokuUndoRequest? = null
         private set
     val canUndo: Boolean get() = previous.isNotEmpty() && pending == null
+    fun canUndo(player: Int): Boolean = pending == null && targetIndex(player) >= 0
+    private fun targetIndex(player: Int): Int = previous.indexOfLast {
+        it.currentPlayer == player && it.outcome == GomokuOutcome.PLAYING
+    }
+    private fun target(player: Int): GomokuState? = targetIndex(player).takeIf { it >= 0 }?.let { previous.elementAt(it) }
+    private fun popTo(player: Int): GomokuState? {
+        val index = targetIndex(player)
+        if (index < 0) return null
+        val result = previous.elementAt(index)
+        while (previous.size > index) previous.removeLast()
+        return result
+    }
     fun record(current: GomokuState, next: GomokuState): Boolean {
         if (next == GomokuEngine.newGame()) previous.clear() else {
             if (next.lastMove?.let { GomokuEngine.play(current, it.x, it.y) == next } != true) return false
-            if (previous.size == 128) previous.removeFirst()
+            if (previous.size == 225) previous.removeFirst()
             previous.addLast(current)
         }
         clear(); return true
     }
     fun begin(revision: Int, game: GomokuState, player: Int): GomokuUndoRequest? {
-        if (!canUndo || player !in 1..2 || revision == Int.MAX_VALUE || localId == Int.MAX_VALUE) return null
+        if (player !in 1..2 || !canUndo(player) || revision == Int.MAX_VALUE || localId == Int.MAX_VALUE) return null
         val request = GomokuUndoRequest(revision, ++localId, player); seen[player] = request.id
         bind(request, game); return request
     }
@@ -533,7 +621,7 @@ internal class GomokuUndoHistory {
         if (request.id <= seen[request.requester]) return XiangqiUndoOffer.STALE
         seen[request.requester] = request.id
         if (pending != null && (host || pending?.requester != localPlayer)) return XiangqiUndoOffer.BUSY
-        if (previous.isEmpty()) return XiangqiUndoOffer.EMPTY
+        if (target(request.requester) == null) return XiangqiUndoOffer.EMPTY
         bind(request, game); return XiangqiUndoOffer.ACCEPTED
     }
     fun consent(revision: Int, game: GomokuState, player: Int): Boolean {
@@ -544,15 +632,15 @@ internal class GomokuUndoHistory {
     fun commitHost(request: GomokuUndoRequest, responder: Int, revision: Int, game: GomokuState): GomokuState? {
         if (pending != request || responder != 3 - request.requester || request.revision != revision ||
             revision == Int.MAX_VALUE || position != game || previous.isEmpty()) return null
-        val target = previous.removeLast(); clear(); return target
+        val target = popTo(request.requester) ?: return null; clear(); return target
     }
     fun acceptsGuest(player: Int, revision: Int, game: GomokuState, next: GomokuRoomMessage.UndoSnapshot): Boolean =
         pending == next.request && next.request.revision == revision && revision < Int.MAX_VALUE && position == game &&
-            next.snapshot.revision == revision + 1 && previous.isNotEmpty() && previous.last() == next.snapshot.game &&
+            next.snapshot.revision == revision + 1 && previous.isNotEmpty() && target(next.request.requester) == next.snapshot.game &&
             (next.request.requester == player || consent)
     fun commitGuest(player: Int, revision: Int, game: GomokuState, next: GomokuRoomMessage.UndoSnapshot): Boolean {
         if (!acceptsGuest(player, revision, game, next)) return false
-        previous.removeLast(); clear(); return true
+        popTo(next.request.requester) ?: return false; clear(); return true
     }
     fun cancel(request: GomokuUndoRequest): Boolean { if (pending != request) return false; clear(); return true }
     private fun bind(request: GomokuUndoRequest, game: GomokuState) { pending = request; position = game; consent = false }

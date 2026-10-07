@@ -14,12 +14,13 @@ class LocalChessUndoTest {
         assertEquals(2, LocalChessUndo.gomokuTarget(listOf(initial, human, cpu)))
     }
 
-    @Test fun xiangqiHumanRoundAndHotseatUndoUseDifferentTargets() {
+    @Test fun hotseatAndCpuUndoBothReturnToTheRequestersPreviousDecision() {
         val initial = XiangqiEngine.newGame()
         val red = XiangqiEngine.play(initial, XiangqiMove(GridCell(0, 6), GridCell(0, 5)))
         val black = XiangqiEngine.play(red, XiangqiMove(GridCell(0, 3), GridCell(0, 4)))
         assertEquals(0, LocalChessUndo.xiangqiTarget(listOf(initial, red), cpu = true))
-        assertEquals(1, LocalChessUndo.xiangqiTarget(listOf(initial, red), cpu = false))
+        assertEquals(0, LocalChessUndo.xiangqiTarget(listOf(initial, red), cpu = false))
+        assertEquals(1, LocalChessUndo.xiangqiTarget(listOf(initial, red), cpu = false, humanSide = XiangqiSide.BLACK))
         assertEquals(2, LocalChessUndo.xiangqiTarget(listOf(initial, red, black), cpu = true))
         assertEquals(-1, LocalChessUndo.xiangqiTarget(emptyList(), cpu = false))
     }

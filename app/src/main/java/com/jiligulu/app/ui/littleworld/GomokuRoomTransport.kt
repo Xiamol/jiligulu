@@ -33,6 +33,7 @@ internal interface GomokuRoomWire {
     val transportView: WebView? get() = null
     fun send(line: String)
     fun close()
+    fun foreground(value: Boolean) {}
 }
 
 internal data class GomokuWireEvents(
@@ -40,6 +41,8 @@ internal data class GomokuWireEvents(
     val connected: () -> Unit,
     val data: (String) -> Unit,
     val failure: (String) -> Unit,
+    val recovering: () -> Unit = {},
+    val recovered: () -> Unit = {},
 )
 
 /** Reliable local byte transport; all UI/game callbacks are serialized on the main looper. */
@@ -145,6 +148,8 @@ internal class GomokuOnlineWire(context: Context, code: String, hosting: Boolean
                 when (type) {
                     "ready" -> events.waiting(code)
                     "connected" -> events.connected()
+                    "recovering" -> events.recovering()
+                    "recovered" -> events.recovered()
                     "data" -> if (value.length <= XiangqiLanProtocol.MAX_LINE_BYTES) events.data(value)
                         else events.failure("收到无效五子棋数据")
                     "closed" -> events.failure("伙伴已离开房间")
@@ -152,6 +157,7 @@ internal class GomokuOnlineWire(context: Context, code: String, hosting: Boolean
                         "peer-unavailable" -> "找不到房间，请确认伙伴仍在等待"
                         "unavailable-id" -> "这个房间码已经有人用了，换一个吧"
                         "protocol" -> "双方软件版本不同，更新后再一起下棋吧"
+                        "relay-unavailable" -> "房间已找到，但网络无法直连；当前中继未配置，请换 Wi-Fi 或附近对局"
                         else -> "互联网连接未成功，可找附近伙伴或同机对局"
                     })
                 }
@@ -163,7 +169,11 @@ internal class GomokuOnlineWire(context: Context, code: String, hosting: Boolean
                 if (request?.url.toString() == "https://appassets.androidplatform.net/peerjs.min.js")
                     WebResourceResponse("application/javascript", "UTF-8", context.assets.open("chess-online/peerjs.min.js")) else null
             override fun onPageFinished(v: WebView?, url: String?) {
-                if (!closed) view.evaluateJavascript("guluStart(${JSONObject.quote(code)},$hosting)", null)
+                if (!closed && !started) {
+                    started = true
+                    val config = context.assets.open("chess-online/relay-config.json").bufferedReader().use { it.readText() }
+                    view.evaluateJavascript("guluStart(${JSONObject.quote(code)},$hosting,$config)", null)
+                }
             }
         }
         // The audited static transport uses the same signaling infrastructure, with isolated peers/metadata.
@@ -171,7 +181,9 @@ internal class GomokuOnlineWire(context: Context, code: String, hosting: Boolean
             .replace("gulu-xq-", prefix)
         view.loadDataWithBaseURL("https://appassets.androidplatform.net/", html, "text/html", "UTF-8", null)
     }
+    private var started = false
     override fun send(line: String) { if (!closed) view.evaluateJavascript("guluSend(${JSONObject.quote(line)})", null) }
+    override fun foreground(value: Boolean) { if (!closed) view.evaluateJavascript("guluForeground($value)", null) }
     override fun close() {
         if (closed) return
         closed = true

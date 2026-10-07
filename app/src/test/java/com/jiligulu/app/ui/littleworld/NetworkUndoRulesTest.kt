@@ -12,14 +12,14 @@ class NetworkUndoRulesTest {
         val host = chessHistory(); val guest = chessHistory()
         val request = requireNotNull(host.beginLocal(2, black, XiangqiSide.RED))
         assertEquals(XiangqiUndoOffer.ACCEPTED, guest.receiveOffer(request, 2, black, XiangqiSide.BLACK, false))
-        val next = XiangqiLanMessage.UndoSnapshot(request, XiangqiLanMessage.Snapshot(3, red))
+        val next = XiangqiLanMessage.UndoSnapshot(request, XiangqiLanMessage.Snapshot(3, initial))
         assertNull(host.commitHost(request, XiangqiSide.RED, 2, black))
         assertFalse(guest.acceptsGuestUndo(XiangqiSide.BLACK, 2, black, next))
         assertFalse(guest.consentLocally(2, black, XiangqiSide.RED))
         assertTrue(guest.consentLocally(2, black, XiangqiSide.BLACK))
-        assertEquals(red, host.commitHost(request, XiangqiSide.BLACK, 2, black))
+        assertEquals(initial, host.commitHost(request, XiangqiSide.BLACK, 2, black))
         assertTrue(guest.commitGuestUndo(XiangqiSide.BLACK, 2, black, next))
-        assertEquals(XiangqiSide.BLACK, next.snapshot.game.turnSide)
+        assertEquals(XiangqiSide.RED, next.snapshot.game.turnSide)
         assertFalse(guest.commitGuestUndo(XiangqiSide.BLACK, 3, red, next))
     }
 
@@ -81,7 +81,7 @@ class NetworkUndoRulesTest {
         guest.consentLocally(2, black, XiangqiSide.BLACK)
         assertFalse(XiangqiSnapshotRules.accepts(2, black, true, XiangqiLanMessage.Snapshot(3, red)))
         assertTrue(XiangqiSnapshotRules.acceptsUndo(2, black, true, XiangqiSide.BLACK, guest,
-            XiangqiLanMessage.UndoSnapshot(request, XiangqiLanMessage.Snapshot(3, red))))
+            XiangqiLanMessage.UndoSnapshot(request, XiangqiLanMessage.Snapshot(3, initial))))
     }
 
     @Test fun allUndoPacketsRoundTripAndMalformedConsentsAreRejected() {
@@ -119,16 +119,16 @@ class NetworkUndoRulesTest {
         for (history in listOf(host, guest)) { assertTrue(history.record(initial, one)); assertTrue(history.record(one, two)) }
         val request = requireNotNull(host.begin(2, two, 1))
         assertEquals(XiangqiUndoOffer.ACCEPTED, guest.offer(request, 2, two, 2, false))
-        val packet = GomokuRoomMessage.UndoSnapshot(request, GomokuRoomMessage.Snapshot(3, one))
+        val packet = GomokuRoomMessage.UndoSnapshot(request, GomokuRoomMessage.Snapshot(3, initial))
         assertEquals(packet, GomokuRoomProtocol.decode(GomokuRoomProtocol.encode(packet)))
         assertFalse(guest.acceptsGuest(2, 2, two, packet))
         assertNull(host.commitHost(request, 1, 2, two))
         assertTrue(guest.consent(2, two, 2))
-        assertFalse(guest.acceptsGuest(2, 2, two, packet.copy(snapshot = GomokuRoomMessage.Snapshot(3, initial))))
-        assertEquals(one, host.commitHost(request, 2, 2, two))
+        assertFalse(guest.acceptsGuest(2, 2, two, packet.copy(snapshot = GomokuRoomMessage.Snapshot(3, one))))
+        assertEquals(initial, host.commitHost(request, 2, 2, two))
         assertTrue(guest.commitGuest(2, 2, two, packet))
         assertFalse(guest.commitGuest(2, 3, one, packet))
-        assertEquals(2, packet.snapshot.game.currentPlayer)
+        assertEquals(1, packet.snapshot.game.currentPlayer)
         assertEquals(XiangqiUndoOffer.STALE, guest.offer(request, 3, one, 2, false))
     }
 

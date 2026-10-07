@@ -20,6 +20,18 @@ internal class XiangqiUndoHistory {
     var pending: XiangqiUndoRequest? = null
         private set
     val canUndo: Boolean get() = previous.isNotEmpty() && pending == null
+    fun canUndo(side: XiangqiSide): Boolean = pending == null && targetIndex(side) >= 0
+    private fun targetIndex(side: XiangqiSide): Int = previous.indexOfLast {
+        it.turnSide == side && it.outcome == XiangqiOutcome.PLAYING
+    }
+    private fun target(side: XiangqiSide): XiangqiState? = targetIndex(side).takeIf { it >= 0 }?.let { previous.elementAt(it) }
+    private fun popTo(side: XiangqiSide): XiangqiState? {
+        val index = targetIndex(side)
+        if (index < 0) return null
+        val result = previous.elementAt(index)
+        while (previous.size > index) previous.removeLast()
+        return result
+    }
 
     /** Call only after ordinary snapshot validation; a fresh game starts a fresh history. */
     fun recordAdvance(current: XiangqiState, next: XiangqiState): Boolean {
@@ -27,7 +39,7 @@ internal class XiangqiUndoHistory {
             previous.clear()
         } else {
             if (next.lastMove?.let { XiangqiEngine.play(current, it) == next } != true) return false
-            if (previous.size == 128) previous.removeFirst()
+            if (previous.size == 512) previous.removeFirst()
             previous.addLast(current)
         }
         cancelPending()
@@ -35,7 +47,7 @@ internal class XiangqiUndoHistory {
     }
 
     fun beginLocal(revision: Int, game: XiangqiState, side: XiangqiSide): XiangqiUndoRequest? {
-        if (!canUndo || revision == Int.MAX_VALUE || nextLocalId == Int.MAX_VALUE) return null
+        if (!canUndo(side) || revision == Int.MAX_VALUE || nextLocalId == Int.MAX_VALUE) return null
         val request = XiangqiUndoRequest(revision, ++nextLocalId, side)
         seenIds[side.ordinal] = request.id
         bind(request, game)
@@ -56,7 +68,7 @@ internal class XiangqiUndoHistory {
         seenIds[request.requester.ordinal] = request.id
         // A host offer wins a simultaneous request. The guest never rewrites the host's pending offer.
         if (pending != null && (host || pending?.requester != localSide)) return XiangqiUndoOffer.BUSY
-        if (previous.isEmpty()) return XiangqiUndoOffer.EMPTY
+        if (target(request.requester) == null) return XiangqiUndoOffer.EMPTY
         bind(request, game)
         return XiangqiUndoOffer.ACCEPTED
     }
@@ -78,7 +90,7 @@ internal class XiangqiUndoHistory {
     ): XiangqiState? {
         if (pending != request || responder != request.requester.opponent || request.revision != revision ||
             revision == Int.MAX_VALUE || pendingPosition != game || previous.isEmpty()) return null
-        val target = previous.removeLast()
+        val target = popTo(request.requester) ?: return null
         cancelPending()
         return target
     }
@@ -92,7 +104,7 @@ internal class XiangqiUndoHistory {
         val request = pending ?: return false
         return next.request == request && request.revision == revision && revision < Int.MAX_VALUE &&
             pendingPosition == game && next.snapshot.revision == revision + 1 && previous.isNotEmpty() &&
-            next.snapshot.game == previous.last() &&
+            next.snapshot.game == target(request.requester) &&
             (localSide == request.requester || approvedByLocalResponder)
     }
 
@@ -104,7 +116,7 @@ internal class XiangqiUndoHistory {
         next: XiangqiLanMessage.UndoSnapshot,
     ): Boolean {
         if (!acceptsGuestUndo(localSide, revision, game, next)) return false
-        previous.removeLast()
+        popTo(next.request.requester) ?: return false
         cancelPending()
         return true
     }
