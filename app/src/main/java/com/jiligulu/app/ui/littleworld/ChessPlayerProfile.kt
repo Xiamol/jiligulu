@@ -27,12 +27,19 @@ data class ChessPlayerProfile(val name: String = "阿噜的朋友", val avatarId
 
 data class ChessRoomInvite(val game: String, val code: String) {
     val uri: String get() = "jiligulu://chess/join?game=$game&code=$code"
+    val webUri: String get() = "https://xiamol.github.io/jiligulu/join/?game=$game&code=$code"
     companion object {
         fun parse(value: String?): ChessRoomInvite? = runCatching {
             val uri = URI(value ?: return null)
-            if (uri.scheme != "jiligulu" || uri.host != "chess" || uri.path != "/join" || uri.fragment != null) return null
+            if (uri.rawUserInfo != null || uri.port != -1 || uri.fragment != null) return null
+            val supported = when (uri.scheme) {
+                "jiligulu" -> uri.host == "chess" && uri.rawPath == "/join"
+                "https" -> uri.host == "xiamol.github.io" && uri.rawPath in setOf("/jiligulu/join", "/jiligulu/join/")
+                else -> false
+            }
+            if (!supported) return null
             val fields = uri.rawQuery.orEmpty().split('&').map { it.split('=', limit = 2) }
-            if (fields.any { it.size != 2 } || fields.map { it[0] }.distinct().size != fields.size) return null
+            if (fields.size != 2 || fields.any { it.size != 2 } || fields.map { it[0] }.toSet() != setOf("game", "code")) return null
             val query = fields.associate { it[0] to it[1] }
             val game = query["game"]?.takeIf { it == "xiangqi" || it == "gomoku" } ?: return null
             val code = RoomRoundRules.code(query["code"].orEmpty()) ?: return null

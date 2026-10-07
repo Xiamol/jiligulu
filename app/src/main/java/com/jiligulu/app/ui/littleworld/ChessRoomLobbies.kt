@@ -157,7 +157,7 @@ internal fun ColumnScope.OnlineChessLobby(active: Boolean, busy: Boolean, code: 
                     TextButton(onClick = {
                         UiSound.select(context)
                         val invite = ChessRoomInvite(game, code)
-                        val text = "来和我下一盘${if (game == "xiangqi") "象棋" else "五子棋"}吧 ♡\n${invite.uri}\n房间码：$code"
+                        val text = "来和我下一盘${if (game == "xiangqi") "象棋" else "五子棋"}吧 ♡\n${invite.webUri}\n房间码：$code"
                         val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
                             type = "text/plain"; putExtra(android.content.Intent.EXTRA_TEXT, text)
                         }

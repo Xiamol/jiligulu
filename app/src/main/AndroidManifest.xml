@@ -70,6 +70,13 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="jiligulu" android:host="chess" android:path="/join" />
             </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="xiamol.github.io" android:path="/jiligulu/join" />
+                <data android:scheme="https" android:host="xiamol.github.io" android:path="/jiligulu/join/" />
+            </intent-filter>
         </activity>
     </application>
 
