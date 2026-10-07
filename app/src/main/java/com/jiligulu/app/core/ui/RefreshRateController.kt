@@ -66,6 +66,8 @@ internal class RefreshRateController(private val activity: ComponentActivity) {
     private var collection: Job? = null
     private var baseline: Pair<Int, Float>? = null
     private var applied: Pair<Int, Float>? = null
+    private var displayListening = false
+    private var receiverRegistered = false
     private var pendingAttach: View.OnAttachStateChangeListener? = null
     private val displayListener = object : DisplayManager.DisplayListener {
         override fun onDisplayAdded(displayId: Int) = Unit
@@ -82,11 +84,9 @@ internal class RefreshRateController(private val activity: ComponentActivity) {
         if (resumed) return
         resumed = true
         baseline = activity.window.attributes.let { it.preferredDisplayModeId to it.preferredRefreshRate }
-        manager?.registerDisplayListener(displayListener, Handler(Looper.getMainLooper()))
-        ContextCompat.registerReceiver(activity, receiver, IntentFilter(PowerManager.ACTION_POWER_SAVE_MODE_CHANGED),
-            ContextCompat.RECEIVER_NOT_EXPORTED)
+        updateMonitoring()
         collection = activity.lifecycleScope.launch {
-            prefs.refreshRate.collect { preference = it; apply() }
+            prefs.refreshRate.collect { preference = it; updateMonitoring(); apply() }
         }
         val decor = activity.window.decorView
         if (decor.isAttachedToWindow) apply() else {
@@ -101,13 +101,36 @@ internal class RefreshRateController(private val activity: ComponentActivity) {
         }
     }
 
+    private fun updateMonitoring() {
+        if (!resumed || preference == AppRefreshRate.SYSTEM) { stopMonitoring(); return }
+        if (!displayListening) manager?.let {
+            runCatching { it.registerDisplayListener(displayListener, Handler(Looper.getMainLooper())) }
+                .onSuccess { displayListening = true }
+                .onFailure { Log.d("WindowRefresh", "Display changes cannot be observed on this device") }
+        }
+        if (!receiverRegistered) runCatching {
+            ContextCompat.registerReceiver(activity, receiver, IntentFilter(PowerManager.ACTION_POWER_SAVE_MODE_CHANGED),
+                ContextCompat.RECEIVER_NOT_EXPORTED)
+        }.onSuccess { receiverRegistered = true }
+            .onFailure { Log.d("WindowRefresh", "Power changes will be checked when the window resumes") }
+    }
+
+    private fun stopMonitoring() {
+        if (displayListening) { manager?.unregisterDisplayListener(displayListener); displayListening = false }
+        if (receiverRegistered) { runCatching { activity.unregisterReceiver(receiver) }; receiverRegistered = false }
+    }
+
     private fun apply() {
         if (!resumed || !activity.window.decorView.isAttachedToWindow) return
-        val display = activity.window.decorView.display ?: return
-        val current = display.mode
-        val mode = selectAppRefreshMode(preference, power?.isPowerSaveMode == true,
-            DisplayRateMode(current.physicalWidth, current.physicalHeight, current.refreshRate, current.modeId),
-            display.supportedModes.map { DisplayRateMode(it.physicalWidth, it.physicalHeight, it.refreshRate, it.modeId) })
+        // SYSTEM must have no display-mode dependency at all. Some virtual/OEM displays
+        // cannot expose mode tables; an optional refresh preference must never break launch.
+        val mode = if (preference == AppRefreshRate.SYSTEM) null else runCatching {
+            val display = activity.window.decorView.display ?: return@runCatching null
+            val current = display.mode
+            selectAppRefreshMode(preference, power?.isPowerSaveMode == true,
+                DisplayRateMode(current.physicalWidth, current.physicalHeight, current.refreshRate, current.modeId),
+                display.supportedModes.map { DisplayRateMode(it.physicalWidth, it.physicalHeight, it.refreshRate, it.modeId) })
+        }.getOrNull()
         val target = mode?.let { it.id to it.refreshRate } ?: baseline ?: return
         val attributes = activity.window.attributes
         val existing = attributes.preferredDisplayModeId to attributes.preferredRefreshRate
@@ -137,8 +160,7 @@ internal class RefreshRateController(private val activity: ComponentActivity) {
         resumed = false
         AppWindowRefreshHints.publish(activity.window, null)
         collection?.cancel(); collection = null
-        manager?.unregisterDisplayListener(displayListener)
-        runCatching { activity.unregisterReceiver(receiver) }
+        stopMonitoring()
         pendingAttach?.let(activity.window.decorView::removeOnAttachStateChangeListener)
         pendingAttach = null
         val owned = applied
