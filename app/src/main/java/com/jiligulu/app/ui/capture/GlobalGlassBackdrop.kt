@@ -34,9 +34,16 @@ internal object GlobalGlassBackdrop {
     var rendererUnavailable = false
         private set
 
-    fun watch(view: GlassFloatingBubbleView) { watched = WeakReference(view); refreshTarget() }
+    fun watch(view: GlassFloatingBubbleView) {
+        watched = WeakReference(view)
+        refreshTarget()
+        ScreenCaptureService.refreshGlassEnvironment()
+    }
     fun unwatch(view: GlassFloatingBubbleView) {
-        if (watched.get() === view) { clearFrame(); watched.clear(); target = null; interacting = false }
+        if (watched.get() === view) {
+            clearFrame(); watched.clear(); target = null; interacting = false
+            ScreenCaptureService.refreshGlassEnvironment()
+        }
     }
     fun interaction(pressed: Boolean) {
         interacting = pressed
@@ -55,6 +62,10 @@ internal object GlobalGlassBackdrop {
     fun settledTarget(): GlassRect? {
         refreshTarget()
         return target?.takeIf { !interacting && SystemClock.uptimeMillis() - changedAt >= GlobalGlassSampling.SETTLE_MS }
+    }
+    fun millisUntilSettled(): Long? {
+        refreshTarget()
+        return GlobalGlassSampling.settleDelayMillis(target != null, interacting, changedAt, SystemClock.uptimeMillis())
     }
     fun session(enabled: Boolean, phase: GlobalGlassPhase, detail: String) {
         if (!enabled) rendererUnavailable = false

@@ -193,7 +193,14 @@ class ScreenCaptureService : Service() {
         // 250 ms here needlessly woke the main thread even while the app was motionless.
         if (AppGlassBackdrop.available()) { pauseGlass("应用内使用本应用背景，整屏采样暂停"); return }
         val target = GlobalGlassBackdrop.settledTarget()
-        if (target == null) { pauseGlass("浮球移动或隐藏，稳定后继续"); nextGlass(150); return }
+        if (target == null) {
+            pauseGlass("浮球移动或隐藏，稳定后继续")
+            // A hidden/missing bubble and a held drag have no sampling work. Attach,
+            // visibility, geometry and release events restart this authorized session.
+            // Only an existing, released target needs one remaining settle deadline.
+            GlobalGlassBackdrop.millisUntilSettled()?.let { nextGlass(it.coerceAtLeast(1L)) }
+            return
+        }
         if (awaitingGlassFrame) {
             if (SystemClock.uptimeMillis() - requestAt > 1_500) {
                 pauseGlass("尚未收到可采样画面"); nextGlass(250)

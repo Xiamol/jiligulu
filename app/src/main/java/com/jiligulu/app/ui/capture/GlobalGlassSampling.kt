@@ -45,6 +45,12 @@ internal object GlobalGlassSampling {
     const val FRAME_MAX_AGE_MS = 350L
     const val MAX_CAPTURE_EDGE = 1280
 
+    /** No target or a held drag waits for an event, not a recurring sampling timer. */
+    fun settleDelayMillis(hasTarget: Boolean, interacting: Boolean, changedAt: Long, now: Long): Long? {
+        if (!hasTarget || interacting) return null
+        return (SETTLE_MS - (now - changedAt).coerceAtLeast(0L)).coerceAtLeast(0L)
+    }
+
     fun captureSize(width: Int, height: Int): Pair<Int, Int> {
         require(width > 0 && height > 0)
         val scale = min(1f, MAX_CAPTURE_EDGE.toFloat() / max(width, height))

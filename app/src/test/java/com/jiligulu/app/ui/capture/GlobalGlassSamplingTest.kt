@@ -5,6 +5,21 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class GlobalGlassSamplingTest {
+    @Test fun hiddenTargetsAndHeldDragsHaveNoSamplingTimer() {
+        assertNull(GlobalGlassSampling.settleDelayMillis(false, false, 1000, 2000))
+        assertNull(GlobalGlassSampling.settleDelayMillis(false, true, 1000, 2000))
+        assertNull(GlobalGlassSampling.settleDelayMillis(true, true, 1000, 2000))
+    }
+
+    @Test fun aReleasedOrRestoredTargetWaitsOnlyItsRemainingSettleDeadline() {
+        assertEquals(300L, GlobalGlassSampling.settleDelayMillis(true, false, 1000, 1000))
+        assertEquals(180L, GlobalGlassSampling.settleDelayMillis(true, false, 1000, 1120))
+        assertEquals(0L, GlobalGlassSampling.settleDelayMillis(true, false, 1000, 1300))
+        assertEquals(0L, GlobalGlassSampling.settleDelayMillis(true, false, 1000, 1600))
+        // Restoring a new target starts a fresh deadline; a backwards clock cannot busy-loop.
+        assertEquals(300L, GlobalGlassSampling.settleDelayMillis(true, false, 2000, 1500))
+    }
+
     @Test fun identicalGlobalRingsDoNotRequestAnotherUploadButChangedPixelsDo() {
         val region = requireNotNull(GlobalGlassSampling.region(100,100,100,100,GlassRect(30,30,60,60)))
         val pixels = IntArray(region.roi.width * region.roi.height) { 0xff336699.toInt() }

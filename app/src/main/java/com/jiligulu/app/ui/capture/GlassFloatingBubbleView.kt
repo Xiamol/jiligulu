@@ -64,6 +64,10 @@ class GlassFloatingBubbleView @JvmOverloads constructor(
     private var backdropX=0f
     private var backdropY=0f
     private val backdropRefreshTask=Runnable {refreshBackdrop()}
+    private val environmentRefreshTask=Runnable {
+        GlobalGlassBackdrop.refreshTarget()
+        ScreenCaptureService.refreshGlassEnvironment()
+    }
 
     init {
         background = null
@@ -137,6 +141,12 @@ class GlassFloatingBubbleView @JvmOverloads constructor(
         }
         shadowCanvas.drawRoundRect(glassBounds, radius, radius, shadowPaint)
         softShadow = shadow
+        refreshGlassEnvironmentAfterLayout()
+    }
+
+    private fun refreshGlassEnvironmentAfterLayout() {
+        removeCallbacks(environmentRefreshTask)
+        post(environmentRefreshTask)
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -252,6 +262,8 @@ class GlassFloatingBubbleView @JvmOverloads constructor(
 
     override fun onWindowVisibilityChanged(visibility: Int) {
         super.onWindowVisibilityChanged(visibility)
+        // Dialog.hide/show keeps the view attached, so visibility must restart the
+        // authorized sampler even when no periodic hidden-target poll remains.
         GlobalGlassBackdrop.refreshTarget()
         ScreenCaptureService.refreshGlassEnvironment()
         if (visibility != VISIBLE) clearGlobalBackdrop()
@@ -259,6 +271,7 @@ class GlassFloatingBubbleView @JvmOverloads constructor(
 
     override fun onDetachedFromWindow() {
         removeCallbacks(backdropRefreshTask)
+        removeCallbacks(environmentRefreshTask)
         AppGlassBackdrop.unwatch(this)
         GlobalGlassBackdrop.unwatch(this)
         resetPress()
