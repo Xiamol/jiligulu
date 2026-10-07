@@ -28,6 +28,9 @@ data class ChessPlayerProfile(val name: String = "阿噜的朋友", val avatarId
 data class ChessRoomInvite(val game: String, val code: String) {
     val uri: String get() = "jiligulu://chess/join?game=$game&code=$code"
     val webUri: String get() = "https://xiamol.github.io/jiligulu/join/?game=$game&code=$code"
+    /** A self invitation is navigation back to the existing desk, never a reconnect request. */
+    fun matchesLiveRoom(currentGame: String?, currentCode: String?, active: Boolean): Boolean =
+        active && currentGame == game && RoomRoundRules.code(currentCode.orEmpty())?.let { it == code } == true
     companion object {
         fun parse(value: String?): ChessRoomInvite? = runCatching {
             val uri = URI(value ?: return null)

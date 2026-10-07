@@ -36,6 +36,25 @@ class ChessRoomInviteTest {
         assertEquals(invite, ChessRoomInvite.parse(invite.webUri))
     }
 
+    @Test fun ownInvitationKeepsBothWaitingAndConnectedRooms() {
+        listOf("xiangqi", "gomoku").forEach { game ->
+            val invite = ChessRoomInvite(game, "ARU628")
+            // Hosting, joined, and transiently reconnecting desks all keep an active room identity.
+            assertTrue(invite.matchesLiveRoom(game, "ARU628", active = true))
+            assertTrue(invite.matchesLiveRoom(game, "aru628", active = true))
+        }
+    }
+
+    @Test fun expiredOrDifferentInvitationRemainsARealJoinRequest() {
+        val invite = ChessRoomInvite("gomoku", "ARU628")
+        assertFalse(invite.matchesLiveRoom("gomoku", "ARU628", active = false))
+        assertFalse(invite.matchesLiveRoom("xiangqi", "ARU628", active = true))
+        assertFalse(invite.matchesLiveRoom("gomoku", "OTHER1", active = true))
+        assertFalse(invite.matchesLiveRoom(null, "ARU628", active = true))
+        assertFalse(invite.matchesLiveRoom("gomoku", null, active = true))
+        assertFalse(invite.matchesLiveRoom("gomoku", "ARU%20628", active = true))
+    }
+
     @Test fun invalidInvitationCannotChangeAnExistingRoom() {
         listOf(null, "https://chess/join?game=xiangqi&code=ROOM12", "jiligulu://other/join?game=xiangqi&code=ROOM12",
             "jiligulu://chess/join?game=snake&code=ROOM12", "jiligulu://chess/join?game=gomoku&code=12",
