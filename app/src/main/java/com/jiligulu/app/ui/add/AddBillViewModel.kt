@@ -223,15 +223,8 @@ class AddBillViewModel(
                 val catalog = categoryRepository.getAll()
                 _reclassification.value = _reclassification.value.copy(total = pending.size)
                 val suggested = mutableListOf<CategoryReclassification>()
-                val unresolved = mutableListOf<BillEntity>()
-                pending.forEach { bill ->
-                    val category = CategoryEngine.suggest("${bill.detail} ${bill.note}", catalog)
-                        ?.takeUnless(CategoryDefaults::isVacuum)
-                    if (category == null) unresolved += bill else suggested += CategoryReclassification(bill,
-                        AiBillDraft(targetId = bill.id, category = category.name, iconEmoji = category.iconValue), category.id)
-                }
-                _reclassification.value = _reclassification.value.copy(proposals = suggested.toList(), processed = suggested.size)
-                unresolved.chunked(PendingCategoryClassifier.BATCH_SIZE).forEach { batch ->
+                // Semantic batches, including familiar words: “苹果耳机” must not be preempted by “水果”.
+                pending.chunked(PendingCategoryClassifier.BATCH_SIZE).forEach { batch ->
                     val remote = remotePendingCategories(batch, catalog)
                     currentCoroutineContext().ensureActive()
                     batch.forEach { bill -> remote[bill.id]?.let { draft ->
