@@ -21,6 +21,24 @@ internal data class GlassSampleRegion(
     val originY get() = bubble.top * scaleY - roi.top
 }
 
+/** A reusable copy of the accepted ROI; the worker's input array is reused next frame. */
+internal class GlassPixelHistory {
+    private var region: GlassSampleRegion? = null
+    private var previous = IntArray(0)
+
+    fun changed(nextRegion: GlassSampleRegion, pixels: IntArray): Boolean {
+        require(pixels.size == nextRegion.roi.width * nextRegion.roi.height)
+        if (region == nextRegion && previous.contentEquals(pixels)) return false
+        if (previous.size != pixels.size) previous = IntArray(pixels.size)
+        pixels.copyInto(previous)
+        region = nextRegion
+        return true
+    }
+
+    fun clear() { region = null; previous.fill(0) }
+    fun release() { clear(); previous = IntArray(0) }
+}
+
 internal object GlobalGlassSampling {
     const val FRAME_INTERVAL_MS = 84L // no more than 12 sampling requests per second
     const val SETTLE_MS = 300L

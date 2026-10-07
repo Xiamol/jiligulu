@@ -5,6 +5,31 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class GlobalGlassSamplingTest {
+    @Test fun identicalGlobalRingsDoNotRequestAnotherUploadButChangedPixelsDo() {
+        val region = requireNotNull(GlobalGlassSampling.region(100,100,100,100,GlassRect(30,30,60,60)))
+        val pixels = IntArray(region.roi.width * region.roi.height) { 0xff336699.toInt() }
+        val history = GlassPixelHistory()
+        assertTrue(history.changed(region, pixels))
+        assertFalse(history.changed(region, pixels))
+        // The capture worker reuses this array; retaining its reference would miss changes.
+        pixels[0] = 0xff669933.toInt()
+        assertTrue(history.changed(region, pixels))
+        assertFalse(history.changed(region, pixels))
+    }
+
+    @Test fun geometryAndSessionChangesAlwaysPublishEvenWhenPixelsMatch() {
+        val first = requireNotNull(GlobalGlassSampling.region(100,100,100,100,GlassRect(30,30,60,60)))
+        val shifted = first.copy(bubble = GlassRect(31,30,61,60))
+        val pixels = IntArray(first.roi.width * first.roi.height) { 0xff123456.toInt() }
+        val history = GlassPixelHistory()
+        assertTrue(history.changed(first, pixels))
+        assertTrue(history.changed(shifted, pixels))
+        history.clear()
+        assertTrue(history.changed(shifted, pixels))
+        history.release()
+        assertTrue(history.changed(shifted, pixels))
+    }
+
     @Test fun projectionIsDownscaledWithAnAspectPreservingBound() {
         assertEquals(576 to 1280, GlobalGlassSampling.captureSize(1080, 2400))
         assertEquals(1280 to 576, GlobalGlassSampling.captureSize(2400, 1080))

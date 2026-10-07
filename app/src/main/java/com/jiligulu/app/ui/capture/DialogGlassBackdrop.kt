@@ -9,6 +9,7 @@ import androidx.compose.ui.window.DialogWindowProvider
 @Composable
 internal fun DialogGlassBackdrop() {
     val window=(LocalView.current.parent as?DialogWindowProvider)?.window
+    com.jiligulu.app.core.ui.DialogRefreshPreference(window)
     DisposableEffect(window) {
         if(window!=null) AppGlassBackdrop.dialog(window,true)
         onDispose {if(window!=null) AppGlassBackdrop.dialog(window,false)}

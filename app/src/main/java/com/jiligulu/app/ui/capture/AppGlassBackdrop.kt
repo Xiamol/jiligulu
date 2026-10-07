@@ -27,6 +27,12 @@ internal object AppGlassBackdrop {
     private var lastRequest=0L
     private var buffers=arrayOfNulls<Bitmap>(2)
     private var nextBuffer=0
+    private var publishedBitmap:Bitmap?=null
+    private var publishedRect:Rect?=null
+    private var publishedOffsetX=0f
+    private var publishedOffsetY=0f
+    private var publishedViewWidth=0
+    private var publishedViewHeight=0
     private var watched=WeakReference<GlassFloatingBubbleView>(null)
     private var drawListener:ViewTreeObserver.OnDrawListener?=null
     private var queued=false
@@ -70,6 +76,7 @@ internal object AppGlassBackdrop {
     }
     private fun switchWindow(window:Window?) {
         cancelRefresh()
+        publishedBitmap=null;publishedRect=null
         source.get()?.let {old ->drawListener?.let {if(old.decorView.viewTreeObserver.isAlive) old.decorView.viewTreeObserver.removeOnDrawListener(it)}}
         drawListener=null;source=WeakReference(window);watched.get()?.clearBackdrop()
         if(window!=null) GlobalGlassBackdrop.clearFrame()
@@ -94,14 +101,30 @@ internal object AppGlassBackdrop {
         val rect=Rect((x-pad).coerceAtLeast(0),(y-pad).coerceAtLeast(0),
             (x+view.width+pad).coerceAtMost(window.decorView.width),(y+view.height+pad).coerceAtMost(window.decorView.height))
         if(rect.width()<=0||rect.height()<=0) {callback(null,0f,0f);return}
-        val index=nextBuffer;nextBuffer=1-nextBuffer
+        // A suppressed identical sample must not make the next request overwrite the
+        // bitmap still held by the visible shader. Advance only after publishing.
+        val index=nextBuffer
         val bitmap=buffers[index]?.takeIf {it.width==rect.width()&&it.height==rect.height()}
             ?: Bitmap.createBitmap(rect.width(),rect.height(),Bitmap.Config.ARGB_8888).also {buffers[index]=it}
         val offsetX=(x-rect.left).toFloat();val offsetY=(y-rect.top).toFloat()
         inFlight=true;lastRequest=SystemClock.uptimeMillis()
         try { PixelCopy.request(window,rect,bitmap,{result ->
             inFlight=false
-            if(result==PixelCopy.SUCCESS && source.get()===window && view.isAttachedToWindow) callback(bitmap,offsetX,offsetY)
+            if(result==PixelCopy.SUCCESS && source.get()===window && view.isAttachedToWindow) {
+                val unchanged = publishedRect==rect && publishedOffsetX==offsetX && publishedOffsetY==offsetY &&
+                    publishedViewWidth==view.width && publishedViewHeight==view.height && !view.isPressed &&
+                    publishedBitmap?.let { previous -> previous.width==bitmap.width && previous.height==bitmap.height &&
+                        runCatching { previous.sameAs(bitmap) }.getOrDefault(false) } == true
+                if(!unchanged) {
+                    publishedBitmap=bitmap;publishedRect=rect
+                    publishedOffsetX=offsetX;publishedOffsetY=offsetY
+                    publishedViewWidth=view.width;publishedViewHeight=view.height
+                    nextBuffer=1-index
+                    callback(bitmap,offsetX,offsetY)
+                }
+                // No callback means no shader rebind or overlay invalidate when a page
+                // redraw changed only pixels outside this small lens region.
+            }
             else {callback(null,0f,0f);if(source.get()!==window) handler.post {watched.get()?.refreshBackdrop()}}
             if(refreshPending) deferRefresh()
         },handler) } catch (_:Exception) {

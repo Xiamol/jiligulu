@@ -29,6 +29,7 @@ internal object GlobalGlassBackdrop {
     private var frame: Bitmap? = null
     private val buffers = arrayOfNulls<Bitmap>(2)
     private var nextBuffer = 0
+    private val pixelsHistory = GlassPixelHistory()
     private var lens: GlobalEdgeLens? = null
     var rendererUnavailable = false
         private set
@@ -69,6 +70,13 @@ internal object GlobalGlassBackdrop {
             clearFrame()
             return
         }
+        val changed = pixelsHistory.changed(region, pixels)
+        if (frame != null && !changed) {
+            // Sampling remains opt-in/capped to detect outside-app changes, but identical
+            // rings need neither another bitmap upload nor a floating-window redraw.
+            frameAt = SystemClock.uptimeMillis()
+            return
+        }
         val index = nextBuffer
         nextBuffer = 1 - nextBuffer
         val width = region.roi.width
@@ -98,12 +106,13 @@ internal object GlobalGlassBackdrop {
     }
 
     fun clearFrame() {
+        pixelsHistory.clear()
         frame = null; frameRegion = null; frameAt = 0L
         watched.get()?.clearGlobalBackdrop()
         buffers.forEach { it?.eraseColor(0) }
         lens = null
     }
-    fun release() { clearFrame(); buffers.fill(null); nextBuffer = 0 }
+    fun release() { clearFrame(); pixelsHistory.release(); buffers.fill(null); nextBuffer = 0 }
 }
 
 /**

@@ -10,6 +10,7 @@ import android.os.Looper
 import android.os.PowerManager
 import android.util.Log
 import android.view.View
+import android.view.Window
 import androidx.activity.ComponentActivity
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
@@ -17,7 +18,22 @@ import com.jiligulu.app.data.prefs.AppRefreshRate
 import com.jiligulu.app.data.prefs.DisplayPerformancePrefs
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import java.util.WeakHashMap
+
+internal data class AppWindowRefreshHint(val modeId: Int, val refreshRate: Float)
+
+/** Main-thread registry; a dialog mirrors only its own Activity, never a global display. */
+internal object AppWindowRefreshHints {
+    private val windows = WeakHashMap<Window, MutableStateFlow<AppWindowRefreshHint?>>()
+    fun forWindow(window: Window): StateFlow<AppWindowRefreshHint?> =
+        windows.getOrPut(window) { MutableStateFlow(null) }
+    fun publish(window: Window, hint: AppWindowRefreshHint?) {
+        windows.getOrPut(window) { MutableStateFlow(null) }.value = hint
+    }
+}
 
 internal data class DisplayRateMode(val width: Int, val height: Int, val refreshRate: Float, val id: Int = 0)
 
@@ -96,14 +112,22 @@ internal class RefreshRateController(private val activity: ComponentActivity) {
         val attributes = activity.window.attributes
         val existing = attributes.preferredDisplayModeId to attributes.preferredRefreshRate
         // A different owner may have set a special mode after ours; don't overwrite it.
-        if (existing != applied && existing != baseline) return
-        if (existing == target) return
+        if (existing != applied && existing != baseline) {
+            AppWindowRefreshHints.publish(activity.window, null)
+            return
+        }
+        if (existing == target) {
+            AppWindowRefreshHints.publish(activity.window, mode?.let { AppWindowRefreshHint(it.id, it.refreshRate) })
+            return
+        }
         try {
             attributes.preferredDisplayModeId = target.first
             attributes.preferredRefreshRate = target.second
             activity.window.attributes = attributes
             applied = if (target == baseline) null else target
+            AppWindowRefreshHints.publish(activity.window, mode?.let { AppWindowRefreshHint(it.id, it.refreshRate) })
         } catch (_: RuntimeException) {
+            AppWindowRefreshHints.publish(activity.window, null)
             Log.d("WindowRefresh", "The device declined this window's refresh preference")
         }
     }
@@ -111,6 +135,7 @@ internal class RefreshRateController(private val activity: ComponentActivity) {
     fun onPause() {
         if (!resumed) return
         resumed = false
+        AppWindowRefreshHints.publish(activity.window, null)
         collection?.cancel(); collection = null
         manager?.unregisterDisplayListener(displayListener)
         runCatching { activity.unregisterReceiver(receiver) }
