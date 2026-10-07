@@ -64,6 +64,7 @@ import com.jiligulu.app.ui.stats.StatsScreen
 import com.jiligulu.app.ui.littleworld.LittleWorldScreen
 import com.jiligulu.app.ui.littleworld.SecretEntrance
 import com.jiligulu.app.ui.littleworld.SecretEntranceOverlay
+import com.jiligulu.app.ui.littleworld.sceneCombinedClickable
 import com.jiligulu.app.ui.components.forwardMainPageSwipe
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.channels.Channel
@@ -277,7 +278,7 @@ private fun MainPageHeader(app: JiliguluApp, active: Boolean, onOpenSettings: ()
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text("叽里咕噜", fontFamily = GuluBrandFont, fontSize = 28.sp,
                 color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.weight(1f).combinedClickable(onClick = {}, onLongClick = onOpenSecretBase))
+                modifier = Modifier.weight(1f).sceneCombinedClickable(onClick = {}, onLongClick = onOpenSecretBase))
             MailboxHeaderButton(app.container.announcements,tagged=active)
             IconButton(onClick = com.jiligulu.app.ui.components.uiTap(com.jiligulu.app.core.audio.UiCue.NAVIGATE, onOpenSettings)) {
                 Icon(Icons.Outlined.Settings, contentDescription = "设置",
