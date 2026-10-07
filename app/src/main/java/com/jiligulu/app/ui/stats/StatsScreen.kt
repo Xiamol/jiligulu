@@ -111,6 +111,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.jiligulu.app.core.util.Formatters
 import com.jiligulu.app.data.local.entity.BillType
 import com.jiligulu.app.data.local.entity.BudgetPeriod
+import com.jiligulu.app.data.prefs.StatsBarMode
+import com.jiligulu.app.data.prefs.StatsDisplayPrefs
 import com.jiligulu.app.ui.components.LedgerCard
 import com.jiligulu.app.ui.components.LedgerBillRow
 import com.jiligulu.app.ui.billdetail.BillDetailSheet
@@ -118,7 +120,6 @@ import com.jiligulu.app.ui.stats.charts.CashFlowBarChart
 import com.jiligulu.app.ui.stats.charts.DonutChart
 import com.jiligulu.app.ui.stats.charts.SpendingLineChart
 import com.jiligulu.app.ui.stats.charts.SpendingLinePoint
-import com.jiligulu.app.ui.stats.charts.rememberCashFlowViewport
 import com.jiligulu.app.ui.theme.ExpenseCoral
 import com.jiligulu.app.ui.theme.ActionPurple
 import com.jiligulu.app.ui.theme.IncomeGreen
@@ -138,20 +139,26 @@ fun StatsScreen(
     onPageDragEnd: ((Float) -> Unit)? = null
 ) {
     val context = LocalContext.current
+    val displayPrefs = remember(context.applicationContext) { StatsDisplayPrefs(context) }
+    val barMode by displayPrefs.barMode.collectAsStateWithLifecycle(initialValue = StatsBarMode.COMPACT_TEN_DAYS)
+    var showTrend by rememberSaveable { mutableStateOf(false) }
+    var showActual by rememberSaveable { mutableStateOf(true) }
+    var showAverage by rememberSaveable { mutableStateOf(true) }
     val flowType by vm.flowType.collectAsStateWithLifecycle()
-    val bars by vm.cashFlowBars.collectAsStateWithLifecycle()
+    val bars = if (showTrend || barMode == StatsBarMode.MONTH_COMPRESSED)
+        vm.cashFlowBars.collectAsStateWithLifecycle().value else emptyList()
     val selectedDay by vm.selectedDay.collectAsStateWithLifecycle()
     val dayDonut by vm.dayDonut.collectAsStateWithLifecycle()
     val dayDetails by vm.dayDetails.collectAsStateWithLifecycle()
     val sort by vm.sort.collectAsStateWithLifecycle()
     val budget by vm.budgetUi.collectAsStateWithLifecycle()
-    val averages by vm.monthlyExpenseAverages.collectAsStateWithLifecycle()
+    val averages = if (showTrend && flowType == BillType.EXPENSE)
+        vm.monthlyExpenseAverages.collectAsStateWithLifecycle().value else emptyList()
     val today by vm.today.collectAsStateWithLifecycle()
 
-    var showTrend by rememberSaveable { mutableStateOf(false) }
-    var showActual by rememberSaveable { mutableStateOf(true) }
-    var showAverage by rememberSaveable { mutableStateOf(true) }
-    val chartViewport = rememberCashFlowViewport()
+    val compactBars = if (!showTrend && barMode == StatsBarMode.COMPACT_TEN_DAYS)
+        vm.compactCashFlowBars.collectAsStateWithLifecycle().value else emptyList()
+    val visibleBars = if (showTrend || barMode == StatsBarMode.MONTH_COMPRESSED) bars else compactBars
     val averageMap = remember(averages) { averages.associateBy { it.date } }
     val linePoints = remember(bars, averageMap, today, flowType) {
         val zone = ZoneId.systemDefault()
@@ -168,7 +175,7 @@ fun StatsScreen(
 
     var showCategoryDetails by remember { mutableStateOf(false) }
     LaunchedEffect(active) {
-        if (active) vm.selectCalendarDate(Formatters.dayStart(System.currentTimeMillis()))
+        if (active) vm.showToday()
         vm.toggleCategory(null)
         showCategoryDetails = false
     }
@@ -179,7 +186,6 @@ fun StatsScreen(
         if (id != null && id == dayDonut.selectedCategoryId) showCategoryDetails = true
         else { showCategoryDetails = false; vm.toggleCategory(id) }
     }
-    var visibleRange by remember { mutableStateOf<Pair<Long, Long>?>(null) }
     val scroll = rememberLazyListState()
     var sceneOrigin by remember { mutableStateOf(Offset.Zero) }
     var cashFlowBounds by remember { mutableStateOf<Rect?>(null) }
@@ -206,16 +212,20 @@ fun StatsScreen(
                 Surface(Modifier.weight(1f).height(44.dp).clickable { UiSound.navigate(context); showDateFilter = true },
                     shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surface) {
                     val date = Instant.ofEpochMilli(selectedDay).atZone(ZoneId.systemDefault()).toLocalDate()
-                    val range = if (showTrend && bars.isNotEmpty()) bars.first().dayStartMillis to bars.last().dayStartMillis else visibleRange
+                    val range = visibleBars.takeIf { it.isNotEmpty() }?.let { it.first().dayStartMillis to it.last().dayStartMillis }
                     fun shortDate(value: Long) = Instant.ofEpochMilli(value).atZone(ZoneId.systemDefault()).toLocalDate().let { "${it.monthValue}月${it.dayOfMonth}日" }
-                    Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically,
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.Center) {
-                        Text(if (range == null) "${date.monthValue}月${date.dayOfMonth}日" else "${shortDate(range.first)} - ${shortDate(range.second)}",
+                        Text(if (showTrend || barMode == StatsBarMode.MONTH_COMPRESSED) "${date.year}年${date.monthValue}月"
+                            else if (range == null) "${date.monthValue}月${date.dayOfMonth}日" else "${shortDate(range.first)} – ${shortDate(range.second)}",
                             color = MaterialTheme.colorScheme.primary, fontSize = 14.sp, fontWeight = FontWeight.Medium,
                             maxLines = 1, modifier = Modifier.weight(1f, fill = false))
-                        Spacer(Modifier.width(5.dp))
-                        Icon(Icons.Outlined.KeyboardArrowDown, contentDescription = "选择统计日期", Modifier.size(20.dp),
-                            tint = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.width(7.dp))
+                        Box(Modifier.size(24.dp).background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = .4f), RoundedCornerShape(50)),
+                            contentAlignment = Alignment.Center) {
+                            Icon(Icons.Outlined.KeyboardArrowDown, contentDescription = "选择统计日期", Modifier.size(20.dp),
+                                tint = MaterialTheme.colorScheme.primary)
+                        }
                     }
                 }
                 Row(Modifier.height(44.dp).background(MaterialTheme.colorScheme.surface, RoundedCornerShape(24.dp)).padding(3.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -245,7 +255,6 @@ fun StatsScreen(
                             }
                         }
                     }
-                    Text("元", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }) {
                 if (showTrend) {
@@ -262,13 +271,16 @@ fun StatsScreen(
                         }
                     }
                 } else CashFlowBarChart(
-                    bars = bars,
-                    onVisibleRange = { first, last -> visibleRange = first to last },
+                    bars = visibleBars,
+                    compressedMonth = barMode == StatsBarMode.MONTH_COMPRESSED,
+                    onShiftWindow = { direction ->
+                        if (barMode == StatsBarMode.MONTH_COMPRESSED) vm.shiftMonth(direction)
+                        else vm.shiftCompactWindow(direction * 10)
+                    },
                     selectedDayMillis = selectedDay,
                     onSelectDay = { UiSound.select(context); vm.selectDay(it) },
                     color = if (flowType == BillType.EXPENSE) ExpenseCoral else IncomeGreen,
                     trackColor = MaterialTheme.colorScheme.outlineVariant,
-                    viewport = chartViewport,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(202.dp)
@@ -432,6 +444,7 @@ fun StatsScreen(
     selectedBillId?.let { id -> BillDetailSheet(id, onDismiss = { selectedBillId = null }) }
     if (showDateFilter) {
         com.jiligulu.app.ui.components.CompactCalendarDialog(selectedDay,
+            latestMonth = YearMonth.of(9999, 12),
             onDismiss = { showDateFilter = false },
             onSelect = { vm.selectCalendarDate(it); showDateFilter = false })
     }

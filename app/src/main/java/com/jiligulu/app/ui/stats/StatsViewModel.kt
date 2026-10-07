@@ -33,12 +33,13 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import java.util.Calendar
+import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.time.YearMonth
@@ -118,8 +119,9 @@ class StatsViewModel(
     private val _flowType = MutableStateFlow(BillType.EXPENSE)
     val flowType: StateFlow<BillType> = _flowType
 
-    /** 选中日期（当天 0 点），默认今天；换月后重置为该月 1 号 */
-    private val _selectedDay = MutableStateFlow(Formatters.dayStart(System.currentTimeMillis()))
+    /** Null follows today's calendar; an explicit selection remains stable across range queries. */
+    private val _selectedDay = MutableStateFlow<Long?>(null)
+    private val _compactWindowStart = MutableStateFlow<LocalDate?>(null)
 
     // Anchor a category filter to its day so an automatic month rollover cannot hide the new day's bills.
     private val _selectedCategory = MutableStateFlow<Pair<Long, Long>?>(null)
@@ -129,17 +131,39 @@ class StatsViewModel(
 
     // ---------- 数据流（核心性能点） ----------
 
+    /** Static statistics wake at the next local midnight, not once every rendered frame or minute. */
+    val today: StateFlow<LocalDate> = flow {
+        val zone = ZoneId.systemDefault()
+        while (true) {
+            val now = Instant.now()
+            val day = now.atZone(zone).toLocalDate()
+            emit(day)
+            val next = day.plusDays(1).atStartOfDay(zone).toInstant()
+            delay((Duration.between(now, next).toMillis() + 100L).coerceAtLeast(100L))
+        }
+    }.distinctUntilChanged().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), LocalDate.now())
+
     /** The range refreshes when the calendar rolls over, including a resumed screen. */
     @OptIn(ExperimentalCoroutinesApi::class)
-    private val displayedMonth: StateFlow<Pair<Long, Long>> = _monthOffset
-        .flatMapLatest { offset -> billRepository.observeMonthRange(offset) }
+    private val displayedMonth: StateFlow<Pair<Long, Long>> = _selectedDay
+        .flatMapLatest { requested ->
+            if (requested == null) billRepository.observeMonthRange()
+            else {
+                val zone = ZoneId.systemDefault()
+                flowOf(monthStatsWindow(Instant.ofEpochMilli(requested).atZone(zone).toLocalDate()).millis(zone))
+            }
+        }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), Formatters.currentMonthRange())
 
-    val selectedDay: StateFlow<Long> = combine(_selectedDay, displayedMonth) { requestedDay, range ->
-        if (requestedDay in range.first until range.second) requestedDay
-        else Formatters.dayStart(System.currentTimeMillis()).takeIf { it in range.first until range.second }
+    val selectedDay: StateFlow<Long> = combine(_selectedDay, displayedMonth, today) { requestedDay, range, now ->
+        requestedDay ?: now.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli().takeIf { it in range.first until range.second }
             ?: range.first
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), _selectedDay.value)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), Formatters.dayStart(System.currentTimeMillis()))
+
+    internal val compactWindow: StateFlow<StatsDateWindow> = combine(_compactWindowStart, selectedDay) { first, day ->
+        if (first != null) StatsDateWindow(first, first.plusDays(9))
+        else compactStatsWindow(Instant.ofEpochMilli(day).atZone(ZoneId.systemDefault()).toLocalDate())
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), compactStatsWindow(LocalDate.now()))
 
     val selectedCategoryId: StateFlow<Long?> = combine(_selectedCategory, selectedDay) { selection, day ->
         selection?.takeIf { it.first == day }?.second
@@ -156,34 +180,27 @@ class StatsViewModel(
 
     /** 收支长河：月账单 × 收支类型 → 每日柱；selectedDay 不参与，换日不重算 */
     val cashFlowBars: StateFlow<List<DayBar>> =
-        combine(monthBills, _flowType, displayedMonth) { bills, type, range ->
-            val calendar = Calendar.getInstance().apply { timeInMillis = range.first }
-            val days = calendar.getActualMaximum(Calendar.DAY_OF_MONTH)
-            val todayStart = Formatters.dayStart(System.currentTimeMillis())
-            val sums = LongArray(days + 1)
-            val billCalendar = calendar.clone() as Calendar
-            bills.forEach { b ->
-                if (b.type == type && b.timestamp in range.first until range.second) {
-                    billCalendar.timeInMillis = b.timestamp
-                    val day = billCalendar.get(Calendar.DAY_OF_MONTH)
-                    if (day in 1..days) sums[day] += b.amountFen
-                }
-            }
-            (1..days).map { day ->
-                val dayStart = (calendar.clone() as Calendar).apply { set(Calendar.DAY_OF_MONTH, day) }.timeInMillis
-                DayBar(
-                    day = day,
-                    dayStartMillis = dayStart,
-                    amountFen = sums[day],
-                    isToday = dayStart == todayStart
-                )
-            }
+        combine(monthBills, _flowType, displayedMonth, today) { bills, type, range, now ->
+            val zone = ZoneId.systemDefault()
+            val first = Instant.ofEpochMilli(range.first).atZone(zone).toLocalDate()
+            statsDayBars(bills, type, monthStatsWindow(first), now, zone)
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    /** A day clock refreshes after midnight without collecting a second historical ledger query. */
-    val today: StateFlow<LocalDate> = flow {
-        while (true) { emit(LocalDate.now()); delay(60_000L) }
-    }.distinctUntilChanged().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), LocalDate.now())
+    /** A bounded ten-day query, including both months when the visible window crosses a boundary. */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private val compactBills = compactWindow.flatMapLatest { window ->
+        val (start, end) = window.millis(ZoneId.systemDefault())
+        billRepository.observeBetween(start, end)
+    }
+
+    val compactCashFlowBars: StateFlow<List<DayBar>> = combine(compactBills, compactWindow, _flowType, today) { bills, window, type, now ->
+        statsDayBars(bills, type, window, now, ZoneId.systemDefault())
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private val selectedDayBills = selectedDay.flatMapLatest { day ->
+        billRepository.observeBetween(day, com.jiligulu.app.ui.components.shiftLocalDay(day, 1))
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val monthlyExpenseAverages: StateFlow<List<MonthlyAverageDay>> = combine(monthBills, displayedMonth, today) { bills, range, now ->
         val zone = ZoneId.systemDefault()
@@ -197,7 +214,7 @@ class StatsViewModel(
 
     /** 今日瓜分：选中日的分类切片（≤7 片，超出合并「其他」） */
     val dayDonut: StateFlow<DayDonutUi> =
-        combine(monthBills, selectedDay, categoryRepository.categories, _flowType, selectedCategoryId) { bills, day, cats, type, selectedId ->
+        combine(selectedDayBills, selectedDay, categoryRepository.categories, _flowType, selectedCategoryId) { bills, day, cats, type, selectedId ->
             distribution(bills, day, cats, type, selectedId)
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), DayDonutUi())
 
@@ -254,7 +271,7 @@ class StatsViewModel(
 
     /** 选中日明细列表：分类过滤 + 排序，全内存操作 */
     val dayDetails: StateFlow<List<DayDetailUi>> =
-        combine(combine(monthBills, _flowType) { bills, type -> bills.filter { it.type == type } }, selectedDay, selectedCategoryId, _sort) { bills, day, catId, sort ->
+        combine(combine(selectedDayBills, _flowType) { bills, type -> bills.filter { it.type == type } }, selectedDay, selectedCategoryId, _sort) { bills, day, catId, sort ->
             Quad(bills, day, catId, sort)
         }.combine(categoryRepository.categories) { q, cats ->
             val catMap = cats.associateBy { it.id }
@@ -298,21 +315,34 @@ class StatsViewModel(
     // ---------- 交互动作 ----------
 
     fun prevMonth() {
-        _monthOffset.value -= 1
-        _selectedDay.value = Formatters.dayOfMonth(_monthOffset.value, 1)
-        _selectedCategory.value = null
+        shiftMonth(-1)
     }
 
     fun nextMonth() {
-        if (_monthOffset.value < 0) {
-            _monthOffset.value += 1
-            _selectedDay.value = if (_monthOffset.value == 0) {
-                Formatters.dayStart(System.currentTimeMillis())
-            } else {
-                Formatters.dayOfMonth(_monthOffset.value, 1)
-            }
-            _selectedCategory.value = null
-        }
+        shiftMonth(1)
+    }
+
+    fun shiftMonth(delta: Int) {
+        val zone = ZoneId.systemDefault()
+        val current = Instant.ofEpochMilli(selectedDay.value).atZone(zone).toLocalDate()
+        selectCalendarDate(adjacentStatsMonth(current, delta.toLong()).atStartOfDay(zone).toInstant().toEpochMilli())
+    }
+
+    fun shiftCompactWindow(days: Int) {
+        if (days == 0) return
+        val zone = ZoneId.systemDefault()
+        val next = currentCompactWindow().shifted(days.toLong())
+        val oldSelected = Instant.ofEpochMilli(selectedDay.value).atZone(zone).toLocalDate()
+        val target = oldSelected.plusDays(days.toLong()).coerceIn(next.first, next.last)
+        _compactWindowStart.value = next.first
+        selectDay(target.atStartOfDay(zone).toInstant().toEpochMilli())
+    }
+
+    fun showToday() {
+        _compactWindowStart.value = null
+        _monthOffset.value = 0
+        _selectedDay.value = null
+        _selectedCategory.value = null
     }
 
     fun setFlowType(type: BillType) {
@@ -322,22 +352,31 @@ class StatsViewModel(
 
     fun shiftDay(delta: Int) {
         val next = com.jiligulu.app.ui.components.shiftLocalDay(selectedDay.value, delta.toLong())
-        selectCalendarDate(next)
+        val date = Instant.ofEpochMilli(next).atZone(ZoneId.systemDefault()).toLocalDate()
+        if (date < currentCompactWindow().first || date > currentCompactWindow().last)
+            _compactWindowStart.value = compactStatsWindow(date).first
+        selectDay(next)
     }
 
-    /** 点柱或日期 chip 选中日：只改内存状态，不触发数据库查询（同月换日月图不重绘） */
+    /** Point selection preserves its window; only the small daily detail query changes within a month. */
     fun selectDay(dayStartMillis: Long) {
-        _selectedDay.value = dayStartMillis
+        // Freeze the current window before moving its selection so tapping a bar does not recenter it.
+        if (_compactWindowStart.value == null) _compactWindowStart.value = currentCompactWindow().first
+        val zone = ZoneId.systemDefault()
+        val requestedMonth = YearMonth.from(Instant.ofEpochMilli(dayStartMillis).atZone(zone))
+        _monthOffset.value = ChronoUnit.MONTHS.between(YearMonth.now(zone), requestedMonth).toInt()
+        _selectedDay.value = Formatters.dayStart(dayStartMillis)
         _selectedCategory.value = null
     }
+
+    private fun currentCompactWindow(): StatsDateWindow = _compactWindowStart.value?.let {
+        StatsDateWindow(it, it.plusDays(9))
+    } ?: compactStatsWindow(Instant.ofEpochMilli(selectedDay.value).atZone(ZoneId.systemDefault()).toLocalDate())
 
     /** Calendar navigation only changes the statistics filter, never a bill's timestamp. */
     fun selectCalendarDate(dayStartMillis: Long) {
         val zone = ZoneId.systemDefault()
-        val requestedMonth = YearMonth.from(Instant.ofEpochMilli(dayStartMillis).atZone(zone))
-        val offset = ChronoUnit.MONTHS.between(YearMonth.now(zone), requestedMonth).toInt()
-        if (offset > 0) return
-        _monthOffset.value = offset
+        _compactWindowStart.value = compactStatsWindow(Instant.ofEpochMilli(dayStartMillis).atZone(zone).toLocalDate()).first
         selectDay(Formatters.dayStart(dayStartMillis))
     }
 

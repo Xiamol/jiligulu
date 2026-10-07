@@ -119,8 +119,9 @@ class StatsDateNavigationTest {
             assertEquals(listOf(2L), vm.dayDetails.value.map { it.id })
             vm.selectCalendarDate(YearMonth.now().plusMonths(1).atDay(1).millis())
             runCurrent()
-            assertEquals(-1, vm.monthOffset.value)
-            assertEquals(targetDay, vm.selectedDay.value)
+            assertEquals(1, vm.monthOffset.value)
+            assertEquals(YearMonth.now().plusMonths(1).atDay(1).millis(), vm.selectedDay.value)
+            assertEquals(emptyList<Long>(), vm.dayDetails.value.map { it.id })
         } finally {
             store.clear()
         }
@@ -148,6 +149,60 @@ class StatsDateNavigationTest {
             assertEquals(yesterday, vm.selectedDay.value)
             assertEquals("300", vm.dayDonut.value.totalText)
             assertEquals(listOf(3L), vm.dayDetails.value.map { it.id })
+        } finally { store.clear() }
+    }
+
+    @Test fun compactWindowQueriesBothMonthsAndBarSelectionKeepsItsVisibleDates() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        val store = ViewModelStore()
+        try {
+            val december = LocalDate.of(2026, 12, 31).millis()
+            val january = LocalDate.of(2027, 1, 1).millis()
+            val vm = model(listOf(
+                BillEntity(id = 41, amountFen = 1000, type = BillType.EXPENSE, categoryId = 1, detail = "年末午饭", timestamp = december + 1000),
+                BillEntity(id = 42, amountFen = 500, type = BillType.EXPENSE, categoryId = 1, detail = "新年水果", timestamp = january + 1000)
+            )) { System.currentTimeMillis() }
+            store.put("stats", vm)
+            backgroundScope.launch { vm.compactCashFlowBars.collect {} }
+            backgroundScope.launch { vm.dayDetails.collect {} }
+            backgroundScope.launch { vm.cashFlowBars.collect {} }
+            runCurrent()
+            vm.selectCalendarDate(december); runCurrent()
+            val first = LocalDate.of(2026, 12, 27).millis()
+            assertEquals(first, vm.compactCashFlowBars.value.first().dayStartMillis)
+            assertEquals(LocalDate.of(2027, 1, 5).millis(), vm.compactCashFlowBars.value.last().dayStartMillis)
+            assertEquals(1500L, vm.compactCashFlowBars.value.sumOf { it.amountFen })
+            vm.selectDay(january); runCurrent()
+            assertEquals(first, vm.compactCashFlowBars.value.first().dayStartMillis)
+            assertEquals(listOf(42L), vm.dayDetails.value.map { it.id })
+            vm.shiftCompactWindow(10); runCurrent()
+            assertEquals(LocalDate.of(2027, 1, 6).millis(), vm.compactCashFlowBars.value.first().dayStartMillis)
+            assertEquals(LocalDate.of(2027, 1, 11).millis(), vm.selectedDay.value)
+            vm.shiftMonth(1); runCurrent()
+            assertEquals(LocalDate.of(2027, 2, 11).millis(), vm.selectedDay.value)
+            assertEquals(28, vm.cashFlowBars.value.size)
+            vm.showToday(); runCurrent()
+            assertEquals(LocalDate.now().millis(), vm.selectedDay.value)
+            assertEquals(compactStatsWindow(LocalDate.now()).first.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli(),
+                vm.compactCashFlowBars.value.first().dayStartMillis)
+        } finally { store.clear() }
+    }
+
+    @Test fun aChosenHistoricalMonthDoesNotDriftWhenTheCurrentCalendarRollsOver() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        val store = ViewModelStore()
+        try {
+            var now = System.currentTimeMillis()
+            val historical = YearMonth.now().minusMonths(1).atDay(15).millis()
+            val vm = model(emptyList()) { now }; store.put("stats", vm)
+            backgroundScope.launch { vm.cashFlowBars.collect {} }
+            backgroundScope.launch { vm.selectedDay.collect {} }
+            runCurrent(); vm.selectCalendarDate(historical); runCurrent()
+            val first = vm.cashFlowBars.value.first().dayStartMillis
+            now = YearMonth.now().plusMonths(1).atDay(1).millis()
+            advanceTimeBy(60_000L); runCurrent()
+            assertEquals(historical, vm.selectedDay.value)
+            assertEquals(first, vm.cashFlowBars.value.first().dayStartMillis)
         } finally { store.clear() }
     }
 

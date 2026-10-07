@@ -253,6 +253,7 @@ fun SettingsScreen(
                         }
                         LittleWorldSkinSettings(enabled = editable)
                         DisplayPerformanceSettings(enabled = editable)
+                        StatsDisplaySettings(enabled = editable)
                         Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
                             Text("按键与棋子音效",Modifier.weight(1f),style=MaterialTheme.typography.bodyMedium)
                             TextButton(onClick={showSoundSamples=true},enabled=feedbackSound) {Text("试听",style=MaterialTheme.typography.labelSmall)}

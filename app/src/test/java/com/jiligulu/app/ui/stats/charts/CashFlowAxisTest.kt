@@ -12,4 +12,12 @@ class CashFlowAxisTest {
         assertEquals(550.0, cashFlowAxis(2000.0).step, .001)
         assertTrue(cashFlowAxisTop(0.0) > 0)
     }
+    @Test fun compactSlotAmountsStayShortWhileUsingCorrectUnits() {
+        assertEquals("43.3", compactCashFlowAmount(4327))
+        assertEquals("63.4", compactCashFlowAmount(6340))
+        assertEquals("1.2k", compactCashFlowAmount(123456))
+        assertEquals("1.2万", compactCashFlowAmount(1234567))
+        assertEquals("0", compactCashFlowAmount(0))
+        assertEquals("0.01", compactCashFlowAmount(1))
+    }
 }
