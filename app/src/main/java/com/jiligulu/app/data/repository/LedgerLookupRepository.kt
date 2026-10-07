@@ -12,12 +12,14 @@ class LedgerLookupRepository(private val database: AppDatabase) {
     suspend fun search(lookup: LedgerLookup): LedgerLookupResult = database.withTransaction {
         val args = mutableListOf<Any>()
         val clauses = mutableListOf("b.deletedAt IS NULL")
+        val catalog = if (lookup.categories.isNotEmpty() || lookup.keywords.isNotEmpty())
+            database.categoryDao().findAllOnce() else emptyList()
         lookup.startMillis?.let { clauses += "b.timestamp >= ?"; args += it }
         lookup.endMillis?.let { clauses += "b.timestamp < ?"; args += it }
         if (lookup.type.isNotBlank()) { clauses += "b.type = ?"; args += lookup.type }
         if (lookup.categories.isNotEmpty()) {
             // The model sees display labels; old IDs/raw names must remain searchable as aliases.
-            val ids = database.categoryDao().findAllOnce().filter { category ->
+            val ids = catalog.filter { category ->
                 lookup.categories.any { requested -> category.name.equals(requested, true) ||
                     CategoryLabels.displayName(category.name).equals(CategoryLabels.displayName(requested), true) }
             }.map { it.id }
@@ -28,10 +30,18 @@ class LedgerLookupRepository(private val database: AppDatabase) {
         }
         if (lookup.keywords.isNotEmpty()) {
             // INSTR treats %, _ and apostrophes literally. Never interpolate model text into SQL.
-            clauses += lookup.keywords.joinToString(" OR ", "(", ")") {
-                args.addAll(listOf(it, it, it))
-                "(instr(lower(b.detail), lower(?)) > 0 OR instr(lower(b.note), lower(?)) > 0 OR instr(lower(c.name), lower(?)) > 0)"
+            val keywordClauses = lookup.keywords.map { term ->
+                args.addAll(listOf(term, term))
+                "(instr(lower(b.detail), lower(?)) > 0 OR instr(lower(b.note), lower(?)) > 0)"
+            }.toMutableList()
+            val categoryIds = catalog.filter { category -> lookup.keywords.any { term ->
+                category.name.contains(term, true) || CategoryLabels.displayName(category.name).contains(term, true)
+            } }.map { it.id }
+            if (categoryIds.isNotEmpty()) {
+                keywordClauses += "b.categoryId IN (${categoryIds.joinToString { "?" }})"
+                args.addAll(categoryIds)
             }
+            clauses += keywordClauses.joinToString(" OR ", "(", ")")
         }
         val from = " FROM bills b LEFT JOIN categories c ON c.id = b.categoryId WHERE " + clauses.joinToString(" AND ")
         val groups = dao.groups(SimpleSQLiteQuery(

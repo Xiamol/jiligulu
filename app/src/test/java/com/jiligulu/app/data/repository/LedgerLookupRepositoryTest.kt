@@ -109,6 +109,7 @@ class LedgerLookupRepositoryTest {
         val expected = setOf(chineseBill, legacyBill)
         assertEquals(expected, repo.search(LedgerLookup(categories = listOf("吃饭"))).bills.map { it.id }.toSet())
         assertEquals(expected, repo.search(LedgerLookup(categories = listOf("EATING"))).bills.map { it.id }.toSet())
+        assertEquals(expected, repo.search(LedgerLookup(keywords = listOf("吃饭"))).bills.map { it.id }.toSet())
         assertEquals(0, repo.search(LedgerLookup(categories = listOf("不存在的分类"))).count)
         assertEquals("eating", db.categoryDao().findByName("eating")!!.name)
     }
