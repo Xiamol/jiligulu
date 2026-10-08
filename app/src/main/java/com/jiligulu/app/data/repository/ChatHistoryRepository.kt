@@ -46,6 +46,13 @@ class ChatHistoryRepository(private val database: AppDatabase) {
     fun observeAll(): Flow<List<ChatMessageEntity>> = dao.observeAll()
     suspend fun getAll(): List<ChatMessageEntity> = dao.getAll()
     suspend fun mediaReferenceRows(): List<com.jiligulu.app.data.local.dao.ChatMediaReferenceRow> = dao.mediaReferenceRows()
+    /** No draft/photo payloads or full-history loading enter local personal-memory learning. */
+    suspend fun personalMemoryBefore(beforeId: Long = Long.MAX_VALUE, limit: Int = 8) =
+        dao.personalMemoryBefore(beforeId, limit.coerceIn(1, 128)).asReversed().map { it.toPersonalTurn() }
+    suspend fun personalMemoryAfter(afterId: Long = 0, limit: Int = 128) =
+        dao.personalMemoryAfter(afterId, limit.coerceIn(1, 128)).map { it.toPersonalTurn() }
+    private fun com.jiligulu.app.data.local.dao.PersonalMemoryTurnRow.toPersonalTurn() =
+        com.jiligulu.app.domain.persona.MemoryConversationTurn(id, kind, content, createdAt)
 
     /** UI pages never trim the stored conversation or change the independent AI context window. */
     suspend fun uiPageBefore(beforeId: Long, limit: Int): List<ChatMessageEntity> =

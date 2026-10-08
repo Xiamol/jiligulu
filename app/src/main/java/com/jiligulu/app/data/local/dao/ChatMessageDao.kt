@@ -8,9 +8,14 @@ import com.jiligulu.app.data.local.entity.ChatMessageEntity
 import kotlinx.coroutines.flow.Flow
 
 data class ChatMediaReferenceRow(val kind: String, val status: String, val draftPayload: String)
+data class PersonalMemoryTurnRow(val id: Long, val kind: String, val content: String, val createdAt: Long)
 
 @Dao
 interface ChatMessageDao {
+    @Query("SELECT id, kind, content, createdAt FROM chat_messages WHERE id < :beforeId AND kind IN ('USER','ASSISTANT') AND content != '' AND status NOT IN ('PENDING','INTERRUPTED') ORDER BY id DESC LIMIT :limit")
+    suspend fun personalMemoryBefore(beforeId: Long, limit: Int): List<PersonalMemoryTurnRow>
+    @Query("SELECT id, kind, content, createdAt FROM chat_messages WHERE id > :afterId AND kind IN ('USER','ASSISTANT') AND content != '' AND status NOT IN ('PENDING','INTERRUPTED') ORDER BY id ASC LIMIT :limit")
+    suspend fun personalMemoryAfter(afterId: Long, limit: Int): List<PersonalMemoryTurnRow>
     @Query("SELECT kind, status, draftPayload FROM chat_messages WHERE kind = 'DRAFT' AND status != 'DELETED' AND draftPayload != ''")
     suspend fun mediaReferenceRows(): List<ChatMediaReferenceRow>
     /** Files from rows physically removed by an explicit history reset, including tombstones. */

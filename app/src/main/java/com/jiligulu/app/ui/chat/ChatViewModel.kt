@@ -177,6 +177,9 @@ class ChatViewModel(
         viewModelScope.launch {
             try {
                 writes.withLock {
+                    try { aiRepository.prepareLocalHistoryMemory() }
+                    catch (cancelled: CancellationException) { throw cancelled }
+                    catch (_: Exception) { /* Optional local memory never blocks opening chat. */ }
                     history.markPendingInterrupted()
                     // Deleted drafts are immutable tombstones; they never become editable again.
                     _items.value = readHistoryPage(Long.MAX_VALUE)
@@ -251,13 +254,17 @@ class ChatViewModel(
                     pendingMsg = message
                     append(pendingMsg!!.toUi())
                 }
-                val result = aiRepository.parse(input, requestMillis, zone)
+                val disclosure = aiRepository.personalDisclosure(input, requestMillis)
+                val result = aiRepository.parse(input, requestMillis, zone, disclosure)
                 // 模型没连上时降级到本地规则；本地规则不会改账删账，也不会扯上下文。
-                val parsed = result.getOrNull() ?: localParse(input, result.exceptionOrNull())
-                val turn = if (result.isSuccess) {
-                    aiRepository.toTurn(parsed, input, requestMillis, zone, carried)
+                val parsed = result.getOrNull() ?: if (disclosure.personalOnly) AiParseResult()
+                    else localParse(disclosure.billInput, result.exceptionOrNull())
+                val turn = if (disclosure.personalOnly) {
+                    aiRepository.personalTurn(disclosure, parsed.reply)
+                } else if (result.isSuccess) {
+                    aiRepository.toTurn(parsed, input, requestMillis, zone, carried, disclosure)
                 } else {
-                    localTurn(parsed, input, requestMillis, zone)
+                    localTurn(parsed, disclosure.billInput, requestMillis, zone)
                 }
                 writes.withLock { history.withConversationLock { finishRequest(pendingMsg!!, input, turn, parsed.reply, requestMillis) } }
             } catch (cancelled: CancellationException) {
@@ -367,7 +374,9 @@ class ChatViewModel(
                 val message = pendingMsg.copy(status = "", content = turn.reply.ifBlank { "阿噜在听，你说～" })
                 history.update(message)
                 replace(message.toUi())
-                clearPending()
+                val rejected = turn.rejectedAmount?.toBigDecimalOrNull()
+                if (!turn.preservePending || rejected != null && _pending.value?.amountText?.toBigDecimalOrNull()?.compareTo(rejected) == 0)
+                    clearPending()
                 return
             }
 
@@ -804,7 +813,10 @@ class ChatViewModel(
             if (ChatIntent.requiresOnlineAction(input)) return AiParseResult(
                 reply = fallbackReply(true, cause) + "\n修改账单和设置需要在线处理，请在 AI 服务恢复后重试；这次没有新增或改动账单。"
             )
-            val drafts = LocalBillParser.parse(input).map { draft ->
+            // A spoken pause between one description and its amount is still one bill.
+            // Only this single description+number form is joined; multiple amounts stay separate.
+            val billInput = input.replace(Regex("^([^\\d，,；;。\\n]+)[，,]\\s*(\\d+(?:\\.\\d{1,2})?)$"), "$1 $2")
+            val drafts = LocalBillParser.parse(billInput).map { draft ->
                 draft.copy(category = CategoryEngine.suggest(draft.detail, categories)?.name ?: "未分类")
             }
             return AiParseResult(bills = drafts, reply = fallbackReply(drafts.isEmpty(), cause))

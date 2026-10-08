@@ -27,6 +27,8 @@ import com.jiligulu.app.domain.chat.LedgerLookup
 import com.jiligulu.app.domain.persona.CompanionFact
 import com.jiligulu.app.domain.persona.CompanionMemoryState
 import com.jiligulu.app.domain.persona.CompanionMemoryPolicy
+import com.jiligulu.app.domain.persona.PersonalDisclosure
+import com.jiligulu.app.domain.persona.PersonalDisclosurePolicy
 import com.jiligulu.app.domain.time.BillTimeResolver
 import com.jiligulu.app.ui.chat.CommandCardCodec
 import com.jiligulu.app.ui.chat.CommandCardPayload
@@ -41,6 +43,8 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -71,7 +75,7 @@ data class ConfirmItem(
  */
 sealed interface AiTurn {
     /** 闲聊或没识别出账目：只说一句话。 */
-    data class Chat(val reply: String) : AiTurn
+    data class Chat(val reply: String, val preservePending: Boolean = false, val rejectedAmount: String? = null) : AiTurn
 
     /** 新增账单草稿。 */
     data class Drafts(val reply: String, val drafts: List<ConfirmItem>) : AiTurn
@@ -116,6 +120,45 @@ class AiRepository(
         userPrefs.rememberCompanionFactsIfCurrent(revision, facts)
     }
 ) {
+    private val historyMemoryLock = Mutex()
+
+    /** At most two small content-only windows; this never calls a model or reads photo payloads. */
+    suspend fun historicalMemoryCandidates(): List<CompanionFact> {
+        val first = chatHistoryRepository.personalMemoryAfter(limit = 128)
+        val last = chatHistoryRepository.personalMemoryBefore(limit = 128)
+        val context = last.firstOrNull()?.let { chatHistoryRepository.personalMemoryBefore(it.id, 1) }.orEmpty()
+        return CompanionMemoryPolicy.merge(PersonalDisclosurePolicy.historyFacts(first),
+            PersonalDisclosurePolicy.historyFacts(context + last))
+    }
+
+    suspend fun prepareLocalHistoryMemory() = historyMemoryLock.withLock {
+        val state = userPrefs.companionMemory.first()
+        if (state.enabled && state.historyLearningVersion < CompanionMemoryPolicy.HISTORY_LEARNING_VERSION)
+            userPrefs.learnHistoricalFactsIfCurrent(state.revision, historicalMemoryCandidates())
+    }
+
+    suspend fun personalDisclosure(input: String, requestMillis: Long): PersonalDisclosure {
+        val previous = try { chatHistoryRepository.personalMemoryBefore(limit = 8).toMutableList() }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { mutableListOf() }
+        // ChatViewModel has already committed the current USER row. It is evidence for this
+        // turn, not an intervening reply that should consume the previous question slot.
+        previous.lastOrNull()?.takeIf { it.role == "USER" && it.sentAt == requestMillis && it.text.trim() == input.trim() }
+            ?.let { previous.removeAt(previous.lastIndex) }
+        return PersonalDisclosurePolicy.analyze(input, requestMillis, previous)
+    }
+
+    fun personalTurn(disclosure: PersonalDisclosure, reply: String = ""): AiTurn.Chat {
+        val safeReply = reply.takeUnless { Regex("金额|花在哪|哪儿花|什么名目|账单|[0-9]+元").containsMatchIn(it) }
+            ?.takeIf { it.isNotBlank() } ?: personalReply(disclosure)
+        return AiTurn.Chat(safeReply, preservePending = true, rejectedAmount = disclosure.rejectedAmount)
+    }
+
+    private fun personalReply(disclosure: PersonalDisclosure): String {
+        val stated = disclosure.facts.joinToString("、") { "${CompanionMemoryPolicy.label(it.kind)}${it.value}" }
+        return if (stated.isBlank()) "这是在聊你的资料，阿噜不会把它当成账单金额。"
+            else "明白了，${stated}，阿噜听清楚了 ♡" + if (disclosure.rejectedAmount != null) " 这里的数字不是账单金额。" else ""
+    }
     /** R9：逐字不变的固定 system 段；版本随 App 走，解析契约全在这一个资源里。 */
     private val systemPromptTemplate: String by lazy {
         context.assets.open(AiConfig.SYSTEM_PROMPT_ASSET_PATH).bufferedReader().use { it.readText() }
@@ -140,10 +183,10 @@ class AiRepository(
     }
 
     /** One immutable provider/key snapshot owns all requests of this operation. */
-    suspend fun createClient(): DeepSeekClient {
-        val prefs = providerPrefs ?: return clientFactory(effectiveApiKey())
+    suspend fun createClient(purpose: com.jiligulu.app.core.ai.AiUsagePurpose = com.jiligulu.app.core.ai.AiUsagePurpose.UNSPECIFIED): DeepSeekClient {
+        val prefs = providerPrefs ?: return clientFactory(effectiveApiKey()).forPurpose(purpose)
         val connection = prefs.connection(userPrefs.apiKeyOverride.first())
-        return providerClientFactory?.invoke(connection) ?: clientFactory(connection.apiKey).configuredFor(connection.profile)
+        return (providerClientFactory?.invoke(connection) ?: clientFactory(connection.apiKey).configuredFor(connection.profile)).forPurpose(purpose)
     }
 
     suspend fun nicknameWithSuffix(): String {
@@ -159,14 +202,14 @@ class AiRepository(
      *
      * [parseRaw] 保留「未经动作分派」的结果，供降级路径（本地规则）复用。
      */
-    suspend fun parse(input: String, requestMillis: Long, zone: ZoneId): Result<AiParseResult> {
+    suspend fun parse(input: String, requestMillis: Long, zone: ZoneId, personal: PersonalDisclosure? = null): Result<AiParseResult> {
         if (com.jiligulu.app.core.ai.ImageReceiptCodec.isImageText(input)) return runCatching {
             val categories = categoryRepository.getAll()
             val parsed = com.jiligulu.app.core.ai.ImageReceiptCodec.parseText(input)
             val fallback = com.jiligulu.app.core.ai.ImageReceiptCodec.classify(parsed, categories)
             if (parsed.bills.all { it.category in listOf("转账", "红包") }) fallback else {
                 val suggestions = try {
-                    createClient().parseBill(
+                    createClient(com.jiligulu.app.core.ai.AiUsagePurpose.CLASSIFICATION).parseBill(
                         com.jiligulu.app.core.ai.ImageCategoryClassifier.PROMPT,
                         com.jiligulu.app.core.ai.ImageCategoryClassifier.input(parsed, categories)
                     ).getOrElse { if (it is CancellationException) throw it else null }
@@ -176,11 +219,17 @@ class AiRepository(
                     com.jiligulu.app.core.ai.ImageCategoryClassifier.apply(fallback, suggestions, categories)
             }
         }.onFailure { if (it is CancellationException) throw it }
+        try { prepareLocalHistoryMemory() }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { /* Local history learning cannot prevent a normal conversation. */ }
+        val disclosure = personal ?: personalDisclosure(input, requestMillis)
         // A single snapshot both renders current memory and protects the eventual write from settings changes.
         var memory = try { userPrefs.companionMemory.first() }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { CompanionMemoryState(enabled = false) }
-        val explicit = if (memory.enabled) CompanionMemoryPolicy.explicitFacts(input, requestMillis) else emptyList()
+        val explicit = if (memory.enabled) disclosure.facts.filterNot { fact ->
+            memory.facts.any { it.id == fact.id && it.value == fact.value && it.updatedAt == fact.updatedAt }
+        } else emptyList()
         if (explicit.isNotEmpty()) try {
             kotlinx.coroutines.currentCoroutineContext().ensureActive()
             if (rememberCompanionFacts(memory.revision, explicit)) {
@@ -209,7 +258,7 @@ class AiRepository(
             return Result.success(parsed.copy(memoryUpdates = emptyList()))
         }
         val categories = categoryRepository.getAll()
-        val pending = PromptRenderer.pendingOf(chatHistoryRepository.latestPending())
+        val pending = if (disclosure.personalOnly) null else PromptRenderer.pendingOf(chatHistoryRepository.latestPending())
         val chatContext = buildContext(categories, requestMillis, zone)
         val candidates = PromptRenderer.candidatesFrom(
             if (ChatIntent.needsCandidates(input)) billRepository.recent(BillRepository.CANDIDATE_SCAN_LIMIT) else emptyList(), requestMillis, zone
@@ -235,8 +284,9 @@ class AiRepository(
             appSettings = appSettings
         )
         val system = renderer.renderSystem()
-        val contextBlock = renderer.renderContext(input, includeStableContext = false) + "\n\n" + memory.renderForAi()
-        val client = createClient()
+        val contextBlock = renderer.renderContext(input, includeStableContext = false) + "\n\n" + memory.renderForAi() +
+            if (disclosure.personalOnly) "\n本轮用户在回答自己的资料，没有记账请求；年龄和生日数字不作金额，不生成 bills、pending 或账本操作。" else ""
+        val client = createClient(com.jiligulu.app.core.ai.AiUsagePurpose.LEDGER_CHAT)
         val history = recentTurns(requestMillis)
         val stableContext = renderer.renderStableContext()
         val first = client.parseBill(system, contextBlock, history = history, stableContext = stableContext)
@@ -286,8 +336,11 @@ class AiRepository(
         input: String,
         requestMillis: Long,
         zone: ZoneId,
-        pending: PendingDraft?
+        pending: PendingDraft?,
+        personal: PersonalDisclosure? = null
     ): AiTurn {
+        val disclosure = personal ?: personalDisclosure(input, requestMillis)
+        if (disclosure.personalOnly) return personalTurn(disclosure, parsed.reply)
         if (parsed.ledgerLookupCompleted && parsed.bills.isEmpty()) return AiTurn.Chat(parsed.reply)
         parsed.appAction?.let { action ->
             if (!action.isValid || parsed.bills.isNotEmpty()) {

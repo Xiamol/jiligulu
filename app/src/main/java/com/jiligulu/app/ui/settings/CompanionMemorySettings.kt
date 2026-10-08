@@ -26,10 +26,12 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 @Composable
-internal fun CompanionMemorySettings(enabled: Boolean, prefs: UserPrefs = rememberUserPrefs()) {
+internal fun CompanionMemorySettings(enabled: Boolean, prefs: UserPrefs = rememberUserPrefs(),
+    scanHistory: (suspend () -> List<CompanionFact>)? = null) {
     val context = LocalContext.current
     val pageActive = LocalSettingPageActive.current
     val nullableMemory = remember(prefs) { prefs.companionMemory.map<CompanionMemoryState, CompanionMemoryState?> { it } }
@@ -40,19 +42,55 @@ internal fun CompanionMemorySettings(enabled: Boolean, prefs: UserPrefs = rememb
     var clearing by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    var historyOpen by remember { mutableStateOf(false) }
+    var historyLoading by remember { mutableStateOf(false) }
+    var historyEpoch by remember { mutableStateOf(0) }
+    var historyRevision by remember { mutableStateOf(0L) }
+    var historyCandidates by remember { mutableStateOf<List<CompanionFact>>(emptyList()) }
+    var historyExisting by remember { mutableStateOf<List<CompanionFact>>(emptyList()) }
+    var historySelected by remember { mutableStateOf<Set<String>>(emptySet()) }
+    val currentPageActive by rememberUpdatedState(pageActive)
+    val scanner = remember(context, scanHistory) {
+        scanHistory ?: (context.applicationContext as? com.jiligulu.app.JiliguluApp)?.container?.aiRepository?.let { repository ->
+            suspend { repository.historicalMemoryCandidates() }
+        }
+    }
     val scope = rememberCoroutineScope()
     LaunchedEffect(pageActive) {
-        if (!pageActive) { open = false; editing = null; clearing = false }
+        if (!pageActive) { open = false; editing = null; clearing = false; historyOpen = false; historyEpoch++; historyLoading = false }
     }
-    fun write(action: suspend () -> Unit, after: () -> Unit = {}) {
+    fun write(action: suspend () -> Unit, after: () -> Unit = {}, failureMessage: String = "这次没保存好，再试一下吧") {
         if (busy) return
         busy = true; error = null
         scope.launch(start = CoroutineStart.UNDISPATCHED) {
             try { withContext(NonCancellable) { action() }; after() }
             catch (cancelled: CancellationException) { throw cancelled }
-            catch (_: Exception) { error = "这次没保存好，再试一下吧" }
+            catch (_: Exception) { error = failureMessage }
             finally { busy = false }
         }
+    }
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        TextButton(enabled = enabled && memory?.enabled == true && !busy && !historyLoading && scanner != null,
+            modifier = Modifier.testTag("companion-memory-history"), onClick = {
+                val scan = scanner ?: return@TextButton
+                val ticket = ++historyEpoch
+                historyLoading = true; error = null
+                scope.launch {
+                    try {
+                        val snapshot = prefs.companionMemory.first()
+                        val candidates = scan().filterNot { fact -> snapshot.facts.any { it.id == fact.id && it.value == fact.value } }
+                        if (ticket == historyEpoch && currentPageActive) {
+                            historyRevision = snapshot.revision; historyExisting = snapshot.facts
+                            historyCandidates = candidates
+                            historySelected = candidates.filter { fact -> snapshot.facts.none { it.id == fact.id } }.map { it.id }.toSet()
+                            historyOpen = true
+                        }
+                    } catch (cancelled: CancellationException) { throw cancelled }
+                    catch (_: Exception) { if (ticket == historyEpoch) error = "这次没能预览聊天资料，再试一下吧" }
+                    finally { if (ticket == historyEpoch) historyLoading = false }
+                }
+            }) { Text(if (historyLoading) "正在本地预览…" else "补记聊天资料") }
+        SettingHelpButton("补记聊天资料", "只在本地预览聊天开头和最近各128条用户/阿噜正文，不加载整段历史，也不调用模型。仅从你亲口说出的资料或对问题的回答提取；阿噜的猜测和‘记住了’不是事实。确认勾选后可以补回曾删除的条目；已有相同资料不重复，冲突项默认不选。关闭记性或资料发生变化时，旧预览不能写入。")
     }
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text("聊天时慢慢记住我", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
@@ -61,13 +99,36 @@ internal fun CompanionMemorySettings(enabled: Boolean, prefs: UserPrefs = rememb
             onCheckedChange = { checked -> UiSound.toggle(context); write({ prefs.setCompanionMemoryEnabled(checked) }) },
             modifier = Modifier.testTag("companion-memory-enabled"))
     }
-    Row(Modifier.fillMaxWidth().clickable(enabled = enabled && !busy) { open = true; error = null }
+    Row(Modifier.fillMaxWidth().clickable(enabled = enabled && !busy && !historyLoading) { open = true; error = null }
         .padding(vertical = 8.dp).testTag("companion-memory-open"), verticalAlignment = Alignment.CenterVertically) {
         Text("阿噜记得的小事", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
         Text("${memory?.facts?.size ?: 0} 条 · 可删改", style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.primary)
     }
     error?.takeIf { !open }?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+    if (pageActive && historyOpen) GuluDialog("补记聊天资料", onDismiss = { historyOpen = false }, compact = true, dense = true,
+        compactWidth = 320.dp, busy = busy, confirmLabel = "记下所选", confirmEnabled = historySelected.isNotEmpty(),
+        onConfirm = { write({
+            check(prefs.learnHistoricalFactsIfCurrent(historyRevision, historyCandidates.filter { it.id in historySelected }, authorizedByUser = true))
+        }, { historyOpen = false }, "资料或开关已经变化，请重新预览再确认") }) {
+        if (historyCandidates.isEmpty()) Text("这两段聊天里没有新的明确资料。", style = MaterialTheme.typography.bodyMedium)
+        historyCandidates.forEach { fact ->
+            Row(Modifier.fillMaxWidth().testTag("companion-history-${fact.id}"), verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(checked = fact.id in historySelected, enabled = !busy, onCheckedChange = { selected ->
+                    historySelected = if (selected) historySelected + fact.id else historySelected - fact.id
+                })
+                Column(Modifier.weight(1f)) {
+                    Text("${CompanionMemoryPolicy.label(fact.kind)} · ${fact.value}", style = MaterialTheme.typography.bodyMedium)
+                    Text("你说：「${fact.evidence}」", style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    historyExisting.firstOrNull { it.id == fact.id }?.let { previous ->
+                        Text("现在记着：${previous.value}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                    }
+                }
+            }
+        }
+        error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+    }
     if (pageActive && open && editing == null && !clearing) {
         val facts = memory?.facts.orEmpty()
         GuluDialog("阿噜记得的小事", onDismiss = { open = false }, compact = true, dense = true,

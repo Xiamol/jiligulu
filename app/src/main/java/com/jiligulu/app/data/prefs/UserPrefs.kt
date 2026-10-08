@@ -58,6 +58,7 @@ class UserPrefs(private val context: Context) {
         private val KEY_COMPANION_MEMORY_ENABLED = booleanPreferencesKey("companion_memory_enabled")
         private val KEY_COMPANION_MEMORY_FACTS = stringPreferencesKey("companion_memory_facts")
         private val KEY_COMPANION_MEMORY_REVISION = longPreferencesKey("companion_memory_revision")
+        private val KEY_COMPANION_HISTORY_VERSION = intPreferencesKey("companion_history_learning_version")
         private val KEY_THEME_MODE = stringPreferencesKey("theme_mode")
         private val KEY_LITTLE_WORLD_SKIN = stringPreferencesKey("little_world_skin")
         private val KEY_SECRET_STAR_BEST = intPreferencesKey("secret_star_best")
@@ -170,7 +171,11 @@ class UserPrefs(private val context: Context) {
         com.jiligulu.app.domain.persona.CompanionMemoryState(
             enabled = it[KEY_COMPANION_MEMORY_ENABLED] ?: true,
             revision = it[KEY_COMPANION_MEMORY_REVISION] ?: 0,
-            facts = com.jiligulu.app.domain.persona.CompanionMemoryPolicy.decode(it[KEY_COMPANION_MEMORY_FACTS].orEmpty()))
+            facts = com.jiligulu.app.domain.persona.CompanionMemoryPolicy.decode(it[KEY_COMPANION_MEMORY_FACTS].orEmpty()),
+            // Older revisions cannot tell an automatic write from a user's deletion. Never
+            // silently reopen that old history; settings offers an explicit preview instead.
+            historyLearningVersion = it[KEY_COMPANION_HISTORY_VERSION] ?: if ((it[KEY_COMPANION_MEMORY_REVISION] ?: 0) > 0)
+                com.jiligulu.app.domain.persona.CompanionMemoryPolicy.HISTORY_LEARNING_VERSION else 0)
     }.distinctUntilChanged()
 
     /** A reply from an older epoch cannot resurrect facts cleared/corrected/disabled by the user. */
@@ -192,10 +197,35 @@ class UserPrefs(private val context: Context) {
         return applied
     }
 
+    /** One bounded local scan, atomically marked complete; user actions invalidate its snapshot. */
+    suspend fun learnHistoricalFactsIfCurrent(expectedRevision: Long,
+        facts: List<com.jiligulu.app.domain.persona.CompanionFact>, authorizedByUser: Boolean = false): Boolean {
+        var applied = false
+        context.dataStore.edit { prefs ->
+            val revision = prefs[KEY_COMPANION_MEMORY_REVISION] ?: 0
+            val version = prefs[KEY_COMPANION_HISTORY_VERSION] ?: if (revision > 0)
+                com.jiligulu.app.domain.persona.CompanionMemoryPolicy.HISTORY_LEARNING_VERSION else 0
+            if ((prefs[KEY_COMPANION_MEMORY_ENABLED] ?: true) && revision == expectedRevision &&
+                (authorizedByUser || version < com.jiligulu.app.domain.persona.CompanionMemoryPolicy.HISTORY_LEARNING_VERSION)) {
+                val existing = com.jiligulu.app.domain.persona.CompanionMemoryPolicy.decode(prefs[KEY_COMPANION_MEMORY_FACTS].orEmpty())
+                val incoming = if (authorizedByUser) facts else facts.filter { old ->
+                    existing.none { it.id == old.id && (it.editedByUser || it.updatedAt >= old.updatedAt) }
+                }
+                val updated = com.jiligulu.app.domain.persona.CompanionMemoryPolicy.merge(existing, incoming)
+                prefs[KEY_COMPANION_MEMORY_FACTS] = com.jiligulu.app.domain.persona.CompanionMemoryPolicy.encode(updated)
+                prefs[KEY_COMPANION_HISTORY_VERSION] = com.jiligulu.app.domain.persona.CompanionMemoryPolicy.HISTORY_LEARNING_VERSION
+                prefs[KEY_COMPANION_MEMORY_REVISION] = revision + 1
+                applied = true
+            }
+        }
+        return applied
+    }
+
     suspend fun setCompanionMemoryEnabled(enabled: Boolean) {
         context.dataStore.edit { prefs ->
             prefs[KEY_COMPANION_MEMORY_ENABLED] = enabled
             prefs[KEY_COMPANION_MEMORY_REVISION] = (prefs[KEY_COMPANION_MEMORY_REVISION] ?: 0) + 1
+            prefs[KEY_COMPANION_HISTORY_VERSION] = com.jiligulu.app.domain.persona.CompanionMemoryPolicy.HISTORY_LEARNING_VERSION
         }
     }
 
@@ -203,6 +233,7 @@ class UserPrefs(private val context: Context) {
         context.dataStore.edit { prefs ->
             prefs.remove(KEY_COMPANION_MEMORY_FACTS)
             prefs[KEY_COMPANION_MEMORY_REVISION] = (prefs[KEY_COMPANION_MEMORY_REVISION] ?: 0) + 1
+            prefs[KEY_COMPANION_HISTORY_VERSION] = com.jiligulu.app.domain.persona.CompanionMemoryPolicy.HISTORY_LEARNING_VERSION
         }
     }
 
@@ -211,6 +242,7 @@ class UserPrefs(private val context: Context) {
             val existing = com.jiligulu.app.domain.persona.CompanionMemoryPolicy.decode(prefs[KEY_COMPANION_MEMORY_FACTS].orEmpty())
             prefs[KEY_COMPANION_MEMORY_FACTS] = com.jiligulu.app.domain.persona.CompanionMemoryPolicy.encode(existing.filter { it.id != id })
             prefs[KEY_COMPANION_MEMORY_REVISION] = (prefs[KEY_COMPANION_MEMORY_REVISION] ?: 0) + 1
+            prefs[KEY_COMPANION_HISTORY_VERSION] = com.jiligulu.app.domain.persona.CompanionMemoryPolicy.HISTORY_LEARNING_VERSION
         }
     }
 
@@ -221,6 +253,7 @@ class UserPrefs(private val context: Context) {
             val existing = com.jiligulu.app.domain.persona.CompanionMemoryPolicy.decode(prefs[KEY_COMPANION_MEMORY_FACTS].orEmpty())
             // Even a stale editor expresses a user action: invalidate replies already in flight.
             prefs[KEY_COMPANION_MEMORY_REVISION] = (prefs[KEY_COMPANION_MEMORY_REVISION] ?: 0) + 1
+            prefs[KEY_COMPANION_HISTORY_VERSION] = com.jiligulu.app.domain.persona.CompanionMemoryPolicy.HISTORY_LEARNING_VERSION
             val old = existing.firstOrNull { it.id == id } ?: return@edit
             val updated = old.copy(id = com.jiligulu.app.domain.persona.CompanionMemoryPolicy.id(old.kind, text), value = text,
                 evidence = "", updatedAt = System.currentTimeMillis(), editedByUser = true)
