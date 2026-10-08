@@ -4,6 +4,7 @@ package com.jiligulu.app.core.ai
 object AiConfig {
     const val BASE_URL = "https://api.deepseek.com/chat/completions"
     const val MODEL = "deepseek-flash" // V4.1-Flash，原生多模态（M5 识屏复用同一模型）
+    const val DEEPSEEK_PRO_MODEL = "deepseek-v4-pro"
 
     /**
      * 内置默认 Key —— 不写在源码里，构建期由 local.properties 的 DEEPSEEK_API_KEY 注入

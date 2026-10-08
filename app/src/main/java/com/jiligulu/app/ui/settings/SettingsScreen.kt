@@ -342,13 +342,9 @@ fun SettingsScreen(
                     }
 
                     if (settingsTab == "数据") SettingsSection("AI 服务", "✨",
-                        help = "自定义 API Key 保存在当前设备，调用 DeepSeek 时用于身份验证。AI 对话会发送你的消息、最近对话及部分账本上下文，用于理解请求；开启阿噜的记性时，也会带上已保存的小记忆。API Key 单独保存，留空时使用可用的内置配置。") {
+                        help = "AI 对话会把消息、最近对话及部分账本上下文发送给当前选择的供应商；开启记性时，也会带上已保存的小记忆。密钥独立保存，切换供应商不会共用密钥。编辑窗口点保存后生效，其它选择即时保存。") {
+                        AiProviderSettings()
                         AiUsageSettings()
-                        ProfileSettingRow("自定义 API Key",if(state.apiKey.isBlank()) {
-                            if (com.jiligulu.app.core.ai.AiConfig.DEFAULT_API_KEY.isNotBlank()) "使用内置配置" else "未填写 · 点击设置"
-                        } else "已设置 · 点击修改",editable) {
-                            edit(ProfileSettingField.API_KEY,state.apiKey)
-                        }
                     }
 
                     if (settingsTab == "数据") SettingsSection("数据管理", "🗂️") {
@@ -369,7 +365,7 @@ fun SettingsScreen(
                     }
 
                     if (settingsTab == "关于") SettingsSection("关于叽里咕噜", "🌱",
-                        help = "叽里咕噜是一个本地优先的 AI 记账小助手，也是会唠叨你好好吃饭的小搭子。\n\n账单、对话和设置保存在这台手机。AI 对话会把消息、最近对话及部分账本上下文发送给 DeepSeek，用于理解请求；启用记性时会附带小记忆。无需登录，暂不支持云同步或应用内备份。\n\n阿噜想说的话：谢谢你愿意把每天的花销交给我。我不会评判你买了什么，但如果你连着两天只吃面，我可能会念叨一句要记得吃肉。") {
+                        help = "叽里咕噜是一个本地优先的 AI 记账小助手，也是会唠叨你好好吃饭的小搭子。\n\n账单、对话和设置保存在这台手机。AI 对话会把消息、最近对话及部分账本上下文发送给当前选择的 AI 供应商，用于理解请求；启用记性时会附带小记忆。无需登录，暂不支持云同步或应用内备份。\n\n阿噜想说的话：谢谢你愿意把每天的花销交给我。我不会评判你买了什么，但如果你连着两天只吃面，我可能会念叨一句要记得吃肉。") {
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             Text("叽里咕噜", style = MaterialTheme.typography.titleLarge.copy(fontFamily = GuluBrandFont, fontWeight = FontWeight.Normal),
@@ -385,7 +381,7 @@ fun SettingsScreen(
                             value = "路陌",
                             brand = true
                         )
-                        AboutLine(title = "AI 助手", value = "DeepSeek")
+                        AboutLine(title = "AI 助手", value = "DeepSeek / 自定义供应商")
                         AboutLine(title = "数据保存", value = "本机")
                         AboutLine(title = "账号同步", value = "无需登录 · 暂无云同步")
 

@@ -350,7 +350,7 @@ class AddBillViewModel(
                     app.container.categoryRepository,
                     app.container.categoryAdminRepository,
                     remoteCategory = { text, type, catalog ->
-                        val client = DeepSeekClient(app.container.aiRepository.effectiveApiKey(), onUsage = app.container.aiUsage::record)
+                        val client = app.container.aiRepository.createClient()
                         val result = client.parseBill(ManualCategoryClassifier.PROMPT,
                             ManualCategoryClassifier.input(text, type, catalog)).getOrThrow()
                         ManualCategoryClassifier.suggestion(result, catalog)
@@ -358,7 +358,7 @@ class AddBillViewModel(
                     importPhotoFile = { uri -> MemoryFiles.importPhoto(app, uri) },
                     deletePhotoFile = { path -> MemoryFiles.deleteImportedPhoto(app, path) },
                     remotePendingCategories = { bills, catalog ->
-                        val client = DeepSeekClient(app.container.aiRepository.effectiveApiKey(), onUsage = app.container.aiUsage::record)
+                        val client = app.container.aiRepository.createClient()
                         val result = client.parseBill(PendingCategoryClassifier.PROMPT,
                             PendingCategoryClassifier.input(bills, catalog)).getOrThrow()
                         PendingCategoryClassifier.suggestions(result, bills, catalog)

@@ -10,6 +10,7 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.addJsonObject
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
@@ -125,7 +126,7 @@ data class AiParseResult(
  * 尤其 402「余额不足」和 401「Key 无效」必须分开——一个要充值，一个要换 Key，
  * 笼统说「连不上网」会让人往错误方向排查。
  */
-class DeepSeekHttpException(val status: Int, val detail: String) : IOException("DeepSeek HTTP $status")
+class DeepSeekHttpException(val status: Int, val detail: String, providerName: String = "DeepSeek") : IOException("$providerName HTTP $status")
 
 /**
  * 服务端返回了 200，但没有给出任何内容。
@@ -134,7 +135,7 @@ class DeepSeekHttpException(val status: Int, val detail: String) : IOException("
  * The reason alone does not establish censorship, unsupported intent, or a Wi-Fi problem.
  */
 class DeepSeekEmptyResponseException(val finishReason: String?) :
-    IllegalStateException("DeepSeek 返回空内容（finish_reason=${finishReason ?: "未知"}）")
+    IllegalStateException("AI 服务返回空内容（finish_reason=${finishReason ?: "未知"}）")
 
 class DeepSeekMalformedResponseException : IllegalStateException("AI 返回的内容格式不正确")
 
@@ -142,14 +143,21 @@ class DeepSeekMalformedResponseException : IllegalStateException("AI 返回的�
 data class ChatTurn(val role: String, val content: String)
 
 /**
- * DeepSeek 官方 API（OpenAI 兼容格式）。
- * 强制 response_format=json_object，本地再做 schema 解析兜底（PRD §8 风险 4）。
+ * OpenAI-compatible chat completion transport; the legacy class name stays source-compatible.
+ * Provider capabilities decide optional parameters; local schema checks apply to every provider.
  */
-class DeepSeekClient(
+class DeepSeekClient private constructor(
     private val apiKey: String,
-    private val client: OkHttpClient = sharedClient,
-    private val onUsage: suspend (AiTokenUsage?) -> Unit = {}
+    private val client: OkHttpClient,
+    val profile: AiProviderProfile,
+    private val onUsage: suspend (AiTokenUsage?) -> Unit,
 ) {
+    constructor(apiKey: String, client: OkHttpClient = sharedClient, onUsage: suspend (AiTokenUsage?) -> Unit = {}) :
+        this(apiKey, client, AiProviderProfile(), onUsage)
+    constructor(apiKey: String, profile: AiProviderProfile, client: OkHttpClient = sharedClient,
+        onUsage: suspend (AiTokenUsage?) -> Unit = {}) : this(apiKey, client, profile, onUsage)
+
+    fun configuredFor(profile: AiProviderProfile): DeepSeekClient = DeepSeekClient(apiKey, client, profile, onUsage)
 
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -178,17 +186,16 @@ class DeepSeekClient(
                 if (attempt < MAX_ATTEMPTS && isRetryable(failure)) {
                     // 移动网络下「上一句还好、下一句就断」多半是 keep-alive 连接被静默回收，
                     // 重发一次通常就好——这是用户能直接感知到的最大改善。
-                    Log.w(TAG, "第 $attempt 次请求失败，${RETRY_DELAY_MS}ms 后重试：${failure.message}")
+                    Log.w(TAG, "请求重试：attempt=$attempt cause=${failure.javaClass.simpleName}")
                     delay(RETRY_DELAY_MS)
                 } else {
-                    // 真实原因必须落日志：UI 只能给一句人话，
-                    // 到底是超时、连接被重置还是 5xx，只能靠这行定位。
-                    Log.w(TAG, "请求失败（不再重试）：${failure.message}", failure)
+                    // Logs retain error classes only; provider bodies/URLs can echo credentials.
+                    Log.w(TAG, "请求失败：${failure.javaClass.simpleName}")
                     return@withContext Result.failure(failure)
                 }
             }
         }
-        Result.failure(lastFailure ?: IllegalStateException("DeepSeek 请求失败"))
+        Result.failure(lastFailure ?: IllegalStateException("AI 服务请求失败"))
     }
 
     /** 单次请求：组装 → 发送 → 解析。重试策略与失败日志都在 [parseBill]。 */
@@ -199,10 +206,10 @@ class DeepSeekClient(
         stableContext: String
     ): AiParseResult {
         val requestJson = buildJsonObject {
-            put("model", AiConfig.MODEL)
-            put("temperature", 0.7)
-            put("thinking", buildJsonObject { put("type", "disabled") })
-            put("response_format", buildJsonObject { put("type", "json_object") })
+            put("model", profile.model)
+            if (profile.sendsTemperature) put("temperature", 0.7)
+            if (profile.disablesDeepSeekThinking) put("thinking", buildJsonObject { put("type", "disabled") })
+            if (profile.jsonMode) put("response_format", buildJsonObject { put("type", "json_object") })
             put("messages", buildJsonArray {
                 addJsonObject {
                     put("role", "system")
@@ -228,18 +235,48 @@ class DeepSeekClient(
             })
         }.toString()
 
-        val request = Request.Builder()
-            .url(AiConfig.BASE_URL)
-            .header("Authorization", "Bearer $apiKey")
-            .post(requestJson.toRequestBody("application/json".toMediaType()))
-            .build()
+        val content = executeContent(requestJson)
+        return try {
+            json.decodeFromString(AiParseResult.serializer(), unwrapJsonFence(content))
+        } catch (parseFailure: Exception) {
+            Log.w(TAG, "回复格式校验失败：${parseFailure.javaClass.simpleName}，长度=${content.length}")
+            throw DeepSeekMalformedResponseException()
+        }
+    }
+
+    /** The same selected profile, credentials, usage observer and cancellation apply to images. */
+    suspend fun recognizeImage(systemPrompt: String, requestContext: String, jpegBase64: String): Result<String> = withContext(Dispatchers.IO) {
+        runCatching {
+            require(profile.supportsImages) { "当前模型未启用图片输入，请在「AI 服务」编辑供应商的图像能力，或选择支持识图的模型" }
+            val request = buildJsonObject {
+                put("model", profile.model)
+                if (profile.supportsLegacyTokenLimit) put("max_tokens", 2400)
+                if (profile.sendsTemperature) put("temperature", 0.0)
+                if (profile.disablesDeepSeekThinking) put("thinking", buildJsonObject { put("type", "disabled") })
+                if (profile.jsonMode) put("response_format", buildJsonObject { put("type", "json_object") })
+                put("messages", buildJsonArray {
+                    addJsonObject { put("role", "system"); put("content", systemPrompt) }
+                    addJsonObject { put("role", "user"); put("content", buildJsonArray {
+                        addJsonObject { put("type", "text"); put("text", requestContext) }
+                        addJsonObject { put("type", "image_url"); put("image_url", buildJsonObject { put("url", "data:image/jpeg;base64,$jpegBase64") }) }
+                    }) }
+                })
+            }.toString()
+            unwrapJsonFence(executeContent(request))
+        }.onFailure { if (it is CancellationException) throw it }
+    }
+
+    private suspend fun executeContent(requestJson: String): String {
+        val builder = Request.Builder().url(profile.endpoint)
+        if (apiKey.isNotBlank()) builder.header("Authorization", "Bearer $apiKey")
+        val request = builder.post(requestJson.toRequestBody("application/json".toMediaType())).build()
 
         var reportedUsage: AiTokenUsage? = null
         try {
             return client.newCall(request).awaitResponse().use { response ->
                 val body = response.body?.string().orEmpty()
                 if (!response.isSuccessful) {
-                    throw DeepSeekHttpException(response.code, body.take(400))
+                    throw DeepSeekHttpException(response.code, redact(body).take(400), profile.name)
                 }
                 val root = json.parseToJsonElement(body).jsonObject
                 reportedUsage = AiTokenUsage.fromResponse(root)
@@ -248,19 +285,18 @@ class DeepSeekClient(
                 // （finish_reason = content_filter），也有过 choices 为空的形态。
                 // 用 !! 会炸成 NPE / 下标越界，最后被 UI 当成「没连上」——那是误导。
                 val choice = root["choices"]?.jsonArray?.firstOrNull()?.jsonObject
-                val finishReason = choice?.get("finish_reason")?.jsonPrimitive?.contentOrNull
-                val content = choice?.get("message")?.jsonObject?.get("content")?.jsonPrimitive?.contentOrNull
+                val finishReason = choice?.get("finish_reason")?.jsonPrimitive?.contentOrNull?.let { redact(it).take(80) }
+                val rawContent = choice?.get("message")?.jsonObject?.get("content")
+                val content = when (rawContent) {
+                    is kotlinx.serialization.json.JsonPrimitive -> rawContent.contentOrNull
+                    is JsonArray -> rawContent.mapNotNull { (it as? JsonObject)?.get("text")?.jsonPrimitive?.contentOrNull }.joinToString("")
+                    else -> null
+                }
                 if (content.isNullOrBlank()) {
                     Log.w(TAG, "响应没有内容：finish_reason=$finishReason")
                     throw DeepSeekEmptyResponseException(finishReason)
                 }
-                try {
-                    json.decodeFromString(AiParseResult.serializer(), unwrapJsonFence(content))
-                } catch (parseFailure: Exception) {
-                    // Never retain conversation/ledger text in device logs. A format failure can be retried.
-                    Log.w(TAG, "回复格式校验失败：${parseFailure.javaClass.simpleName}，长度=${content.length}")
-                    throw DeepSeekMalformedResponseException()
-                }
+                content
             }
         } finally {
             // Count reported usage even when content is empty/malformed and this attempt retries.
@@ -272,6 +308,8 @@ class DeepSeekClient(
             }
         }
     }
+
+    private fun redact(value: String): String = if (apiKey.isBlank()) value else value.replace(apiKey, "[redacted]")
 
     companion object {
         // JSON output and plain-text assistant exemplars conflict in multi-turn conversations.
@@ -326,13 +364,13 @@ class DeepSeekClient(
      * 或者历史又被每轮重排，看这行日志能第一时间发现。
      */
     private fun logCacheUsage(root: JsonObject) {
-        val usage = root["usage"]?.jsonObject ?: return
-        val hit = usage["prompt_cache_hit_tokens"]?.jsonPrimitive?.contentOrNull
-        val miss = usage["prompt_cache_miss_tokens"]?.jsonPrimitive?.contentOrNull
+        val usage = root["usage"] as? JsonObject ?: return
+        val hit = (usage["prompt_cache_hit_tokens"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull
+        val miss = (usage["prompt_cache_miss_tokens"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull
         val hits = hit?.toLongOrNull() ?: 0L
         val misses = miss?.toLongOrNull() ?: 0L
         val ratio = if (hits + misses > 0) "%.1f%%".format(java.util.Locale.ROOT, hits * 100.0 / (hits + misses)) else "unknown"
-        Log.d(TAG, "prompt cache: hit=$hit miss=$miss rate=$ratio")
+        Log.d(TAG, "prompt cache: hit=${hit?.toLongOrNull()} miss=${miss?.toLongOrNull()} rate=$ratio")
     }
 }
 

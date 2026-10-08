@@ -109,6 +109,8 @@ class AiRepository(
     },
     private val clientFactory: (String) -> DeepSeekClient = { DeepSeekClient(it) },
     private val ledgerLookupRepository: LedgerLookupRepository? = null,
+    private val providerPrefs: com.jiligulu.app.data.prefs.AiProviderPrefs? = null,
+    private val providerClientFactory: ((com.jiligulu.app.core.ai.AiProviderConnection) -> DeepSeekClient)? = null,
     private val rememberCompanionFacts: suspend (Long, List<CompanionFact>) -> Unit = { revision, facts ->
         userPrefs.rememberCompanionFactsIfCurrent(revision, facts)
     }
@@ -129,10 +131,18 @@ class AiRepository(
      * 此时抛出明确提示而不是拿空 Bearer 去撞 401。
      */
     suspend fun effectiveApiKey(): String {
+        if (providerPrefs != null) return providerPrefs.connection(userPrefs.apiKeyOverride.first()).apiKey
         val key = userPrefs.apiKeyOverride.first().ifBlank { AiConfig.DEFAULT_API_KEY }
         // R5：App 没有「我的」页，AI 服务在设置页——报错也要指路指对，跟功能地图口径一致。
         require(key.isNotBlank()) { "还没有配置 API Key，请到「设置 → AI 服务」里填写" }
         return key
+    }
+
+    /** One immutable provider/key snapshot owns all requests of this operation. */
+    suspend fun createClient(): DeepSeekClient {
+        val prefs = providerPrefs ?: return clientFactory(effectiveApiKey())
+        val connection = prefs.connection(userPrefs.apiKeyOverride.first())
+        return providerClientFactory?.invoke(connection) ?: clientFactory(connection.apiKey).configuredFor(connection.profile)
     }
 
     suspend fun nicknameWithSuffix(): String {
@@ -155,7 +165,7 @@ class AiRepository(
             val fallback = com.jiligulu.app.core.ai.ImageReceiptCodec.classify(parsed, categories)
             if (parsed.bills.all { it.category in listOf("转账", "红包") }) fallback else {
                 val suggestions = try {
-                    clientFactory(effectiveApiKey()).parseBill(
+                    createClient().parseBill(
                         com.jiligulu.app.core.ai.ImageCategoryClassifier.PROMPT,
                         com.jiligulu.app.core.ai.ImageCategoryClassifier.input(parsed, categories)
                     ).getOrElse { if (it is CancellationException) throw it else null }
@@ -213,7 +223,7 @@ class AiRepository(
         )
         val system = renderer.renderSystem()
         val contextBlock = renderer.renderContext(input, includeStableContext = false) + "\n\n" + memory.renderForAi()
-        val client = clientFactory(effectiveApiKey())
+        val client = createClient()
         val history = recentTurns(requestMillis)
         val stableContext = renderer.renderStableContext()
         val first = client.parseBill(system, contextBlock, history = history, stableContext = stableContext)

@@ -8,20 +8,12 @@ import android.media.ExifInterface
 import android.net.Uri
 import android.util.Base64
 import com.jiligulu.app.JiliguluApp
-import com.jiligulu.app.core.ai.AiConfig
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.json.*
-import okhttp3.*
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.File
-import java.io.IOException
 import java.util.UUID
-import java.util.concurrent.TimeUnit
-import kotlin.coroutines.resume
-import kotlin.coroutines.resumeWithException
 
 /** One explicitly chosen image; never searches gallery or captures in the background. */
 object ImageBillImport {
@@ -51,46 +43,17 @@ object ImageBillImport {
     fun save(context: Context, bitmap: Bitmap): File = File(directory(context), "${UUID.randomUUID()}.jpg").also { file ->
         file.outputStream().use { check(bitmap.compress(Bitmap.CompressFormat.JPEG, 90, it)) }
     }
-    private val client = OkHttpClient.Builder().connectTimeout(15, TimeUnit.SECONDS).readTimeout(60, TimeUnit.SECONDS).callTimeout(90, TimeUnit.SECONDS).build()
     suspend fun recognize(context: Context, file: File): String = withContext(Dispatchers.IO) {
         val requestMillis = System.currentTimeMillis()
         val zone = java.time.ZoneId.systemDefault()
-        val key = (context.applicationContext as JiliguluApp).container.aiRepository.effectiveApiKey()
-        val data = Base64.encodeToString(file.readBytes(), Base64.NO_WRAP)
-        val body = buildJsonObject {
-            put("model", "deepseek-flash")
-            put("max_tokens", 2400)
-            put("response_format", buildJsonObject { put("type", "json_object") })
-            put("temperature", 0.0)
-            put("thinking", buildJsonObject { put("type", "disabled") })
-            put("messages", buildJsonArray {
-                addJsonObject { put("role", "system"); put("content", com.jiligulu.app.core.ai.ImageReceiptCodec.PROMPT) }
-                addJsonObject { put("role", "user"); put("content", buildJsonArray {
-                    addJsonObject { put("type", "text"); put("text", com.jiligulu.app.core.ai.ImageReceiptCodec.requestContext(requestMillis, zone)) }
-                    addJsonObject { put("type", "image_url"); put("image_url", buildJsonObject { put("url", "data:image/jpeg;base64,$data") }) }
-                }) }
-            })
-        }.toString()
-        val call = client.newCall(Request.Builder().url(AiConfig.BASE_URL).header("Authorization", "Bearer $key").post(body.toRequestBody("application/json".toMediaType())).build())
-        var reportedUsage: com.jiligulu.app.core.ai.AiTokenUsage? = null
-        try {
-            val response = suspendCancellableCoroutine<Response> { continuation ->
-                continuation.invokeOnCancellation { call.cancel() }
-                call.enqueue(object : Callback {
-                    override fun onFailure(call: Call, e: IOException) { if (continuation.isActive) continuation.resumeWithException(e) }
-                    override fun onResponse(call: Call, response: Response) { continuation.resume(response) { _, value, _ -> value.close() } }
-                })
-            }
-            response.use {
-                check(it.isSuccessful) { when(it.code) { 401 -> "AI 密钥无效，请检查设置"; 402 -> "AI 余额不足"; 429 -> "请求有点多，请稍后重试"; else -> "图片识别暂不可用（${it.code}），请稍后重试" } }
-                val root = Json.parseToJsonElement(it.body!!.string()).jsonObject
-                reportedUsage = com.jiligulu.app.core.ai.AiTokenUsage.fromResponse(root)
-                val content = root["choices"]?.jsonArray?.firstOrNull()?.jsonObject?.get("message")?.jsonObject?.get("content")?.jsonPrimitive?.contentOrNull?.takeIf { text -> text.isNotBlank() && text.length <= 8000 }
-                    ?: error("这次没读到内容，可以换张清晰的图片重试")
-                com.jiligulu.app.core.ai.ImageReceiptCodec.render(content, requestMillis, zone)
-            }
-        } finally {
-            (context.applicationContext as JiliguluApp).container.aiUsage.record(reportedUsage)
+        val service = (context.applicationContext as JiliguluApp).container.aiRepository.createClient()
+        require(service.profile.supportsImages) {
+            "当前模型未启用图片输入，请在「设置 → AI 服务」选择支持识图的模型或编辑图像能力"
         }
+        val data = Base64.encodeToString(file.readBytes(), Base64.NO_WRAP)
+        val content = service.recognizeImage(com.jiligulu.app.core.ai.ImageReceiptCodec.PROMPT,
+            com.jiligulu.app.core.ai.ImageReceiptCodec.requestContext(requestMillis, zone), data).getOrThrow()
+        require(content.isNotBlank() && content.length <= 8000) { "这次没读到有效内容，可以换张清晰图片重试" }
+        com.jiligulu.app.core.ai.ImageReceiptCodec.render(content, requestMillis, zone)
     }
 }

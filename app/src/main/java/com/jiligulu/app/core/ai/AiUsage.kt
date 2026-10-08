@@ -11,7 +11,10 @@ data class AiTokenUsage(
     val cacheHit: Long = 0,
     val cacheMiss: Long = 0,
     val unclassifiedInput: Long = 0,
-    val output: Long = 0
+    val output: Long = 0,
+    val inputReported: Boolean = true,
+    val outputReported: Boolean = true,
+    val cacheReported: Boolean = true,
 ) {
     companion object {
         fun fromResponse(root: JsonObject): AiTokenUsage? {
@@ -26,7 +29,9 @@ data class AiTokenUsage(
             val hit = reportedHit?.coerceAtMost(input ?: Long.MAX_VALUE) ?: 0L
             val miss = (reportedMiss ?: if (input != null && reportedHit != null) input - hit else 0L)
                 .coerceAtMost(input?.minus(hit) ?: Long.MAX_VALUE)
-            return AiTokenUsage(hit, miss, ((input ?: 0) - hit - miss).coerceAtLeast(0), output ?: 0)
+            return AiTokenUsage(hit, miss, ((input ?: 0) - hit - miss).coerceAtLeast(0), output ?: 0,
+                inputReported = input != null || reportedHit != null && reportedMiss != null,
+                outputReported = output != null, cacheReported = reportedHit != null || reportedMiss != null)
         }
     }
 }
@@ -38,7 +43,10 @@ data class AiUsageTotals(
     val cacheHit: Long = 0,
     val cacheMiss: Long = 0,
     val unclassifiedInput: Long = 0,
-    val output: Long = 0
+    val output: Long = 0,
+    val inputReportedCalls: Long = 0,
+    val outputReportedCalls: Long = 0,
+    val cacheReportedCalls: Long = 0,
 ) {
     val knownInput: Long get() = cacheHit + cacheMiss
     val hitRate: Double? get() = if (knownInput > 0) cacheHit.toDouble() / knownInput else null
@@ -47,6 +55,9 @@ data class AiUsageTotals(
     fun add(usage: AiTokenUsage?) = copy(
         calls = calls + 1,
         reportedCalls = reportedCalls + if (usage != null) 1 else 0,
+        inputReportedCalls = inputReportedCalls + if (usage?.inputReported == true) 1 else 0,
+        outputReportedCalls = outputReportedCalls + if (usage?.outputReported == true) 1 else 0,
+        cacheReportedCalls = cacheReportedCalls + if (usage?.cacheReported == true) 1 else 0,
         cacheHit = cacheHit + (usage?.cacheHit ?: 0),
         cacheMiss = cacheMiss + (usage?.cacheMiss ?: 0),
         unclassifiedInput = unclassifiedInput + (usage?.unclassifiedInput ?: 0),

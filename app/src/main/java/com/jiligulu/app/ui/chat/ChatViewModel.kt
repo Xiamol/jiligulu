@@ -847,7 +847,7 @@ class ChatViewModel(
                 keyProblem ->
                     "先用本地规则整理好了，请核对后再确认入账（配置 API Key 后可让叽里咕噜帮你拆得更细）～"
                 httpStatus == 402 ->
-                    "叽里咕噜的账户余额不够啦，先去 DeepSeek 平台充值，再回来找我记账～"
+                    "AI 服务返回余额或额度不足，请到所选供应商核对账户，再回来试试～"
                 httpStatus == 401 ->
                     "这个 API Key 好像失效了，到「设置 → AI 服务」里换一个新的吧。"
                 httpStatus == 429 ->
@@ -855,9 +855,9 @@ class ChatViewModel(
                 httpStatus == 400 ->
                     "AI 服务没有接受这次请求，请稍后重试（400）。"
                 httpStatus != null && httpStatus >= 500 ->
-                    "DeepSeek 那边暂时有点忙，稍后再试一次。"
+                    "AI 服务那边暂时有点忙，稍后再试一次。"
                 httpStatus != null ->
-                    "阿噜这边出了点小状况（DeepSeek 返回 $httpStatus），稍后再试试～"
+                    "AI 服务返回 $httpStatus，请检查当前供应商的地址、模型和密钥后重试。"
                 cause is DeepSeekEmptyResponseException ->
                     "AI 服务这次返回了空内容，阿噜没接到回复，请稍后再试。"
                 cause is DeepSeekMalformedResponseException ->

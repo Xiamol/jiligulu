@@ -32,6 +32,40 @@ class AiUsageTest {
         assertEquals(1L, AiUsageTotals().add(null).calls)
     }
 
+    @Test fun partialUsageDoesNotClaimMissingInputOutputOrCacheWasReported() {
+        val outputOnly = parse("""{"usage":{"completion_tokens":23}}""")!!
+        assertFalse(outputOnly.inputReported)
+        assertTrue(outputOnly.outputReported)
+        assertFalse(outputOnly.cacheReported)
+        assertEquals(0L, outputOnly.unclassifiedInput)
+        assertEquals(23L, outputOnly.output)
+
+        val inputOnly = parse("""{"usage":{"prompt_tokens":71}}""")!!
+        assertTrue(inputOnly.inputReported)
+        assertFalse(inputOnly.outputReported)
+        assertFalse(inputOnly.cacheReported)
+        assertEquals(71L, inputOnly.unclassifiedInput)
+        assertEquals(0L, inputOnly.cacheMiss)
+    }
+
+    @Test fun mixedPartialUsageTracksCoverageSeparatelyFromTokenCounters() {
+        val totals = AiUsageTotals()
+            .add(parse("""{"usage":{"completion_tokens":23}}"""))
+            .add(parse("""{"usage":{"prompt_tokens":71}}"""))
+            .add(parse("""{"usage":{"prompt_cache_hit_tokens":30,"prompt_cache_miss_tokens":10}}"""))
+            .add(null)
+        assertEquals(4L, totals.calls)
+        assertEquals(3L, totals.reportedCalls)
+        assertEquals(2L, totals.inputReportedCalls)
+        assertEquals(1L, totals.outputReportedCalls)
+        assertEquals(1L, totals.cacheReportedCalls)
+        assertEquals(30L, totals.cacheHit)
+        assertEquals(10L, totals.cacheMiss)
+        assertEquals(71L, totals.unclassifiedInput)
+        assertEquals(23L, totals.output)
+        assertEquals(.75, totals.hitRate!!, .000001)
+    }
+
     @Test fun inconsistentProviderCountersAreBoundedByPromptTotal() {
         assertEquals(AiTokenUsage(80, 20, 0, 1), parse("""{"usage":{"prompt_tokens":100,"prompt_cache_hit_tokens":80,"prompt_cache_miss_tokens":100,"completion_tokens":1}}"""))
     }

@@ -20,13 +20,20 @@ class AiUsageRepository(context: Context) {
     private val key = stringPreferencesKey("aggregate_v1")
     private val json = Json { ignoreUnknownKeys = true }
     val snapshots = store.data.map { decode(it[key]) }
+    fun snapshotsFor(providerId: String) = store.data.map { decode(it[keyFor(providerId)]) }
+
+    private fun keyFor(providerId: String) = if (providerId == "deepseek") key else stringPreferencesKey("provider_" +
+        java.security.MessageDigest.getInstance("SHA-256").digest(providerId.toByteArray(Charsets.UTF_8))
+            .take(12).joinToString("") { "%02x".format(it.toInt() and 255) })
 
     /** Called once per completed/failed HTTP attempt, before parsing model content. */
-    suspend fun record(usage: AiTokenUsage?) = withContext(NonCancellable) {
+    suspend fun record(usage: AiTokenUsage?) = record(usage, "deepseek")
+    suspend fun record(usage: AiTokenUsage?, providerId: String) = withContext(NonCancellable) {
         try {
             val day = LocalDate.now().toString()
+            val selectedKey = keyFor(providerId)
             store.edit { prefs ->
-                prefs[key] = json.encodeToString(AiUsageSnapshot.serializer(), decode(prefs[key]).add(day, usage))
+                prefs[selectedKey] = json.encodeToString(AiUsageSnapshot.serializer(), decode(prefs[selectedKey]).add(day, usage))
             }
         } catch (_: Exception) {
             // Meter persistence can never turn a valid reply into a retry (and another charge).

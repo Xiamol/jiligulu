@@ -40,6 +40,7 @@ class AppContainer(private val app: Application) {
 
     val littleWorld: com.jiligulu.app.data.littleworld.LittleWorldRepository by lazy { com.jiligulu.app.data.littleworld.LittleWorldRepository(app) }
     val userPrefs: UserPrefs by lazy { UserPrefs(app) }
+    val aiProviders: com.jiligulu.app.data.prefs.AiProviderPrefs by lazy { com.jiligulu.app.data.prefs.AiProviderPrefs(app) }
     val aiUsage: com.jiligulu.app.data.prefs.AiUsageRepository by lazy {
         com.jiligulu.app.data.prefs.AiUsageRepository(app)
     }
@@ -47,7 +48,7 @@ class AppContainer(private val app: Application) {
     val announcements: AnnouncementRepository by lazy { AnnouncementRepository(userPrefs) }
 
     val billRepository: BillRepository by lazy { BillRepository(database.billDao()) }
-    val categoryRepository: CategoryRepository by lazy { CategoryRepository(database.categoryDao()) }
+    val categoryRepository: CategoryRepository by lazy { CategoryRepository(database.categoryDao(), database = database) }
     val categoryAdminRepository: CategoryAdminRepository by lazy { CategoryAdminRepository(database) }
     private val categoryPresetUpdater by lazy { com.jiligulu.app.data.repository.CategoryPresetUpdater(
         categoryAdminRepository, app.getSharedPreferences("category_catalog_updates", android.content.Context.MODE_PRIVATE)) }
@@ -56,7 +57,9 @@ class AppContainer(private val app: Application) {
         AiRepository(
             app, categoryRepository, billRepository, userPrefs,
             chatHistoryRepository, categoryAdminRepository,
-            clientFactory = { key -> com.jiligulu.app.core.ai.DeepSeekClient(key, onUsage = aiUsage::record) },
+            providerPrefs = aiProviders,
+            providerClientFactory = { connection -> com.jiligulu.app.core.ai.DeepSeekClient(connection.apiKey, connection.profile,
+                onUsage = { usage -> aiUsage.record(usage, connection.profile.usageId) }) },
             ledgerLookupRepository = com.jiligulu.app.data.repository.LedgerLookupRepository(database)
         )
     }
