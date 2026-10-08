@@ -31,6 +31,8 @@ object PersonalDisclosurePolicy {
             val evidence = clause.value.trim().replace(Regex("^(?:请)?(?:记住|记一下|记得|记好)[：:\\s]*"), "").trim()
             if (!safeClaim(input, clause.range.first, evidence)) continue
             val bare = input.trim().trimEnd('。', '！', '!') == evidence
+            val startsDisclosure = input.substring(0, clause.range.first).isBlank()
+            val declaredEarlier = personalClauses.isNotEmpty()
             fun add(kind: String, value: String) {
                 if (CompanionMemoryPolicy.validValue(value)) {
                     extra += CompanionFact(CompanionMemoryPolicy.id(kind, value), kind, value, evidence, now)
@@ -39,6 +41,7 @@ object PersonalDisclosurePolicy {
                 }
             }
             val age = ageStatement.matchEntire(evidence)?.groupValues?.get(1)?.let(::number)
+                ?.takeIf { evidence.startsWith("我") || evidence.startsWith("年龄") || startsDisclosure || declaredEarlier || Slot.AGE in slots }
             if (age != null) {
                 personalAnswer = true; personalClauses += clause.range
                 if (age in 1..120) add("age", "${age}岁")
@@ -50,10 +53,11 @@ object PersonalDisclosurePolicy {
                 rejected = rejected ?: years?.toString()
             }
             val gender = standaloneGender.matchEntire(evidence)?.groupValues?.get(1)
+                ?.takeIf { bare || declaredEarlier || Slot.GENDER in slots }
                 ?: evidence.takeIf { bare && Slot.GENDER in slots && it in setOf("男", "女", "male", "female") }
             if (gender != null) add("gender", if (gender in setOf("男生", "男性", "男孩", "男孩子", "男", "male")) "男" else "女")
             val birth = birthday.matchEntire(evidence)
-            if (birth != null && (evidence.startsWith("生日") || evidence.startsWith("我") || bare && Slot.BIRTHDAY in slots)) {
+            if (birth != null && (evidence.startsWith("我") || evidence.startsWith("生日") && (startsDisclosure || declaredEarlier) || bare && Slot.BIRTHDAY in slots)) {
                 personalAnswer = true; personalClauses += clause.range
                 val month = number(birth.groupValues[1]); val day = number(birth.groupValues[2])
                 if (month != null && day != null && runCatching { MonthDay.of(month, day) }.isSuccess) add("birthday", "${month}月${day}日")
@@ -132,7 +136,10 @@ object PersonalDisclosurePolicy {
         if (Regex("^(?:我(?:的)?(?:妈妈|爸爸|弟弟|妹妹|哥哥|姐姐|朋友|同学|同事|对象|男朋友|女朋友|儿子|女儿)|(?:妈妈|爸爸|他|她|朋友|哥哥|姐姐|弟弟|妹妹|儿子|女儿))").containsMatchIn(evidence)) return false
         if (Regex("^(?:不是|不确定|不清楚|不知道|可能|也许|猜|应该)").containsMatchIn(evidence)) return false
         val before = input.substring(0, offset).takeLast(400)
-        if (!evidence.startsWith("我") && Regex("我(?:妈妈|爸爸|弟弟|妹妹|哥哥|姐姐|朋友|儿子|女儿)[^。！？?]*$").containsMatchIn(before)) return false
+        val topicPrefix = before.substringAfterLast('。').substringAfterLast('！').substringAfterLast('？').substringAfterLast('\n')
+        val otherOwner = Regex("([\\p{L}]{1,20})的(?:年龄|性别|生日|学校|年级|职业)").findAll(topicPrefix)
+            .any { it.groupValues[1] !in setOf("我", "本人") }
+        if (!evidence.startsWith("我") && (otherOwner || Regex("(?:我(?:的)?|给|送|替|帮)?(?:妈妈|爸爸|弟弟|妹妹|哥哥|姐姐|朋友|同事|同学|对象|男朋友|女朋友|儿子|女儿)").containsMatchIn(topicPrefix))) return false
         if (Regex("截图|图片|OCR|识别出的|转述|聊天记录|角色扮演|假设|如果|假如|(?:妈妈|爸爸|他|她|朋友)(?:说|告诉|写)").containsMatchIn(before)) return false
         if (listOf('“' to '”', '「' to '」', '『' to '』').any { (open, close) -> before.lastIndexOf(open) > before.lastIndexOf(close) } ||
             before.count { it == '"' } % 2 != 0) return false

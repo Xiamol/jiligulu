@@ -197,6 +197,23 @@ class PersonalDisclosurePolicyTest {
         assertFalse(result.personalOnly)
     }
 
+    @Test fun terseFieldsAboutAnotherPersonNeverBecomeTheUsersOwnGenderOrAge() {
+        listOf("给弟弟买衣服，男生，19元", "弟弟的年龄，19岁", "给妹妹过生日，生日2月28",
+            "朋友的资料，女生，生日2月28", "送同事礼物，男生，19元", "我朋友19岁，生日2月28").forEach { input ->
+            assertTrue(input, PersonalDisclosurePolicy.analyze(input, now).facts.isEmpty())
+        }
+    }
+
+    @Test fun aThirdPersonTopicCannotBorrowAnEarlierPersonalQuestionSlot() {
+        val history = listOf(assistant(1, "你今年几岁？"))
+        assertTrue(PersonalDisclosurePolicy.analyze("弟弟的年龄，19岁", now, history).facts.isEmpty())
+        assertTrue(PersonalDisclosurePolicy.analyze("小明的年龄，19岁", now, history).facts.isEmpty())
+        val own = PersonalDisclosurePolicy.analyze("我19岁，吃饭19元", now, history)
+        assertEquals(mapOf("age" to "19岁"), factsOf(own))
+        assertFalse(own.personalOnly)
+        assertEquals("吃饭19元", own.billInput)
+    }
+
     @Test fun selfQuestionsQuotesOtherPeopleOcrAndHypothesesCannotSupplyPersonalFacts() {
         listOf(
             "我是男生吗？",
