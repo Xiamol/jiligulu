@@ -16,11 +16,9 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.jiligulu.app.JiliguluApp
 import com.jiligulu.app.data.prefs.UserPrefs
-import com.jiligulu.app.data.prefs.GlobalGlassFrameRate
-import com.jiligulu.app.data.prefs.GlobalGlassPrefs
-import com.jiligulu.app.ui.components.GuluDialog
+import com.jiligulu.app.data.prefs.AppGlassFrameRate
+import com.jiligulu.app.data.prefs.AppGlassPrefs
 import com.jiligulu.app.ui.settings.SettingHelpButton
-import com.jiligulu.app.ui.settings.LocalSettingPageActive
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
@@ -47,32 +45,17 @@ fun FloatingCaptureSettings() {
     val hidden by FloatingCaptureService.hiddenForSession.collectAsStateWithLifecycle()
     val running by FloatingCaptureService.running.collectAsStateWithLifecycle()
     val ready by ScreenCaptureService.ready.collectAsStateWithLifecycle()
-    val globalDesired by prefs.globalGlassRefractionEnabled.collectAsStateWithLifecycle(false)
-    val glassPrefs = remember(context.applicationContext) { GlobalGlassPrefs(context) }
-    val globalStatus by GlobalGlassBackdrop.state.collectAsStateWithLifecycle()
-    var explainGlobal by remember { mutableStateOf(false) }
-    val pageActive = LocalSettingPageActive.current
-    LaunchedEffect(pageActive) { if (!pageActive) explainGlobal = false }
+    val glassPrefs = remember(context.applicationContext) { AppGlassPrefs(context) }
     val scope = rememberCoroutineScope()
     var error by remember { mutableStateOf<String?>(null) }
     fun prepare() {
         context.startActivity(Intent(context, CapturePermissionActivity::class.java).putExtra("prepareOnly", true))
     }
-    fun authorizeGlobal() { scope.launch {
-        try {
-            prefs.setGlobalGlassRefractionEnabled(true)
-            if (!ScreenCaptureService.enableGlobalIfReady()) context.startActivity(
-                Intent(context, CapturePermissionActivity::class.java).putExtra("prepareOnly", true)
-                    .putExtra(ScreenCaptureService.EXTRA_GLOBAL_GLASS, true))
-        } catch (cancelled: CancellationException) { throw cancelled }
-        catch (_: Exception) { error = "未能启动共享授权，点击重新授权后再试。" }
-    } }
     fun enable() { scope.launch {
         try {
             FloatingCaptureService.hiddenForSession.value = false
             prefs.setFloatingCaptureEnabled(true)
             ContextCompat.startForegroundService(context, Intent(context, FloatingCaptureService::class.java))
-            if (!ScreenCaptureService.ready.value) prepare()
         } catch (cancelled: CancellationException) { throw cancelled
         } catch (_: Exception) { error = "已记住开关，暂未能启动，请检查系统权限或稍后重试" }
     } }
@@ -125,56 +108,11 @@ fun FloatingCaptureSettings() {
     }
     HorizontalDivider(Modifier.padding(vertical = 4.dp))
     GlassSamplingSettings(glassPrefs, enabled = Build.VERSION.SDK_INT >= 33)
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text("全局液态玻璃", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-        SettingHelpButton("全局液态玻璃", "当前状态：${globalStatus.detail}\n\n默认关闭。关闭时，采样速度仍对 App 内玻璃起效。开启后需要本次系统屏幕共享授权，系统共享标识和可停止的通知会持续显示；每次重新启动都需要重新授权。\n\nApp 内从本应用新鲜背景取样，快速画面无法同步时暂退为透明材质，样本跟上后恢复。跨窗口采样有时延，不能保证严格同帧。App 外共享画面含悬浮球本身，只使用未遮挡画面做可信边缘折射和轻透明色调；中心不重建被遮住的文字，不等同于真实底层画面。\n\n画面只在本机内存中用于玻璃效果，不保存、上传或识别。采样速度默认每秒 30 次，实际受设备画面与处理速度限制，较高档位会增加耗电；静止时不持续重绘。隐藏、锁屏或关闭屏幕时全局采样暂停，系统结束共享时停止。")
-        Switch(checked = globalDesired, enabled = Build.VERSION.SDK_INT >= 33 && (globalDesired || enabled && running && !hidden),
-            onCheckedChange = { value ->
-                com.jiligulu.app.core.audio.UiSound.toggle(context)
-                if (value) explainGlobal = true else {
-                    ScreenCaptureService.stopGlobalSampling()
-                    scope.launch {
-                        try { prefs.setGlobalGlassRefractionEnabled(false) }
-                        catch (cancelled: CancellationException) { throw cancelled }
-                        catch (_: Exception) { error = "采样已停止，但开关未保存，请重试。" }
-                    }
-                }
-            })
-    }
-    Text(when {
-        Build.VERSION.SDK_INT < 33 -> "需要 Android 13+"
-        !globalDesired -> "未开启"
-        !enabled || !running || hidden -> "先开启悬浮球"
-        !globalStatus.authorizedThisSession -> "待授权"
-        globalStatus.phase == GlobalGlassPhase.ACTIVE -> "运行中"
-        globalStatus.phase == GlobalGlassPhase.STARTING -> "准备中"
-        else -> "已暂停"
-    }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    if (globalDesired && enabled && running && !hidden && Build.VERSION.SDK_INT >= 33) {
-        if (!globalStatus.authorizedThisSession) TextButton(onClick = { explainGlobal = true }) {
-            Text(if (ready) "在本次共享中启用" else "重新授权并启用")
-        }
-        if (ready) TextButton(onClick = {
-            ScreenCaptureService.stopGlobalSampling()
-            context.stopService(Intent(context, ScreenCaptureService::class.java))
-        }) { Text("停止本次共享") }
-    }
-    if (explainGlobal && pageActive) GuluDialog("开启全局液态玻璃？", onDismiss = { explainGlobal = false },
-        compact = true, dense = true, compactWidth = 300.dp,
-        confirmLabel = if (ready) "启用本次共享" else "前往系统授权", dismissLabel = "先不开启",
-        onConfirm = { explainGlobal = false; authorizeGlobal() }) {
-        Text("需要共享整个屏幕，系统共享标识和可停止的通知会持续显示。画面仅在本机内存中使用，不保存、上传或识别。",
-            style = MaterialTheme.typography.bodySmall)
-        Text("App 内使用新鲜背景采样，快速画面跟不上时暂用透明材质；App 外只折射可信边缘，中心用轻透明色调保持稳定，不重建被遮住的文字。",
-            style = MaterialTheme.typography.bodySmall)
-        Text("较高采样速度会增加耗电。隐藏、锁屏或关闭屏幕时暂停；系统结束共享时停止，下次启动需要重新授权。",
-            style = MaterialTheme.typography.bodySmall)
-    }
     error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
 }
 
 @Composable
-private fun GlassSamplingSettings(prefs: GlobalGlassPrefs, enabled: Boolean) {
+private fun GlassSamplingSettings(prefs: AppGlassPrefs, enabled: Boolean) {
     val context = LocalContext.current
     val saved by prefs.frameRate.collectAsStateWithLifecycle(initialValue = null)
     val scope = rememberCoroutineScope()
@@ -183,10 +121,10 @@ private fun GlassSamplingSettings(prefs: GlobalGlassPrefs, enabled: Boolean) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text("采样速度", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
         Text("次/秒", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        SettingHelpButton("采样速度", "设置液态玻璃每秒采样的目标次数，默认 30。它与外观页的屏幕刷新率（Hz）是两个设置；实际采样速度受设备画面与处理速度限制，较高档位会增加耗电，静止时不持续重绘。\n\n同时作用于 App 内真实背景玻璃和已授权的全局玻璃。全局关闭时，仅 App 内起效；App 内取样无需屏幕共享授权。选项立即保存，改档位不会开启屏幕共享或自动启用全局液态玻璃。")
+        SettingHelpButton("采样速度", "设置液态玻璃每秒采样的目标次数，默认 30。它与外观页的屏幕刷新率（Hz）是两个设置；实际采样速度受设备画面与处理速度限制，较高档位会增加耗电，静止时不持续重绘。\n\n仅对 App 内的背景折射起效；App 外保持透明材质，不持续采集屏幕。取样无需屏幕共享授权。拖动时固定透明材质，松手后渐显折射。选项立即保存。")
     }
-    Row(Modifier.fillMaxWidth().testTag("global-glass-frame-rate"), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        GlobalGlassFrameRate.entries.forEach { rate ->
+    Row(Modifier.fillMaxWidth().testTag("app-glass-frame-rate"), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        AppGlassFrameRate.entries.forEach { rate ->
             val checked = saved == rate
             Surface(onClick = {
                 if (checked) return@Surface
@@ -199,7 +137,7 @@ private fun GlassSamplingSettings(prefs: GlobalGlassPrefs, enabled: Boolean) {
                     finally { saving = false }
                 }
             }, enabled = enabled && saved != null && !saving,
-                modifier = Modifier.weight(1f).heightIn(min = 44.dp).testTag("global-glass-rate-${rate.fps}").semantics {
+                modifier = Modifier.weight(1f).heightIn(min = 44.dp).testTag("app-glass-rate-${rate.fps}").semantics {
                     role = Role.RadioButton; selected = checked
                 }, shape = MaterialTheme.shapes.medium,
                 color = if (checked) MaterialTheme.colorScheme.primaryContainer

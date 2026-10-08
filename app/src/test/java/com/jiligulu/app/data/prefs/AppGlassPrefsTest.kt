@@ -21,12 +21,12 @@ import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk=[28], application=Application::class, manifest=Config.NONE)
-class GlobalGlassPrefsTest {
+class AppGlassPrefsTest {
     @get:Rule val temporary=TemporaryFolder()
     @Test fun targetsDefaultToThirtyAndHaveHonestNotFasterThanRequestedIntervals() {
-        assertEquals(GlobalGlassFrameRate.FPS_30, GlobalGlassFrameRate.fromFps(null))
-        assertEquals(GlobalGlassFrameRate.FPS_30, GlobalGlassFrameRate.fromFps(999))
-        for(rate in GlobalGlassFrameRate.entries) {
+        assertEquals(AppGlassFrameRate.FPS_30, AppGlassFrameRate.fromFps(null))
+        assertEquals(AppGlassFrameRate.FPS_30, AppGlassFrameRate.fromFps(999))
+        for(rate in AppGlassFrameRate.entries) {
             assertTrue(rate.intervalMillis*rate.fps>=1000)
             assertTrue(rate.intervalNanos>0)
         }
@@ -37,13 +37,13 @@ class GlobalGlassPrefsTest {
             val first=SupervisorJob()
             val store=PreferenceDataStoreFactory.create(scope=CoroutineScope(first+Dispatchers.IO),produceFile={file})
             try {
-                val prefs=GlobalGlassPrefs(store)
-                assertEquals(GlobalGlassFrameRate.DEFAULT,prefs.frameRate.first())
-                prefs.setFrameRate(GlobalGlassFrameRate.FPS_120)
+                val prefs=AppGlassPrefs(store)
+                assertEquals(AppGlassFrameRate.DEFAULT,prefs.frameRate.first())
+                prefs.setFrameRate(AppGlassFrameRate.FPS_120)
             } finally { first.cancelAndJoin() }
             val second=SupervisorJob()
             val restored=PreferenceDataStoreFactory.create(scope=CoroutineScope(second+Dispatchers.IO),produceFile={file})
-            try { assertEquals(GlobalGlassFrameRate.FPS_120,GlobalGlassPrefs(restored).frameRate.first()) }
+            try { assertEquals(AppGlassFrameRate.FPS_120,AppGlassPrefs(restored).frameRate.first()) }
             finally { second.cancelAndJoin() }
         }
     }

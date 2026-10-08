@@ -16,7 +16,6 @@ class CapturePermissionActivity : ComponentActivity() {
             try {
                 ContextCompat.startForegroundService(this, Intent(this, ScreenCaptureService::class.java)
                     .putExtra("code", result.resultCode).putExtra("grant", result.data)
-                    .putExtra(ScreenCaptureService.EXTRA_GLOBAL_GLASS, intent.getBooleanExtra(ScreenCaptureService.EXTRA_GLOBAL_GLASS, false))
                     .putExtra("prepareOnly", intent.getBooleanExtra("prepareOnly", false)))
                 handedOff = true
             } catch (_: Exception) { android.widget.Toast.makeText(this, "截图未能启动，请重试", android.widget.Toast.LENGTH_SHORT).show() }
@@ -27,9 +26,7 @@ class CapturePermissionActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (ScreenCaptureService.ready.value) {
-            if (intent.getBooleanExtra(ScreenCaptureService.EXTRA_GLOBAL_GLASS, false)) {
-                ScreenCaptureService.enableGlobalIfReady(); FloatingCaptureService.restore()
-            } else if (!intent.getBooleanExtra("prepareOnly", false)) ScreenCaptureService.captureIfReady()
+            if (!intent.getBooleanExtra("prepareOnly", false)) ScreenCaptureService.captureIfReady()
             finish(); return
         }
         if (savedInstanceState == null) {

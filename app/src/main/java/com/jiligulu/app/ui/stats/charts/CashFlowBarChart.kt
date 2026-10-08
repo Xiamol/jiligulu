@@ -251,14 +251,17 @@ private fun CashFlowDayCell(day: LocalDate, bar: DayBar?, selectedDayMillis: Lon
             if (bar == null) Box(Modifier.width((slot * .55f).coerceAtMost(18.dp)).height(18.dp)
                 .background(trackColor.copy(alpha = .35f), RoundedCornerShape(5.dp)))
             else if (bar.amountFen > 0) {
-                Box(Modifier.width((slot * if (compressed) .65f else .6f).coerceAtMost(22.dp)).height(height)
+                Box(Modifier.width((slot * if (compressed) .65f else .6f).coerceAtMost(if (compressed) 22.dp else 32.dp)).height(height)
                     .clip(RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp, bottomStart = 5.dp, bottomEnd = 5.dp))
                     .background(Brush.verticalGradient(listOf(color.copy(alpha = if (selected) .72f else .42f), color)))) {
                     if (selected && !compressed) Box(Modifier.padding(top = 7.dp).width(7.dp).height(3.dp).align(Alignment.TopCenter)
                         .background(Color.White.copy(alpha = .7f), RoundedCornerShape(50)))
                 }
-                if (!compressed) Text(compactCashFlowAmount(bar.amountFen), Modifier.align(Alignment.BottomCenter).offset(y = -(height + 3.dp)),
-                    fontSize = 9.sp, maxLines = 1, color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                if (!compressed) Text(if (slot >= 40.dp) Formatters.fenToYuanText(bar.amountFen) else compactCashFlowAmount(bar.amountFen),
+                    Modifier.align(Alignment.BottomCenter).offset(y = -(height + 3.dp)),
+                    fontSize = if (slot >= 56.dp) 12.sp else if (slot >= 40.dp) 10.sp else 9.sp,
+                    lineHeight = if (slot >= 56.dp) 14.sp else 12.sp, maxLines = 1,
+                    color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
             } else Box(Modifier.padding(bottom = 2.dp).size(5.dp).background(if (selected) MaterialTheme.colorScheme.primary else trackColor, RoundedCornerShape(50)))
         }
         if (!compressed) Surface(Modifier.padding(top = 4.dp).height(24.dp), shape = RoundedCornerShape(50),

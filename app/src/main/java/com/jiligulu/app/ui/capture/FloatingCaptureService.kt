@@ -33,7 +33,7 @@ class FloatingCaptureService : Service() {
     private var sizePercent = UserPrefs.DEFAULT_FLOATING_SIZE_PERCENT
     private val touchHandler = Handler(Looper.getMainLooper())
     private val windows by lazy { getSystemService(WindowManager::class.java) }
-    private val glassHost by lazy { GlassOverlayHost(this,windows) }
+    private val glassHost by lazy { GlassOverlayHost(windows) }
     private val prefs by lazy { (application as com.jiligulu.app.JiliguluApp).container.userPrefs }
     override fun onBind(intent: Intent?) = null
 
@@ -98,17 +98,16 @@ class FloatingCaptureService : Service() {
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     view.setGlassPressed(true)
-                    view.setGlassLight(event.rawX/resources.displayMetrics.widthPixels,event.rawY/resources.displayMetrics.heightPixels)
                     startX = event.rawX; startY = event.rawY; x = params.x; y = params.y
                     dragStartPosition = FloatingCaptureGeometry.normalize(x, y, params.width, usableBounds())
                     moved = false; held = false; overTarget = false
                     touchHandler.postDelayed(hold, ViewConfiguration.getLongPressTimeout().toLong()); true
                 }
                 MotionEvent.ACTION_MOVE -> {
-                    view.setGlassLight(event.rawX/resources.displayMetrics.widthPixels,event.rawY/resources.displayMetrics.heightPixels)
                     val dx = event.rawX - startX; val dy = event.rawY - startY
                     if (abs(dx) + abs(dy) > ViewConfiguration.get(this).scaledTouchSlop) moved = true
                     if (moved) {
+                        view.setGlassDragging(true)
                         val point = FloatingCaptureGeometry.clamp(x + dx.toInt(), y + dy.toInt(), params.width, usableBounds())
                         params.x = point.x; params.y = point.y
                         runCatching { glassHost.update(params) }.onSuccess {view.refreshBackdropAfterMove()}
@@ -124,6 +123,7 @@ class FloatingCaptureService : Service() {
                 }
                 MotionEvent.ACTION_UP -> {
                     view.setGlassPressed(false)
+                    view.setGlassDragging(false)
                     val droppedToHide = moved && overDismissTarget(event.rawX, event.rawY)
                     touchHandler.removeCallbacks(hold); hideDismissTarget()
                     if (droppedToHide) {
@@ -146,6 +146,7 @@ class FloatingCaptureService : Service() {
                 }
                 MotionEvent.ACTION_CANCEL -> {
                     view.setGlassPressed(false)
+                    view.setGlassDragging(false)
                     touchHandler.removeCallbacks(hold); hideDismissTarget()
                     rememberedPosition = dragStartPosition
                     placeRememberedBubble()
@@ -208,7 +209,7 @@ class FloatingCaptureService : Service() {
         super.onConfigurationChanged(newConfig)
         touchHandler.removeCallbacksAndMessages(null)
         hideDismissTarget()
-        (bubble as? GlassFloatingBubbleView)?.setGlassPressed(false)
+        (bubble as? GlassFloatingBubbleView)?.apply { setGlassPressed(false); setGlassDragging(false) }
         placeRememberedBubble()
     }
 

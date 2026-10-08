@@ -14,17 +14,6 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [28], manifest = Config.NONE, application = Application::class)
 class FloatingCapturePreferenceTest {
-    @Test fun globalRefractionDefaultsOffAndStoresOnlyUserPreference() = runBlocking {
-        val context = RuntimeEnvironment.getApplication()
-        val prefs = UserPrefs(context)
-        assertFalse(prefs.globalGlassRefractionEnabled.first())
-        prefs.setGlobalGlassRefractionEnabled(true)
-        assertTrue(UserPrefs(context).globalGlassRefractionEnabled.first())
-        // A preference is not a MediaProjection grant and cannot make this service ready.
-        assertFalse(ScreenCaptureService.ready.value)
-        prefs.setGlobalGlassRefractionEnabled(false)
-        assertFalse(UserPrefs(context).globalGlassRefractionEnabled.first())
-    }
     @Test fun preferenceSurvivesNewOwnerAndExplicitOffIsRemembered() = runBlocking {
         val context = RuntimeEnvironment.getApplication()
         val first = UserPrefs(context)

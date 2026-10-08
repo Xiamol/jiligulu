@@ -65,7 +65,10 @@ fun AiProviderSettings() {
             onClick = uiTap { persist { prefs.select(AiProviderId.DEEPSEEK) } }, label = { Text("DeepSeek") },
             modifier = Modifier.testTag("ai-provider-deepseek"))
         FilterChip(state.selected == AiProviderId.CUSTOM,
-            onClick = uiTap { persist { prefs.select(AiProviderId.CUSTOM) }; if (state.custom.address.isBlank()) editor = AiProviderId.CUSTOM },
+            onClick = uiTap {
+                if (state.custom.address.isBlank() || state.custom.model.isBlank()) editor = AiProviderId.CUSTOM
+                else persist { prefs.select(AiProviderId.CUSTOM) }
+            },
             label = { Text("自定义") }, modifier = Modifier.testTag("ai-provider-custom"))
         TextButton(onClick = uiTap { help = true }) { Text("说明") }
     }
@@ -90,7 +93,10 @@ fun AiProviderSettings() {
     editor?.let { id ->
         AiProviderEditor(id, if (id == AiProviderId.CUSTOM) state.custom else AiProviderProfile.deepSeek(state.deepSeekModel),
             loadKey = { prefs.savedKey(id) }, onDismiss = { editor = null }, onSave = { profile, key ->
-                if (id == AiProviderId.DEEPSEEK) prefs.saveDeepSeekKey(key) else prefs.saveCustom(profile, key)
+                if (id == AiProviderId.DEEPSEEK) prefs.saveDeepSeekKey(key) else {
+                    prefs.saveCustom(profile, key)
+                    prefs.select(AiProviderId.CUSTOM)
+                }
             })
     }
     if (help) GuluDialog("AI 服务说明", onDismiss = { help = false }, compact = true, dense = true) {

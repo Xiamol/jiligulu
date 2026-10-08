@@ -55,19 +55,16 @@ class GlassFloatingBubbleView @JvmOverloads constructor(
     private var glassPressed = false
     private var pressAnimator: ValueAnimator? = null
     private val lightMatrix=Matrix()
-    private var lightX=.3f
-    private var lightY=.3f
+    private val lightX=.3f
+    private val lightY=.3f
     private val backdropPaint=Paint(Paint.ANTI_ALIAS_FLAG)
     private var lens:GlassLensShader?=null
     private var backdrop:Bitmap?=null
-    private var usingGlobalBackdrop=false
-    private var backdropX=0f
-    private var backdropY=0f
+    private var dragging=false
+    private var backdropMix=0f
+    private var backdropAnimator: ValueAnimator?=null
+    internal val canSampleOwnBackdrop get() = isAttachedToWindow && isShown && !dragging
     private val backdropRefreshTask=Runnable {refreshBackdrop()}
-    private val environmentRefreshTask=Runnable {
-        GlobalGlassBackdrop.refreshTarget()
-        ScreenCaptureService.refreshGlassEnvironment()
-    }
 
     init {
         background = null
@@ -84,7 +81,7 @@ class GlassFloatingBubbleView @JvmOverloads constructor(
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
-        backdrop=null;backdropPaint.shader=null
+        clearBackdrop()
         if (w <= 0 || h <= 0) return
         side = min(w, h).toFloat()
         val cx = w / 2f
@@ -141,12 +138,7 @@ class GlassFloatingBubbleView @JvmOverloads constructor(
         }
         shadowCanvas.drawRoundRect(glassBounds, radius, radius, shadowPaint)
         softShadow = shadow
-        refreshGlassEnvironmentAfterLayout()
-    }
-
-    private fun refreshGlassEnvironmentAfterLayout() {
-        removeCallbacks(environmentRefreshTask)
-        post(environmentRefreshTask)
+        post(backdropRefreshTask)
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -157,13 +149,11 @@ class GlassFloatingBubbleView @JvmOverloads constructor(
         // The platform blur outline cannot deform with this View. Keep one stable shell
         // and let the sprite flex inside it, avoiding a halo during a press or release.
         softShadow?.let { canvas.drawBitmap(it, 0f, 0f, bitmapPaint) }
-        if (if(usingGlobalBackdrop) !GlobalGlassBackdrop.available() else !AppGlassBackdrop.available()) {
-            backdrop=null;backdropPaint.shader=null
+        if (!AppGlassBackdrop.available() || (backdrop!=null&&!AppGlassBackdrop.matchesCurrentContent(backdrop))) clearOwnBackdrop()
+        if(backdropPaint.shader!=null&&!dragging) {
+            backdropPaint.alpha=(backdropMix*255).toInt().coerceIn(0,255)
+            canvas.drawPath(glassPath,backdropPaint)
         }
-        if(!usingGlobalBackdrop&&backdrop!=null&&!AppGlassBackdrop.matchesCurrentContent(backdrop)) {
-            backdrop=null;backdropPaint.shader=null
-        }
-        if(backdropPaint.shader!=null) canvas.drawPath(glassPath,backdropPaint)
         canvas.drawRoundRect(glassBounds, radius, radius, glassPaint)
         canvas.drawPath(glassPath, glowPaint)
 
@@ -179,81 +169,69 @@ class GlassFloatingBubbleView @JvmOverloads constructor(
         canvas.drawRoundRect(rimBounds, rimRadius, rimRadius, rimPaint)
         val reflections = canvas.save()
         canvas.clipPath(glassPath)
-        canvas.translate(pressure * side * .012f, -pressure * side * .014f)
-        glintPaint.alpha = (224 + pressure * 30).toInt().coerceIn(0, 255)
+        glintPaint.alpha = 224
         canvas.drawPath(topGlint, glintPaint)
         canvas.drawPath(lowerGlint, lowerGlintPaint)
         canvas.restoreToCount(reflections)
         canvas.restoreToCount(body)
     }
 
-    /** Position-driven specular bands; no pixel sampling or continuously running animation. */
-    fun setGlassLight(x:Float,y:Float) {
-        val nextX=x.coerceIn(0f,1f);val nextY=y.coerceIn(0f,1f)
-        if(kotlin.math.abs(nextX-lightX)+kotlin.math.abs(nextY-lightY)<.012f) return
-        lightX=nextX;lightY=nextY
-        lightMatrix.setRotate((lightX-.5f)*110f+(lightY-.5f)*45f,width/2f,height/2f)
-        rimPaint.shader?.setLocalMatrix(lightMatrix)
-        refreshBackdropAfterMove()
-        invalidate()
+    /** A drag keeps one transparent material throughout; asynchronous crops cannot toggle it. */
+    fun setGlassDragging(value: Boolean) {
+        if(dragging==value) return
+        dragging=value
+        if(value) { removeCallbacks(backdropRefreshTask); AppGlassBackdrop.suspendForDrag(this); clearBackdrop() }
+        else refreshBackdropAfterMove()
     }
-
-    /** Sample after WindowManager has applied the newest position, including the final UP. */
     fun refreshBackdropAfterMove() {
-        if(android.os.Build.VERSION.SDK_INT<33 || !isAttachedToWindow) return
-        GlobalGlassBackdrop.refreshTarget()
-        // Keep optics under the finger using current coordinates, before waiting for a
-        // new PixelCopy/MediaProjection frame. Out-of-crop data is never bound at old x/y.
-        if(AppGlassBackdrop.available()) {
-            val cached=AppGlassBackdrop.cachedFor(this)
-            if(cached!=null) bindOwnBackdrop(cached.bitmap,cached.offsetX,cached.offsetY)
-            else {backdrop=null;backdropPaint.shader=null;invalidate()}
-        } else {
-            usingGlobalBackdrop=true
-            backdropPaint.shader=runCatching {GlobalGlassBackdrop.shaderFor(this,lightX,lightY)}.getOrNull()
-            invalidate()
-        }
+        if(android.os.Build.VERSION.SDK_INT<33 || !isAttachedToWindow || dragging) return
         removeCallbacks(backdropRefreshTask)
         postOnAnimation(backdropRefreshTask)
     }
 
     fun refreshBackdrop() {
-        if(android.os.Build.VERSION.SDK_INT<33) return
-        if (!AppGlassBackdrop.available()) {
-            backdrop=null;usingGlobalBackdrop=true
-            backdropPaint.shader=runCatching { GlobalGlassBackdrop.shaderFor(this,lightX,lightY) }.getOrNull()
-            invalidate()
-            return
-        }
-        usingGlobalBackdrop=false
+        if(android.os.Build.VERSION.SDK_INT<33 || !canSampleOwnBackdrop) return
+        if (!AppGlassBackdrop.available()) { clearBackdrop(); return }
         AppGlassBackdrop.copyBehind(this) {bitmap,x,y ->
-            if(!AppGlassBackdrop.available()) {refreshBackdrop();return@copyBehind}
-            if(bitmap==null) {backdrop=null;backdropPaint.shader=null;invalidate()}
+            if(!canSampleOwnBackdrop) return@copyBehind
+            if(bitmap==null || !AppGlassBackdrop.available()) clearOwnBackdrop()
             else bindOwnBackdrop(bitmap,x,y)
         }
     }
     private fun bindOwnBackdrop(bitmap:Bitmap,x:Float,y:Float) {
-        backdrop=bitmap;usingGlobalBackdrop=false
+        val first=backdrop==null
+        backdrop=bitmap
         runCatching {
                 val next=lens ?: GlassLensShader().also {lens=it;android.util.Log.d("GlassLens","Own-window refraction initialized")}
-                backdropX=x;backdropY=y
                 next.bind(bitmap,x,y,width,height,lightX,lightY)
                 backdropPaint.shader=next.shader
             }.onFailure {backdropPaint.shader=null;backdrop=null;android.util.Log.w("GlassLens","Shader unavailable",it)}
-            invalidate()
+        if(first&&backdrop!=null) {
+            backdropAnimator?.cancel()
+            if(!ValueAnimator.areAnimatorsEnabled()) backdropMix=1f
+            else backdropAnimator=ValueAnimator.ofFloat(0f,1f).apply {
+                duration=120L
+                addUpdateListener {backdropMix=it.animatedValue as Float;invalidate()}
+                start()
+            }
+        }
+        invalidate()
     }
 
-    fun clearBackdrop() {backdrop=null;backdropPaint.shader=null;usingGlobalBackdrop=false;invalidate()}
-    internal fun clearOwnBackdrop() {if(!usingGlobalBackdrop&&backdrop!=null){backdrop=null;backdropPaint.shader=null;invalidate()}}
-    internal fun hasOwnBackdrop(bitmap:Bitmap?)=!usingGlobalBackdrop&&bitmap!=null&&backdrop===bitmap&&backdropPaint.shader!=null
-    internal fun clearGlobalBackdrop() {if(usingGlobalBackdrop) clearBackdrop()}
-    override fun onAttachedToWindow() {super.onAttachedToWindow();GlobalGlassBackdrop.watch(this);AppGlassBackdrop.watch(this);postDelayed(backdropRefreshTask,100)}
+    fun clearBackdrop() {
+        backdropAnimator?.cancel();backdropAnimator=null
+        val changed=backdrop!=null||backdropPaint.shader!=null
+        backdrop=null;backdropPaint.shader=null;backdropMix=0f
+        if(changed)invalidate()
+    }
+    internal fun clearOwnBackdrop() {if(backdrop!=null)clearBackdrop()}
+    internal fun hasOwnBackdrop(bitmap:Bitmap?)=bitmap!=null&&backdrop===bitmap&&backdropPaint.shader!=null
+    override fun onAttachedToWindow() {super.onAttachedToWindow();AppGlassBackdrop.watch(this);postDelayed(backdropRefreshTask,100)}
 
     /** Call on DOWN, and release on UP/CANCEL/configuration changes in the service. */
     fun setGlassPressed(pressed: Boolean) {
         if (glassPressed == pressed) return
         glassPressed = pressed
-        GlobalGlassBackdrop.interaction(pressed)
         super.setPressed(pressed)
         pressAnimator?.cancel()
         val target = if (pressed) 1f else 0f
@@ -275,26 +253,23 @@ class GlassFloatingBubbleView @JvmOverloads constructor(
 
     override fun onVisibilityChanged(changedView: View, visibility: Int) {
         super.onVisibilityChanged(changedView, visibility)
-        if (visibility != VISIBLE) {removeCallbacks(backdropRefreshTask);resetPress()}
+        if (visibility != VISIBLE) {
+            removeCallbacks(backdropRefreshTask);resetPress()
+            AppGlassBackdrop.suspendForDrag(this);clearBackdrop()
+        }
         else if(isAttachedToWindow) refreshBackdropAfterMove()
     }
 
     override fun onWindowVisibilityChanged(visibility: Int) {
         super.onWindowVisibilityChanged(visibility)
-        // Dialog.hide/show keeps the view attached, so visibility must restart the
-        // authorized sampler even when no periodic hidden-target poll remains.
-        GlobalGlassBackdrop.refreshTarget()
-        ScreenCaptureService.refreshGlassEnvironment()
-        if (visibility != VISIBLE) clearGlobalBackdrop()
+        if(visibility!=VISIBLE)clearBackdrop() else if(isAttachedToWindow)refreshBackdropAfterMove()
     }
 
     override fun onDetachedFromWindow() {
         removeCallbacks(backdropRefreshTask)
-        removeCallbacks(environmentRefreshTask)
         AppGlassBackdrop.unwatch(this)
-        GlobalGlassBackdrop.unwatch(this)
         resetPress()
-        backdrop=null;backdropPaint.shader=null;lens=null
+        clearBackdrop();dragging=false;lens=null
         super.onDetachedFromWindow()
     }
 

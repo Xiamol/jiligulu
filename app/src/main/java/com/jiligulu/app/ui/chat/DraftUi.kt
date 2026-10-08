@@ -36,7 +36,7 @@ data class DraftUi(
 
 internal fun draftNoteForDisplay(note: String): String {
     if (!note.trimStart().startsWith("图片状态：")) return note
-    val completed = setOf("支付成功", "已支付", "已完成", "交易成功", "转账成功", "已收款", "确认收款", "收款成功", "已存入零钱", "状态待确认", "请核对", "可修改")
+    val completed = setOf("支付成功", "已支付", "已完成", "交易成功", "转账成功", "已收款", "确认收款", "收款成功", "已存入零钱", "制作中", "配送中", "状态待确认", "请核对", "可修改")
     return note.trimStart().removePrefix("图片状态：").split('，', ',', '；', ';', '\n').map(String::trim).mapNotNull { part ->
         when {
             part.isBlank() || part in completed || part.startsWith("支付方式：") ||

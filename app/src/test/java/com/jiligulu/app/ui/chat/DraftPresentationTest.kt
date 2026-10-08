@@ -5,7 +5,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.test.assertDoesNotExist
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
@@ -22,7 +21,7 @@ class DraftPresentationTest {
 
     @Test fun neitherExpandedNorCollapsedDraftRepeatsSourceOrTechnicalReceiptNotes() {
         val raw = "【图片记账】原图生成的大段原话"
-        val metadata = "图片状态：支付成功，图中无相关账单时间，暂按系统时间，可修改"
+        val metadata = "图片状态：制作中，图中无相关账单时间，暂按系统时间，可修改"
         val card = ChatItem.DraftCard(id = 18, rawInput = raw,
             drafts = listOf(DraftUi(amountText = "3.5", detail = "奶茶", categoryName = "饮品", note = metadata)))
         var expanded by mutableStateOf(true)
@@ -34,6 +33,7 @@ class DraftPresentationTest {
         compose.onNodeWithText(raw).assertDoesNotExist()
         compose.onNodeWithText("「$raw」").assertDoesNotExist()
         compose.onNodeWithText(metadata).assertDoesNotExist()
+        compose.onNodeWithText("制作中").assertDoesNotExist()
         compose.runOnIdle { expanded = false }
         compose.onNodeWithText("奶茶").assertIsDisplayed()
         compose.onNodeWithText(raw).assertDoesNotExist()

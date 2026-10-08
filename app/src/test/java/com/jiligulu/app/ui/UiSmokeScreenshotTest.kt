@@ -832,10 +832,10 @@ class UiSmokeScreenshotTest {
             compose.onNodeWithText("试听").assertDoesNotExist()
             scrollSettingsTo("采样速度")
             listOf(15, 30, 60, 120).forEach { fps ->
-                compose.onNodeWithTag("global-glass-rate-$fps").assertIsDisplayed()
+                compose.onNodeWithTag("app-glass-rate-$fps").assertIsDisplayed()
             }
             compose.onNodeWithContentDescription("采样速度说明").performClick()
-            awaitText("全局关闭时，仅 App 内起效", substring = true)
+            awaitText("仅对 App 内的背景折射起效", substring = true)
             compose.onNodeWithText("知道啦").performClick()
             compose.onNodeWithTag("settings-tab-提醒").performClick()
             awaitSettingsPage("提醒", "喝水提醒")

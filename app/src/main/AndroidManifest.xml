@@ -24,6 +24,7 @@
         android:roundIcon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:supportsRtl="true"
+        android:usesCleartextTraffic="true"
         android:theme="@style/Theme.Jiligulu">
 
         <provider android:name="androidx.core.content.FileProvider" android:authorities="${applicationId}.memories" android:exported="false" android:grantUriPermissions="true">

@@ -12,8 +12,8 @@ import android.view.Window
 import android.view.ViewTreeObserver
 import java.lang.ref.WeakReference
 import kotlin.math.roundToInt
-import com.jiligulu.app.data.prefs.GlobalGlassFrameRate
-import com.jiligulu.app.data.prefs.GlobalGlassPrefs
+import com.jiligulu.app.data.prefs.AppGlassFrameRate
+import com.jiligulu.app.data.prefs.AppGlassPrefs
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collect
 
@@ -23,8 +23,8 @@ internal data class AppGlassSample(val bitmap: Bitmap, val offsetX: Float, val o
 internal object AppGlassBackdrop {
     // The small decorative lens does not need to copy an Activity at the page's
     // 60–120 Hz cadence. It remains event-driven and is completely idle at rest.
-    private var minCopyIntervalMillis = GlobalGlassFrameRate.DEFAULT.intervalMillis
-    private var targetFps = GlobalGlassFrameRate.DEFAULT.fps
+    private var minCopyIntervalMillis = AppGlassFrameRate.DEFAULT.intervalMillis
+    private var targetFps = AppGlassFrameRate.DEFAULT.fps
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var preferenceJob: Job? = null
     private var source=WeakReference<Window>(null)
@@ -90,7 +90,7 @@ internal object AppGlassBackdrop {
     private fun observePreference(window:Window) {
         if(preferenceJob?.isActive==true || watched.get()==null) return
         preferenceJob=scope.launch {
-            GlobalGlassPrefs(window.context).frameRate.collect {rate ->
+            AppGlassPrefs(window.context).frameRate.collect {rate ->
                 minCopyIntervalMillis=rate.intervalMillis
                 targetFps=rate.fps
                 if(refreshPending) deferRefresh()
@@ -110,10 +110,9 @@ internal object AppGlassBackdrop {
         forgetPublishedFrame()
         source.get()?.let {old ->drawListener?.let {if(old.decorView.viewTreeObserver.isAlive) old.decorView.viewTreeObserver.removeOnDrawListener(it)}}
         drawListener=null;source=WeakReference(window);watched.get()?.clearBackdrop()
-        if(window!=null) GlobalGlassBackdrop.clearFrame()
-        ScreenCaptureService.refreshGlassEnvironment()
         if(window==null || watched.get()==null) return
         val listener=ViewTreeObserver.OnDrawListener {
+            if(watched.get()?.canSampleOwnBackdrop!=true)return@OnDrawListener
             val frame=++drawnFrame
             val frameEpoch=epoch
             val commit=Runnable {
@@ -153,7 +152,11 @@ internal object AppGlassBackdrop {
         if(x<0 || y<0 || x+view.width>bitmap.width || y+view.height>bitmap.height) return null
         return AppGlassSample(bitmap,x,y)
     }
+    fun suspendForDrag(view:GlassFloatingBubbleView) {
+        if(watched.get()===view){epoch++;cancelRefresh();forgetPublishedFrame()}
+    }
     fun copyBehind(view:GlassFloatingBubbleView,callback:(Bitmap?,Float,Float)->Unit) {
+        if(!view.canSampleOwnBackdrop)return
         val window=source.get()
         if(window==null||!window.decorView.isShown) {forgetPublishedFrame();callback(null,0f,0f);return}
         if(view.width<=0 || !view.isAttachedToWindow || !view.isShown) return
@@ -178,7 +181,7 @@ internal object AppGlassBackdrop {
         val ticket=OwnGlassFrameTicket(epoch,committedFrame,lastRequest)
         try { PixelCopy.request(window,rect,bitmap,{result ->
             scope.launch {
-            if(result==PixelCopy.SUCCESS && OwnGlassFramePolicy.isFresh(ticket,epoch,committedFrame,SystemClock.uptimeMillis(),targetFps) && source.get()===window && view.isAttachedToWindow) {
+            if(result==PixelCopy.SUCCESS && OwnGlassFramePolicy.isFresh(ticket,epoch,committedFrame,SystemClock.uptimeMillis(),targetFps) && source.get()===window && view.canSampleOwnBackdrop) {
                 val previous=publishedBitmap
                 val sameGeometry = publishedRect==rect && publishedOffsetX==offsetX && publishedOffsetY==offsetY &&
                     publishedViewWidth==view.width && publishedViewHeight==view.height && !view.isPressed &&
