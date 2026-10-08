@@ -44,6 +44,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -119,14 +120,18 @@ internal fun ColumnScope.OnlineChessLobby(active: Boolean, busy: Boolean, code: 
     val clipboard = LocalClipboardManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     var joining by rememberSaveable { mutableStateOf(false) }
-    var enteredCode by rememberSaveable { mutableStateOf("") }
+    var enteredCode by rememberSaveable(game, stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue()) }
+    var inputError by remember { mutableStateOf<String?>(null) }
     var copied by remember(code) { mutableStateOf(false) }
-    val canSubmit = !busy && (if (joining) RoomRoundRules.code(enteredCode) != null
-        else enteredCode.isBlank() || RoomRoundRules.code(enteredCode) != null)
+    val canSubmit = !busy
     val submit = {
         if (canSubmit) {
-            keyboard?.hide(); UiSound.select(context)
-            if (joining) onJoin(enteredCode.trim()) else onHost(enteredCode.trim())
+            val request = roomCodeSubmission(enteredCode.text, joining)
+            inputError = request.error
+            request.code?.let { normalized ->
+                keyboard?.hide(); UiSound.select(context)
+                if (joining) onJoin(normalized) else onHost(normalized)
+            }
         }
     }
     BoxWithConstraints(Modifier.fillMaxWidth().weight(1f).imePadding().padding(top = 28.dp), contentAlignment = Alignment.TopCenter) {
@@ -177,7 +182,7 @@ internal fun ColumnScope.OnlineChessLobby(active: Boolean, busy: Boolean, code: 
                     listOf(false to "创建", true to "加入").forEach { (value, label) ->
                         Box(Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(18.dp))
                             .background(if (joining == value) ChessLobbyColors.wash else Color.Transparent)
-                            .clickable(enabled = !busy, role = Role.Tab) { UiSound.select(context); joining = value },
+                            .clickable(enabled = !busy, role = Role.Tab) { UiSound.select(context); joining = value; inputError = null },
                             contentAlignment = Alignment.Center) {
                             Text(label, color = if (joining == value) ChessLobbyColors.accent else ChessLobbyColors.muted,
                                 fontWeight = if (joining == value) FontWeight.Medium else FontWeight.Normal)
@@ -187,17 +192,16 @@ internal fun ColumnScope.OnlineChessLobby(active: Boolean, busy: Boolean, code: 
                 Spacer(Modifier.height(if (compact) 8.dp else 14.dp))
                 Row(Modifier.fillMaxWidth().height(46.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("房间码", style = MaterialTheme.typography.bodySmall, color = ChessLobbyColors.muted)
-                    BasicTextField(enteredCode, { enteredCode = it.uppercase().filter { c ->
-                        c in 'A'..'Z' || c in '0'..'9' }.take(12) },
+                    BasicTextField(enteredCode, { enteredCode = it; inputError = null },
                         Modifier.weight(1f).padding(start = 16.dp).testTag("room-code-input")
                             .semantics { contentDescription = "房间码" }, enabled = !busy, singleLine = true,
                         textStyle = MaterialTheme.typography.titleMedium.copy(color = ChessLobbyColors.ink,
                             letterSpacing = 2.sp, textAlign = TextAlign.Center),
                         cursorBrush = SolidColor(ChessLobbyColors.accent),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii, imeAction = ImeAction.Go),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text, imeAction = ImeAction.Go),
                         keyboardActions = KeyboardActions(onGo = { submit() }), decorationBox = { inner ->
                             Box(contentAlignment = Alignment.Center) {
-                                if (enteredCode.isEmpty()) Text(if (joining) "输入棋友的房间码" else "留空自动生成",
+                                if (enteredCode.text.isEmpty()) Text(if (joining) "输入棋友的房间码" else "留空自动生成",
                                     style = MaterialTheme.typography.bodySmall, color = ChessLobbyColors.muted)
                                 inner()
                             }
@@ -214,7 +218,7 @@ internal fun ColumnScope.OnlineChessLobby(active: Boolean, busy: Boolean, code: 
                     }
                     Text(if (busy) "正在连接" else if (joining) "加入棋桌" else "邀请棋友")
                 }
-                if (error != null || busy) LobbyStatus(error ?: status, error != null)
+                if (inputError != null || error != null || busy) LobbyStatus(inputError ?: error ?: status, inputError != null || error != null)
             }
             if (!compact) Text("棋桌保留 5 分钟", Modifier.padding(top = 12.dp),
                 style = MaterialTheme.typography.bodySmall, color = ChessLobbyColors.muted)

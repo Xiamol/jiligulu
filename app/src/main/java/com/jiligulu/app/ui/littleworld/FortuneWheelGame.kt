@@ -22,9 +22,11 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalContext
 import com.jiligulu.app.R
 import com.jiligulu.app.core.audio.UiSound
+import com.jiligulu.app.ui.components.SpringScrollColumn
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.LocalDate
+import java.time.LocalTime
 import java.time.Instant
 import java.time.ZoneId
 import java.time.Duration
@@ -36,7 +38,8 @@ internal fun ColumnScope.FortuneWheelGame(boardSize: Dp, foreground: Boolean,
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("gulu_daily_luck", Context.MODE_PRIVATE) }
     var date by remember { mutableStateOf(LocalDate.now()) }
-    var luckPage by rememberSaveable { mutableStateOf(false) }
+    var fortunePage by rememberSaveable { mutableStateOf("wheel") }
+    val liuRenStore = remember(context) { XiaoLiuRenStore(context.getSharedPreferences("gulu_xiao_liuren", Context.MODE_PRIVATE)) }
     var sign by rememberSaveable { mutableStateOf(prefs.getString("sign", DailyLuckEngine.signs.first()).orEmpty()) }
     var rewrittenDay by remember { mutableStateOf(prefs.getString("rewritten_day", "").orEmpty()) }
     var signPicker by remember { mutableStateOf(false) }
@@ -69,7 +72,7 @@ internal fun ColumnScope.FortuneWheelGame(boardSize: Dp, foreground: Boolean,
     LaunchedEffect(foreground) {
         if (!foreground && spinning) { angle.stop(); savedAngle = angle.value % 360; spinning = false }
     }
-    if (signPicker) SecretWoodDialog("挑一颗小星座", { signPicker = false }, confirmLabel = "随缘也好", compactWidth = 286.dp) {
+    if (signPicker) FortunePopup("挑一颗小星座", { signPicker = false }, width = 286.dp) {
         DailyLuckEngine.signs.chunked(3).forEach { choices ->
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 choices.forEach { value ->
@@ -85,16 +88,17 @@ internal fun ColumnScope.FortuneWheelGame(boardSize: Dp, foreground: Boolean,
     BoxWithConstraints(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
         val compact = maxHeight < 520.dp
         Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-                listOf(false to "转一转", true to "今日运势").forEach { (page, title) ->
-                    TextButton(onClick = { UiSound.select(context); luckPage = page },
-                        colors = ButtonDefaults.textButtonColors(contentColor = if (luckPage == page) Color(0xFF8B74A4) else Color(0xFF9A929A))) {
-                        Text(title, style = if (luckPage == page) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodyMedium)
+            Row(Modifier.widthIn(max = 320.dp).fillMaxWidth()) {
+                listOf("wheel" to "转一转", "luck" to "今日运势", "liuren" to "小六壬").forEach { (page, title) ->
+                    TextButton(onClick = { UiSound.select(context); fortunePage = page }, modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(horizontal = 4.dp),
+                        colors = ButtonDefaults.textButtonColors(contentColor = if (fortunePage == page) Color(0xFF8B74A4) else Color(0xFF9A929A))) {
+                        Text(title, maxLines = 1, style = if (fortunePage == page) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodyMedium)
                     }
                 }
             }
             Spacer(Modifier.height(if (compact) 12.dp else 24.dp))
-            if (!luckPage) {
+            if (fortunePage == "wheel") {
                 SecretPrizeWheel(angle.value, minOf(boardSize, if (compact) 270.dp else 310.dp), enabled = foreground && !spinning) {
                     if (!spinning && foreground) {
                         UiSound.select(context); spinning = true
@@ -123,6 +127,19 @@ internal fun ColumnScope.FortuneWheelGame(boardSize: Dp, foreground: Boolean,
                         "memories" -> TextButton(onClick = { UiSound.pageTurn(context); onOpenMemories() }) { Text("翻翻纪念册") }
                         "paper" -> TextButton(onClick = onOpenPaper) { Text("听句悄悄话") }
                     }
+                }
+            } else if (fortunePage == "liuren") {
+                var selection by remember(date) { mutableStateOf(liuRenStore.loadForDay(date) {
+                    XiaoLiuRenCalendar.forDate(date, XiaoLiuRen.shichen(LocalTime.now().hour))
+                }) }
+                SpringScrollColumn(Modifier.fillMaxWidth().heightIn(max = (maxHeight - 72.dp).coerceAtLeast(1.dp)),
+                    horizontalAlignment = Alignment.CenterHorizontally, handOffOnRepeat = true) {
+                    XiaoLiuRenPane(selection, rewrittenDay == date.toString(), onSelect = {
+                        liuRenStore.save(date, it); selection = it
+                    }, onRewrite = {
+                        UiSound.pet(context); rewrittenDay = date.toString()
+                        prefs.edit().putString("rewritten_day", rewrittenDay).apply(); stamp = true
+                    })
                 }
             } else {
                 Row(Modifier.widthIn(max = 290.dp).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,

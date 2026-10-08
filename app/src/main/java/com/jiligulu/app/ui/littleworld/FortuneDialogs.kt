@@ -7,11 +7,15 @@ import androidx.compose.material.icons.outlined.Favorite
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.jiligulu.app.ui.components.GuluDialog
 import com.jiligulu.app.ui.components.SpringLazyColumn
 import com.jiligulu.app.ui.components.SpringScrollColumn
 import com.jiligulu.app.ui.components.uiTap
@@ -20,8 +24,7 @@ import com.jiligulu.app.ui.components.uiTap
 @Composable
 internal fun DailyFortuneDialog(note: LittleFortune, saved: Boolean, onDismiss: () -> Unit,
     onBookmark: () -> Unit, onCollection: () -> Unit) {
-    GuluDialog("今日小签", onDismiss, compact = true, compactWidth = 280.dp, dense = true,
-        confirmCue = com.jiligulu.app.core.audio.UiCue.PAPER) {
+    FortunePopup("今日小签", onDismiss) {
         Text("${note.mark}  ${note.title}", style = MaterialTheme.typography.titleSmall,
             color = MaterialTheme.colorScheme.primary, maxLines = 1, overflow = TextOverflow.Ellipsis,
             modifier = Modifier.height(26.dp))
@@ -45,8 +48,7 @@ internal fun DailyFortuneDialog(note: LittleFortune, saved: Boolean, onDismiss: 
 @Composable
 internal fun FortuneCollectionDialog(savedIds: Set<Int>, onDismiss: () -> Unit, onBookmark: (Int) -> Unit) {
     val notes = DailyFortunes.all.filter { it.id in savedIds }
-    GuluDialog("夹在书里的小签", onDismiss, compact = true, compactWidth = 280.dp, dense = true,
-        confirmCue = com.jiligulu.app.core.audio.UiCue.PAPER) {
+    FortunePopup("夹在书里的小签", onDismiss) {
         SpringLazyColumn(Modifier.fillMaxWidth().height(220.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             if (notes.isEmpty()) item {
                 Box(Modifier.fillMaxWidth().height(180.dp), contentAlignment = Alignment.Center) {
@@ -66,6 +68,23 @@ internal fun FortuneCollectionDialog(savedIds: Set<Int>, onDismiss: () -> Unit, 
                 }
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .45f))
             }
+        }
+    }
+}
+
+/** Purposeful collection/selection actions remain; plain closing uses back or the outside. */
+@Composable
+internal fun FortunePopup(title: String, onDismiss: () -> Unit, width: Dp = 280.dp,
+    content: @Composable ColumnScope.() -> Unit) {
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        com.jiligulu.app.ui.capture.DialogGlassBackdrop()
+        SecretWoodSurface(Modifier.widthIn(max = width).fillMaxWidth()
+            .heightIn(max = (LocalConfiguration.current.screenHeightDp * .7f).dp),
+            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 40.dp, bottom = 18.dp)) {
+            Text(title, Modifier.fillMaxWidth().padding(bottom = 10.dp),
+                style = MaterialTheme.typography.titleMedium, color = SecretWoodInk, textAlign = TextAlign.Center)
+            SpringScrollColumn(Modifier.weight(1f, fill = false).fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp), content = content)
         }
     }
 }
