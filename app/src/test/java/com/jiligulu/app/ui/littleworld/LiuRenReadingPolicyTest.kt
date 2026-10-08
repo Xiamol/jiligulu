@@ -149,7 +149,8 @@ class LiuRenReadingPolicyTest {
             if (i == 0) stage.copy(text = stage.text + "阿噜包你通过面试。") else stage }), cast))
         assertNull(accepted(correct.copy(links = correct.links.mapIndexed { i, link ->
             if (i == 0) link.copy(text = link.text + "你必定被录用。") else link }), cast))
-        listOf("但不能保证录用结果。", "阿噜不保证录用结果。", "这不意味着一定会通过面试。", "不一定会成功，录用还要看实际反馈。").forEach { caution ->
+        listOf("但不能保证录用结果。", "阿噜不保证录用结果。", "这不意味着一定会通过面试。", "不一定会成功，录用还要看实际反馈。",
+            "小吉不等于必然录用。", "这不表示百分之百通过面试。").forEach { caution ->
             val cautious = correct.copy(advice = correct.advice + caution)
             assertEquals(caution, cautious, accepted(cautious, cast))
         }

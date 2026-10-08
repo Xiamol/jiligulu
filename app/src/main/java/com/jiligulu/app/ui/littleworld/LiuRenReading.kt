@@ -161,7 +161,7 @@ internal object LiuRenReadingPolicy {
                 .substringAfterLast('。').substringAfterLast('，').substringAfterLast(',').substringAfterLast('；').substringAfterLast('\n')
             val suffix = text.substring(match.range.last + 1).takeWhile { it !in "。；;，,\n" }
             val denied = prefix.endsWith("不") || prefix.endsWith("未") ||
-                Regex("不能|无法|不可|不可能|不意味|不保证|不一定|不必然|不代表|不是|并非|未必|是否|能否").containsMatchIn(prefix)
+                Regex("不能|无法|不可|不可能|不意味|不表示|不等于|不构成|不保证|不一定|不必然|不代表|不是|并非|未必|是否|能否").containsMatchIn(prefix)
             !denied && !Regex("吗|[？?]").containsMatchIn(suffix)
         }
         if (assertion(Regex("保证|必定|一定会|百分之百|100%|必然|包你|肯定会|注定"))) return false
