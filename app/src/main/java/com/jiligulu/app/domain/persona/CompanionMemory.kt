@@ -86,7 +86,7 @@ object CompanionMemoryPolicy {
             }
             val study = Regex("^我(?:现在|目前|今年|还)?(?:是(?:一名|一个|个)?|在读|读|上)([^的]{0,40}(?:学生|研究生|博士生|大学|高中|初中|小学|大专|本科|硕士|博士))$").find(evidence)
             study?.groupValues?.get(1)?.let { updates += AiMemoryUpdate("study", it, evidence) }
-            val work = Regex("^我(?:现在|目前|其实)?(?:的工作是|的职业是|从事|在做)([^的]{1,40})$").find(evidence)
+            val work = Regex("^我(?:现在|目前|其实)?(?:的工作是|的职业是|从事)([^的]{1,40})$").find(evidence)
             work?.groupValues?.get(1)?.let { updates += AiMemoryUpdate("occupation", it, evidence) }
             // A small explicit occupation vocabulary avoids guessing from arbitrary '我是…' sentences.
             Regex("^我(?:现在|目前|其实)?是(?:一名|一个|个)?(老师|教师|护士|医生|程序员|工程师|设计师|厨师|司机|会计|律师|学生)$")

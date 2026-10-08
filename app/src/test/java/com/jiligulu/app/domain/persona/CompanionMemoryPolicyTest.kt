@@ -15,7 +15,7 @@ class CompanionMemoryPolicyTest {
     }
     @Test fun localExtractionAlsoRejectsQuestionsQuotesThirdPartiesAndOcr() {
         listOf("我是女生吗？", "妈妈说：我是护士", "如果我是大学生", "他说：我喜欢草莓",
-            "【图片记账】我是大学生", "截图里写着：我是护士", "我是老师的学生").forEach {
+            "【图片记账】我是大学生", "截图里写着：我是护士", "我是老师的学生", "我在做饭", "我现在在做家务").forEach {
             assertTrue(it, CompanionMemoryPolicy.explicitFacts(it, 1).isEmpty())
         }
     }
