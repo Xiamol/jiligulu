@@ -9,9 +9,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowForward
 import androidx.compose.material.icons.outlined.ContentCopy
@@ -27,7 +24,6 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.layout.boundsInRoot
@@ -38,12 +34,8 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -192,20 +184,12 @@ internal fun ColumnScope.OnlineChessLobby(active: Boolean, busy: Boolean, code: 
                 Spacer(Modifier.height(if (compact) 8.dp else 14.dp))
                 Row(Modifier.fillMaxWidth().height(46.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("房间码", style = MaterialTheme.typography.bodySmall, color = ChessLobbyColors.muted)
-                    BasicTextField(enteredCode, { enteredCode = it; inputError = null },
-                        Modifier.weight(1f).padding(start = 16.dp).testTag("room-code-input")
-                            .semantics { contentDescription = "房间码" }, enabled = !busy, singleLine = true,
-                        textStyle = MaterialTheme.typography.titleMedium.copy(color = ChessLobbyColors.ink,
-                            letterSpacing = 2.sp, textAlign = TextAlign.Center),
-                        cursorBrush = SolidColor(ChessLobbyColors.accent),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text, imeAction = ImeAction.Go),
-                        keyboardActions = KeyboardActions(onGo = { submit() }), decorationBox = { inner ->
-                            Box(contentAlignment = Alignment.Center) {
-                                if (enteredCode.text.isEmpty()) Text(if (joining) "输入棋友的房间码" else "留空自动生成",
-                                    style = MaterialTheme.typography.bodySmall, color = ChessLobbyColors.muted)
-                                inner()
-                            }
-                        })
+                    key(game) {
+                        RoomCodeEditor(initialValue = enteredCode, enabled = !busy,
+                            hint = if (joining) "输入棋友的房间码" else "留空自动生成",
+                            onValueChange = { enteredCode = it; inputError = null }, onSubmit = submit,
+                            modifier = Modifier.weight(1f).fillMaxHeight().padding(start = 16.dp).testTag("room-code-input"))
+                    }
                 }
                 HorizontalDivider(color = ChessLobbyColors.accent.copy(alpha = .55f), thickness = 1.dp)
                 Spacer(Modifier.height(if (compact) 10.dp else 18.dp))
