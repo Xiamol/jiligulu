@@ -218,4 +218,17 @@ class PersonalReplyFlowTest {
         assertEquals(listOf("2月28日"), fixture.prefs.companionMemory.first().facts.map { it.value })
         assertEquals(1, fixture.requests.size)
     }
+
+    @Test fun modelMemoryMetadataCannotBypassTheOtherPersonsBirthdayTopic() = runBlocking {
+        val fixture = Fixture(AiParseResult(reply = "弟弟的生日啊", memoryUpdates = listOf(
+            AiMemoryUpdate("birthday", "2月28日", "生日2月28"))))
+        val now = System.currentTimeMillis()
+        fixture.history.insert(ChatMessageEntity(kind = "USER", content = "我弟弟的资料", createdAt = now - 2000))
+        fixture.history.insert(ChatMessageEntity(kind = "ASSISTANT", content = "你弟弟的生日是几月几日？", createdAt = now - 1000))
+        val vm = fixture.model(); fixture.send(vm, "生日2月28")
+        assertTrue(fixture.prefs.companionMemory.first().facts.isEmpty())
+        assertNull(vm.pending.value)
+        assertTrue(vm.items.value.none { it is ChatItem.DraftCard })
+        assertEquals(1, fixture.requests.size)
+    }
 }

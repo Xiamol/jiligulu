@@ -256,6 +256,9 @@ class AiRepository(
             val parsed = result.getOrNull() ?: return result
             if (memory.enabled) {
                 val facts = CompanionMemoryPolicy.accepted(input, earlierUpdates + parsed.memoryUpdates, requestMillis)
+                    // These terse fields also require the dialogue ownership checked locally.
+                    .filter { fact -> fact.kind !in setOf("birthday", "school", "grade") ||
+                        disclosure.facts.any { it.id == fact.id && it.value == fact.value } }
                     .filterNot { fact -> memory.facts.any { it.id == fact.id && it.value == fact.value } }
                 if (facts.isNotEmpty()) try {
                     kotlinx.coroutines.currentCoroutineContext().ensureActive()
