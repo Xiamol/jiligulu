@@ -72,6 +72,31 @@ class PickerDialogDismissalTest {
         compose.runOnIdle { assertFalse(shown); assertEquals(listOf(LocalDate.of(2028, 2, 29).millis() to false), applied) }
     }
 
+    @Test fun timeWheelStartsAtExactEdgeAndSteppedValuesWithoutAdvancingTwoRows() {
+        data class Case(val hour: Int, val minute: Int, val step: Int)
+        val cases = listOf(Case(0, 0, 1), Case(23, 59, 1), Case(0, 0, 15), Case(23, 45, 15))
+        var current by mutableStateOf(cases.first())
+        var shown by mutableStateOf(true)
+        val confirmed = mutableListOf<Pair<Int, Int>>()
+        compose.setContent { MaterialTheme {
+            if (shown) TimePickerDialog("边界时间${current.step}", current.hour, current.minute,
+                minuteStep = current.step, onConfirm = { hour, minute -> confirmed += hour to minute; shown = false },
+                onDismiss = { shown = false })
+        } }
+        for (case in cases) {
+            compose.runOnIdle { current = case; shown = true }
+            compose.waitForIdle()
+            val dialog = compose.runOnIdle { checkNotNull(ShadowDialog.getShownDialogs().lastOrNull { it.isShowing }) }
+            compose.onNodeWithTag("time-picker-confirm").performClick()
+            compose.waitUntil(8_000) {
+                shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(16))
+                !dialog.isShowing
+            }
+            compose.runOnIdle { assertFalse(shown); assertEquals(case.hour to case.minute, confirmed.last()) }
+        }
+        assertEquals(cases.map { it.hour to it.minute }, confirmed)
+    }
+
     private fun dismissOutside() = dismissPlatformDialog { dialog ->
         val now = SystemClock.uptimeMillis()
         val event = MotionEvent.obtain(now, now, MotionEvent.ACTION_OUTSIDE, -1f, -1f, 0)

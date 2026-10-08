@@ -150,13 +150,14 @@ private fun WheelColumn(
     modifier: Modifier = Modifier
 ) {
     val itemHeight = WHEEL_ITEM_HEIGHT_DP.dp
-    val listState = rememberLazyListState()
     val initialIndex = remember(values) { values.indexOf(selected).coerceAtLeast(0) }
+    val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialIndex)
 
     // 补过空位后，第 i 个真实值位于列表第 (i + WHEEL_PAD) 项。
-    // 直接 scrollToItem 到它，居中由空位保证——不再依赖「尽量往中间推」。
+    // 顶部停在 i，目标真实项 i + WHEEL_PAD 才位于五行视口正中。
+    // 初始位置也直接赋值，避免观察者先把零点回写成草稿。
     LaunchedEffect(initialIndex) {
-        listState.scrollToItem(initialIndex + WHEEL_PAD)
+        listState.scrollToItem(initialIndex)
     }
 
     val snapBehavior = rememberSnapFlingBehavior(listState)

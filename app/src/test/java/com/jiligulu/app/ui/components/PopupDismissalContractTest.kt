@@ -10,6 +10,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
@@ -44,9 +45,11 @@ class PopupDismissalContractTest {
         compose.onNodeWithText("正在处理…").assertIsNotEnabled()
         val protected = outside()
         compose.runOnIdle { assertTrue(shown); assertTrue(protected.isShowing); assertEquals(0, submits); busy = false }
+        awaitDeleteReady()
         val closed = outside()
         awaitDismissed(closed)
         compose.runOnIdle { assertFalse(shown); assertEquals(0, submits); shown = true }
+        awaitDeleteReady()
         compose.onNodeWithText("删除").performClick()
         compose.runOnIdle { assertFalse(shown); assertEquals(1, submits) }
     }
@@ -85,6 +88,18 @@ class PopupDismissalContractTest {
             shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(16))
             !dialog.isShowing
         }
+        compose.waitForIdle()
+    }
+    private fun awaitDeleteReady() {
+        compose.waitUntil(8_000) {
+            shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(16))
+            ShadowDialog.getShownDialogs().any { it.isShowing } && runCatching {
+                compose.onNodeWithText("删除").assertIsDisplayed().assertIsEnabled()
+            }.isSuccess
+        }
+        // The new window must complete a layout/input frame after reopening, not reuse a
+        // semantics action while the previous disabled dialog is being disposed.
+        compose.mainClock.advanceTimeByFrame()
         compose.waitForIdle()
     }
 }
