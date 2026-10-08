@@ -69,7 +69,8 @@ class PersonalReplyFlowTest {
                     .body(body.toResponseBody("application/json".toMediaType())).build()
             }.build()
             ai = AiRepository(context, categories, BillRepository(db.billDao()), prefs, history,
-                CategoryAdminRepository(db), clientFactory = { DeepSeekClient(it, client) })
+                CategoryAdminRepository(db), clientFactory = { DeepSeekClient(it, client) },
+                ledgerLookupRepository = LedgerLookupRepository(db))
         }
         suspend fun ageQuestion() {
             val now = System.currentTimeMillis()
@@ -102,6 +103,19 @@ class PersonalReplyFlowTest {
         assertTrue(fixture.db.billDao().observeAll().first().isEmpty())
         assertEquals(1, fixture.requests.size)
         assertTrue(fixture.requests.single()["messages"]!!.jsonArray.last().jsonObject["content"]!!.jsonPrimitive.content.contains("没有记账请求"))
+    }
+
+    @Test fun aPersonalAgeAnswerCannotTriggerTheModelsLedgerLookupOrASecondPaidRound() = runBlocking {
+        val fixture = Fixture(AiParseResult(ledgerQuery = AiLedgerQuery(), reply = "阿噜查一下账本"),
+            laterResponses = listOf(AiParseResult(reply = "第二轮本不应发生")))
+        fixture.ageQuestion()
+        val vm = fixture.model(); fixture.send(vm, "19")
+        assertEquals(1, fixture.requests.size)
+        assertEquals("19岁", fixture.prefs.companionMemory.first().facts.single { it.kind == "age" }.value)
+        assertNull(fixture.history.latestPending())
+        assertTrue(vm.items.value.none { it is ChatItem.DraftCard || it is ChatItem.CommandCard || it is ChatItem.AppActionCard })
+        assertTrue(fixture.db.billDao().observeAll().first().isEmpty())
+        assertFalse(vm.items.value.filterIsInstance<ChatItem.GuluMsg>().any { "第二轮本不应发生" in it.text || "查一下账本" in it.text })
     }
 
     @Test fun offlinePersonalAnswersStillSaveGenderAgeAndBirthdayWithoutGeneratingABill() = runBlocking {

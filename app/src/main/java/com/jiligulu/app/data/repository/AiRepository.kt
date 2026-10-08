@@ -291,6 +291,15 @@ class AiRepository(
         val stableContext = renderer.renderStableContext()
         val first = client.parseBill(system, contextBlock, history = history, stableContext = stableContext)
         val initial = first.getOrElse { return first }
+        if (disclosure.personalOnly) {
+            // The local personal-intent decision also owns retrieval. A model's mistaken
+            // financial payload cannot read the ledger or create a second paid request.
+            val misplacedAction = initial.bills.isNotEmpty() || initial.pending != null || initial.ledgerQuery != null ||
+                initial.appAction != null || initial.options.isNotEmpty() || !initial.navigate.isNullOrBlank()
+            return complete(Result.success(initial.copy(bills = emptyList(), pending = null, ledgerQuery = null,
+                appAction = null, options = emptyList(), navigate = null,
+                reply = if (misplacedAction) personalReply(disclosure) else initial.reply)))
+        }
         val query = initial.ledgerQuery ?: return complete(first)
         // Only a read is possible here. Do not mix a lookup with speculative writes/settings.
         if (initial.bills.isNotEmpty() || initial.appAction != null) return Result.success(AiParseResult(
