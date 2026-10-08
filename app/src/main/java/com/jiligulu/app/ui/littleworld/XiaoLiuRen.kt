@@ -5,13 +5,8 @@ import java.time.Instant
 import java.time.ZoneId
 import kotlinx.serialization.Serializable
 
-internal enum class LiuRenPalace(val title: String, val mark: String, val message: String) {
-    DA_AN("大安", "🌿", "先把手边的小事安稳做好。阿噜给你留一块慢慢来的地方。"),
-    LIU_LIAN("留连", "🍃", "不急着给答案，再想一小会儿也好。让念头先在窗边坐坐。"),
-    SU_XI("速喜", "🌸", "想到的小快乐，今天就试着留下来吧。阿噜想听你的好消息。"),
-    CHI_KOU("赤口", "☕", "回复之前缓一口气，温柔一点说。话可以慢慢讲，茶也可以慢慢喝。"),
-    XIAO_JI("小吉", "⭐", "把目标缩成一小步，走完就给自己盖个章。小小的好运也值得收藏。"),
-    KONG_WANG("空亡", "☁️", "空白也能装下新的可能。先放下一个纠结，给今天腾一点位置。")
+internal enum class LiuRenPalace(val title: String) {
+    DA_AN("大安"), LIU_LIAN("留连"), SU_XI("速喜"), CHI_KOU("赤口"), XIAO_JI("小吉"), KONG_WANG("空亡")
 }
 
 internal data class XiaoLiuRenInput(val date: LocalDate, val lunarMonth: Int, val lunarDay: Int,

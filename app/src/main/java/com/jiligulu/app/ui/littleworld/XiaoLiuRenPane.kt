@@ -25,7 +25,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.jiligulu.app.R
 import com.jiligulu.app.core.audio.UiSound
 import com.jiligulu.app.ui.components.SpringScrollColumn
-import com.jiligulu.app.ui.theme.GuluBrandFont
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -113,7 +112,7 @@ internal fun XiaoLiuRenPane(store: XiaoLiuRenStore, rewritten: Boolean, onRewrit
             }
             LiuRenStep.RESULT -> session.cast?.let { snapshot ->
                 val response by remember(snapshot) { analysis.state(snapshot) }.collectAsStateWithLifecycle()
-                val result = snapshot.result
+                val palaces = LiuRenReadingPolicy.palaces(snapshot)
                 LiuRenQuestionLine(snapshot.question)
                 Text(if (snapshot.mode == LiuRenMode.NUMBERS) "灵感 ${snapshot.digits} · ${snapshot.counts.joinToString(" / ")}" else {
                     val clock = Instant.ofEpochMilli(snapshot.capturedAtMillis).atZone(ZoneId.of(snapshot.zoneId))
@@ -121,16 +120,35 @@ internal fun XiaoLiuRenPane(store: XiaoLiuRenStore, rewritten: Boolean, onRewrit
                         "${if (snapshot.leapMonth) "闰" else ""}${snapshot.lunarMonth}月${snapshot.lunarDay}日 ${XiaoLiuRen.branches[snapshot.shichen - 1]}时"
                 }, style = MaterialTheme.typography.labelSmall, color = ChessLobbyColors.muted, modifier = Modifier.testTag("liuren-snapshot"))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                    listOf(result.month, result.day, result.hour).forEachIndexed { i, palace ->
-                        if (i > 0) Text("→", color = accent.copy(alpha = .5f))
-                        Text(palace.title, color = accent, style = MaterialTheme.typography.bodyMedium)
+                    palaces.forEachIndexed { i, palace ->
+                        if (i > 0) Text("→", color = accent.copy(alpha = .5f), modifier = Modifier.padding(top = 15.dp))
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(LiuRenReadingPolicy.roles[i], style = MaterialTheme.typography.labelSmall, color = ChessLobbyColors.muted)
+                            Text(palace.title, color = accent, style = MaterialTheme.typography.titleSmall)
+                        }
                     }
                 }
-                Text(result.hour.title, Modifier.testTag("liuren-result"), fontFamily = GuluBrandFont, fontSize = 26.sp, color = accent)
-                if (response.loading) Text("阿噜在想怎么说…", style = MaterialTheme.typography.labelSmall, color = ChessLobbyColors.muted)
-                SpringScrollColumn(Modifier.fillMaxWidth().heightIn(max = 160.dp)) {
-                    Text(response.reply, style = MaterialTheme.typography.bodyMedium, color = SecretWoodInk,
-                        modifier = Modifier.testTag("liuren-analysis"))
+                Text(if (response.remote) "阿噜的问事解读" else if (response.loading) "本地简析 · 阿噜正在解读" else "本地三宫简析",
+                    Modifier.testTag("liuren-result"), style = MaterialTheme.typography.labelMedium, color = accent)
+                SpringScrollColumn(Modifier.fillMaxWidth().heightIn(max = 248.dp).testTag("liuren-analysis")) {
+                    val reading = response.reading ?: LiuRenReadingPolicy.local(snapshot)
+                    Text(reading.summary, style = MaterialTheme.typography.bodyMedium, color = SecretWoodInk,
+                        modifier = Modifier.testTag("liuren-summary"))
+                    reading.stages.forEachIndexed { index, stage ->
+                        Spacer(Modifier.height(12.dp))
+                        Text("${index + 1} · ${LiuRenReadingPolicy.roles[index]} · ${stage.palace}（${LiuRenReadingPolicy.element(palaces[index]).label}）",
+                            style = MaterialTheme.typography.titleSmall, color = accent, modifier = Modifier.testTag("liuren-stage-$index"))
+                        Text(stage.text, style = MaterialTheme.typography.bodyMedium, color = SecretWoodInk)
+                        reading.links.getOrNull(index)?.let { link ->
+                            Spacer(Modifier.height(8.dp))
+                            Text("${link.from} → ${link.to} · ${link.relation.label}", style = MaterialTheme.typography.labelSmall,
+                                color = ChessLobbyColors.muted, modifier = Modifier.testTag("liuren-link-$index"))
+                            Text(link.text, style = MaterialTheme.typography.bodySmall, color = SecretWoodInk)
+                        }
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    Text("这次可以怎么做", style = MaterialTheme.typography.titleSmall, color = accent)
+                    Text(reading.advice, style = MaterialTheme.typography.bodyMedium, color = SecretWoodInk)
                 }
                 if (rewritten) Text("阿噜给这件事盖了大吉章，先添一点勇气 ♡", style = MaterialTheme.typography.labelSmall, color = accent)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
@@ -150,6 +168,8 @@ internal fun XiaoLiuRenPane(store: XiaoLiuRenStore, rewritten: Boolean, onRewrit
         Text("此刻法按农历月、日、十二时辰顺数；报数法用你想到的三个数字。两种都把每段起点算作 1。",
             style = MaterialTheme.typography.bodySmall, color = ChessLobbyColors.muted)
         Text("本版数字 0 按 10 计。闰月沿该月号；子时 23:00–00:59 仍用本次日期。计算时刻会保留，换页不会重新起课。",
+            style = MaterialTheme.typography.bodySmall, color = ChessLobbyColors.muted)
+        Text("本版用起点、过程、趋向串看三宫；相邻五行辅助解释转折。同宫也保留三个阶段，不是所有流派统一的断法。留连与空亡采用土属性，不混入九宫。",
             style = MaterialTheme.typography.bodySmall, color = ChessLobbyColors.muted)
         Text("联网解读使用你选的 AI 服务，只发送这一问和本地盘；已有解读会保存，重看不再请求。",
             style = MaterialTheme.typography.bodySmall, color = ChessLobbyColors.muted)

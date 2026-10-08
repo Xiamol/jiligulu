@@ -20,10 +20,11 @@ internal class XiaoLiuRenStore(private val prefs: SharedPreferences) {
     fun saveSession(value: LiuRenSession) {
         prefs.edit().putString("session_v2", json.encodeToString(LiuRenSession.serializer(), value)).apply()
     }
-    fun analysis(key: String): String? = analysisCache()[key]?.takeIf { it.isNotBlank() && it.length <= 800 }
+    fun analysis(key: String): String? = analysisCache()[key]?.takeIf { it.isNotBlank() && it.length <= LiuRenReadingPolicy.MAX_STORED_CHARS }
     @Synchronized fun saveAnalysis(key: String, reply: String) {
         val values = LinkedHashMap(analysisCache())
-        values.remove(key); values[key] = reply.take(800)
+        require(reply.length <= LiuRenReadingPolicy.MAX_STORED_CHARS)
+        values.remove(key); values[key] = reply
         while (values.size > 16) values.remove(values.keys.first())
         prefs.edit().putString("analysis_v2", json.encodeToString(AnalysisCache.serializer(), AnalysisCache(values))).apply()
     }

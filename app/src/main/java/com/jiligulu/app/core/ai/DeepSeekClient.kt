@@ -211,7 +211,27 @@ class DeepSeekClient private constructor(
         stableContext: String,
         purpose: AiUsagePurpose,
     ): AiParseResult {
-        val requestJson = buildJsonObject {
+        val content = executeContent(textRequest(systemPrompt, userInput, history, stableContext, OUTPUT_CONTRACT), purpose)
+        return try {
+            json.decodeFromString(AiParseResult.serializer(), unwrapJsonFence(content))
+        } catch (parseFailure: Exception) {
+            Log.w(TAG, "回复格式校验失败：${parseFailure.javaClass.simpleName}，长度=${content.length}")
+            throw DeepSeekMalformedResponseException()
+        }
+    }
+
+    /** Structured side features choose one attempt; bad content never silently buys a repair. */
+    suspend fun requestJson(systemPrompt: String, userInput: String,
+        purpose: AiUsagePurpose = usagePurpose): Result<JsonObject> = withContext(Dispatchers.IO) {
+        runCatching {
+            val content = executeContent(textRequest(systemPrompt, userInput, emptyList(), "",
+                "\n请只返回 system 中指定的 JSON 对象。"), purpose)
+            json.parseToJsonElement(unwrapJsonFence(content)) as? JsonObject ?: throw DeepSeekMalformedResponseException()
+        }.onFailure { if (it is CancellationException) throw it }
+    }
+
+    private fun textRequest(systemPrompt: String, userInput: String, history: List<ChatTurn>,
+        stableContext: String, contract: String): String = buildJsonObject {
             put("model", profile.model)
             if (profile.sendsTemperature) put("temperature", 0.7)
             if (profile.disablesDeepSeekThinking) put("thinking", buildJsonObject { put("type", "disabled") })
@@ -236,19 +256,10 @@ class DeepSeekClient private constructor(
                 }
                 addJsonObject {
                     put("role", "user")
-                    put("content", userInput + OUTPUT_CONTRACT)
+                    put("content", userInput + contract)
                 }
             })
         }.toString()
-
-        val content = executeContent(requestJson, purpose)
-        return try {
-            json.decodeFromString(AiParseResult.serializer(), unwrapJsonFence(content))
-        } catch (parseFailure: Exception) {
-            Log.w(TAG, "回复格式校验失败：${parseFailure.javaClass.simpleName}，长度=${content.length}")
-            throw DeepSeekMalformedResponseException()
-        }
-    }
 
     /** The same selected profile, credentials, usage observer and cancellation apply to images. */
     suspend fun recognizeImage(systemPrompt: String, requestContext: String, jpegBase64: String,
