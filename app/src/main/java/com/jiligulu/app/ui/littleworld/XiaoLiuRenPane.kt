@@ -8,6 +8,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.HelpOutline
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -31,7 +32,8 @@ import java.time.format.DateTimeFormatter
 
 /** Ask → choose → a saved reading. Visiting this page never causes a new paid request. */
 @Composable
-internal fun XiaoLiuRenPane(store: XiaoLiuRenStore, rewritten: Boolean, onRewrite: () -> Unit,
+internal fun XiaoLiuRenPane(store: XiaoLiuRenStore,
+    rewriteStateFor: (LiuRenCast) -> LiuRenRewriteState = { LiuRenRewriteState() }, onRewrite: (LiuRenCast) -> Unit = {},
     repository: XiaoLiuRenAnalysisRepository? = null) {
     val context = LocalContext.current
     val analysis = remember(store, repository) { repository ?: XiaoLiuRenAnalysisRepository.forApp(context, store) }
@@ -72,13 +74,17 @@ internal fun XiaoLiuRenPane(store: XiaoLiuRenStore, rewritten: Boolean, onRewrit
         when (session.step) {
             LiuRenStep.QUESTION -> {
                 BasicTextField(question, { question = it; error = null }, Modifier.fillMaxWidth()
-                    .background(accent.copy(alpha = .055f), RoundedCornerShape(16.dp)).padding(12.dp)
+                    .background(accent.copy(alpha = .055f), RoundedCornerShape(16.dp)).padding(12.dp).padding(end = 26.dp)
                     .heightIn(min = 52.dp).testTag("liuren-question"), maxLines = 3,
                     textStyle = MaterialTheme.typography.bodyMedium.copy(color = SecretWoodInk), cursorBrush = SolidColor(accent),
                     decorationBox = { inner -> Box {
                         if (question.text.isBlank()) Text("比如：明天见面，我该怎样准备？",
                             style = MaterialTheme.typography.bodyMedium, color = ChessLobbyColors.muted)
                         inner()
+                        if (question.text.isNotEmpty()) IconButton(onClick = { question = TextFieldValue(); error = null },
+                            modifier = Modifier.align(Alignment.TopEnd).offset(x = 26.dp).size(24.dp).testTag("liuren-question-clear")) {
+                            Icon(Icons.Outlined.Close, "清空问题", Modifier.size(14.dp), tint = ChessLobbyColors.muted)
+                        }
                     } })
                 TextButton(onClick = {
                     val q = question.text.trim()
@@ -104,6 +110,10 @@ internal fun XiaoLiuRenPane(store: XiaoLiuRenStore, rewritten: Boolean, onRewrit
                         cursorBrush = SolidColor(accent), decorationBox = { inner -> Box {
                             if (digits.text.isBlank()) Text("137", color = accent.copy(alpha = .35f), letterSpacing = 9.sp)
                             inner()
+                            if (digits.text.isNotEmpty()) IconButton(onClick = { digits = TextFieldValue(); error = null },
+                                modifier = Modifier.align(Alignment.CenterEnd).offset(x = 24.dp).size(24.dp).testTag("liuren-digits-clear")) {
+                                Icon(Icons.Outlined.Close, "清空报数", Modifier.size(14.dp), tint = ChessLobbyColors.muted)
+                            }
                         } })
                     Text("想到的三个数字 · 本版 0 按 10 计", style = MaterialTheme.typography.labelSmall, color = ChessLobbyColors.muted)
                 } else Text("起课时锁定农历月、日和本地时辰", style = MaterialTheme.typography.labelSmall, color = ChessLobbyColors.muted)
@@ -113,6 +123,11 @@ internal fun XiaoLiuRenPane(store: XiaoLiuRenStore, rewritten: Boolean, onRewrit
             LiuRenStep.RESULT -> session.cast?.let { snapshot ->
                 val response by remember(snapshot) { analysis.state(snapshot) }.collectAsStateWithLifecycle()
                 val palaces = LiuRenReadingPolicy.palaces(snapshot)
+                val rewrite = rewriteStateFor(snapshot)
+                var details by remember(snapshot) { mutableStateOf(false) }
+                var original by remember(snapshot, rewrite.applied) { mutableStateOf(false) }
+                val reading = response.reading ?: LiuRenReadingPolicy.local(snapshot)
+                val receipt = rewrite.receipt.takeUnless { original }
                 LiuRenQuestionLine(snapshot.question)
                 Text(if (snapshot.mode == LiuRenMode.NUMBERS) "灵感 ${snapshot.digits} · ${snapshot.counts.joinToString(" / ")}" else {
                     val clock = Instant.ofEpochMilli(snapshot.capturedAtMillis).atZone(ZoneId.of(snapshot.zoneId))
@@ -128,12 +143,25 @@ internal fun XiaoLiuRenPane(store: XiaoLiuRenStore, rewritten: Boolean, onRewrit
                         }
                     }
                 }
-                Text(if (response.remote) "阿噜的问事解读" else if (response.loading) "本地简析 · 阿噜正在解读" else "本地三宫简析",
+                Text(receipt?.title ?: if (response.remote) "阿噜的回答" else if (response.loading) "本地简答 · 阿噜正在看" else "本地简答",
                     Modifier.testTag("liuren-result"), style = MaterialTheme.typography.labelMedium, color = accent)
-                SpringScrollColumn(Modifier.fillMaxWidth().heightIn(max = 248.dp).testTag("liuren-analysis")) {
-                    val reading = response.reading ?: LiuRenReadingPolicy.local(snapshot)
-                    Text(reading.summary, style = MaterialTheme.typography.bodyMedium, color = SecretWoodInk,
-                        modifier = Modifier.testTag("liuren-summary"))
+                Column(Modifier.fillMaxWidth().testTag("liuren-analysis"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(receipt?.conclusion ?: reading.summary, style = MaterialTheme.typography.titleMedium, color = SecretWoodInk,
+                        modifier = Modifier.testTag(if (receipt == null) "liuren-summary" else "liuren-rewrite-answer"))
+                    if (receipt == null) Text(reading.reason, style = MaterialTheme.typography.bodyMedium, color = SecretWoodInk,
+                        modifier = Modifier.testTag("liuren-reason"))
+                    Text(receipt?.action ?: reading.advice, style = MaterialTheme.typography.bodySmall, color = ChessLobbyColors.muted,
+                        modifier = Modifier.testTag("liuren-advice"))
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                    TextButton(onClick = { UiSound.paper(context); details = !details }, modifier = Modifier.weight(1f).testTag("liuren-details-toggle")) {
+                        Text(if (details) "收起推演" else "看看推演")
+                    }
+                    if (rewrite.applied) TextButton(onClick = { UiSound.paper(context); original = !original }, modifier = Modifier.weight(1f).testTag("liuren-original-toggle")) {
+                        Text(if (original) "看阿噜改命版" else "看原解读")
+                    } else Spacer(Modifier.weight(1f))
+                }
+                if (details) SpringScrollColumn(Modifier.fillMaxWidth().heightIn(max = 180.dp)) {
                     reading.stages.forEachIndexed { index, stage ->
                         Spacer(Modifier.height(12.dp))
                         Text("${index + 1} · ${LiuRenReadingPolicy.roles[index]} · ${stage.palace}（${LiuRenReadingPolicy.element(palaces[index]).label}）",
@@ -146,18 +174,16 @@ internal fun XiaoLiuRenPane(store: XiaoLiuRenStore, rewritten: Boolean, onRewrit
                             Text(link.text, style = MaterialTheme.typography.bodySmall, color = SecretWoodInk)
                         }
                     }
-                    Spacer(Modifier.height(12.dp))
-                    Text("这次可以怎么做", style = MaterialTheme.typography.titleSmall, color = accent)
-                    Text(reading.advice, style = MaterialTheme.typography.bodyMedium, color = SecretWoodInk)
                 }
-                if (rewritten) Text("阿噜给这件事盖了大吉章，先添一点勇气 ♡", style = MaterialTheme.typography.labelSmall, color = accent)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                    if (!response.loading && !response.remote) TextButton(onClick = { UiSound.paper(context); analysis.request(snapshot) }) {
-                        Text(if (response.error == null) "听阿噜解读" else "再听阿噜讲讲")
+                    TextButton(onClick = { UiSound.paper(context); analysis.request(snapshot) },
+                        enabled = !response.loading && !response.remote, modifier = Modifier.weight(1f)) {
+                        Text(if (response.remote) "已听阿噜解读" else if (response.loading) "阿噜正在看" else if (response.error == null) "听阿噜解读" else "再听阿噜讲讲")
                     }
-                    TextButton(onClick = { update(session.copy(step = LiuRenStep.QUESTION, cast = null)) }) { Text("换个问题") }
+                    TextButton(onClick = { update(session.copy(step = LiuRenStep.QUESTION, cast = null)) }, modifier = Modifier.weight(1f)) { Text("换个问题") }
                 }
-                TextButton(onClick = onRewrite, enabled = !rewritten) { Text(if (rewritten) "阿噜盖过章啦 ♡" else "让阿噜逆天改命") }
+                TextButton(onClick = { onRewrite(snapshot) }, enabled = rewrite.available && !rewrite.applied,
+                    modifier = Modifier.testTag("liuren-rewrite")) { Text(rewrite.buttonLabel) }
                 response.error?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = ChessLobbyColors.muted) }
             }
         }
@@ -172,6 +198,8 @@ internal fun XiaoLiuRenPane(store: XiaoLiuRenStore, rewritten: Boolean, onRewrit
         Text("本版用起点、过程、趋向串看三宫；相邻五行辅助解释转折。同宫也保留三个阶段，不是所有流派统一的断法。留连与空亡采用土属性，不混入九宫。",
             style = MaterialTheme.typography.bodySmall, color = ChessLobbyColors.muted)
         Text("联网解读使用你选的 AI 服务，只发送这一问和本地盘；已有解读会保存，重看不再请求。",
+            style = MaterialTheme.typography.bodySmall, color = ChessLobbyColors.muted)
+        Text("改命是阿噜的鼓励彩蛋：盖大吉章，切到这件事的积极结论和行动。原课、原解读仍可看，不重新起课、不额外请求 AI。",
             style = MaterialTheme.typography.bodySmall, color = ChessLobbyColors.muted)
     }
 }

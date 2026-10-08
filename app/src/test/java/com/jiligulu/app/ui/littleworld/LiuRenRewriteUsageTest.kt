@@ -77,12 +77,16 @@ class LiuRenRewriteUsageTest {
         assertFalse(usage.rewriteLiuRen(cast(at = startAt + 2), tomorrow))
     }
 
-    @Test fun legacyDailyUsageDoesNotInventOwnershipAndCorruptReceiptsDoNotRestoreSpentQuota() {
+    @Test fun aLegacyInvisibleStampCanBeExplicitlyRedrawnOnceWithoutInventingAnOwner() {
         val prefs = preferences()
         prefs.edit().putString(FortuneRewriteKind.LIU_REN.preferenceKey, today.toString())
             .putString(FortuneRewriteUsage.LIU_REN_RECEIPTS_KEY, "not JSON").apply()
         val usage = FortuneRewriteUsage(prefs)
-        assertEquals(LiuRenRewriteState(receipt = null, available = false), usage.liuRenState(cast(), today))
+        assertEquals(LiuRenRewriteState(receipt = null, available = true), usage.liuRenState(cast(), today))
+        assertTrue(usage.rewriteLiuRen(cast(), today))
+        assertTrue(usage.liuRenState(cast(), today).applied)
+        assertFalse(usage.liuRenState(cast("另一个问题"), today).available)
+        prefs.edit().putString(FortuneRewriteUsage.LIU_REN_RECEIPTS_KEY, "not JSON").apply()
         assertFalse(usage.rewriteLiuRen(cast(), today))
         assertTrue(usage.liuRenState(cast(), today.plusDays(1)).available)
     }

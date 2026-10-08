@@ -3,6 +3,8 @@ package com.jiligulu.app.ui.littleworld
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 import java.text.Normalizer
 
 internal enum class LiuRenElement(val label: String) { WOOD("木"), FIRE("火"), EARTH("土"), METAL("金"), WATER("水") }
@@ -14,9 +16,11 @@ internal enum class LiuRenElement(val label: String) { WOOD("木"), FIRE("火"),
 @Serializable internal data class LiuRenReadingLink(val from: String, val to: String, val text: String,
     val relation: LiuRenRelation)
 @Serializable internal data class LiuRenReading(val question: String, val summary: String,
-    val stages: List<LiuRenReadingStage>, val links: List<LiuRenReadingLink>, val advice: String) {
+    val stages: List<LiuRenReadingStage>, val links: List<LiuRenReadingLink>, val advice: String,
+    val reason: String = "") {
     fun plainText(): String = buildString {
         appendLine(summary)
+        appendLine(reason)
         stages.forEachIndexed { index, stage ->
             appendLine("${LiuRenReadingPolicy.roles[index]} · ${stage.palace}：${stage.text}")
             links.getOrNull(index)?.let { appendLine("${it.from}→${it.to}：${it.text}") }
@@ -27,7 +31,7 @@ internal enum class LiuRenElement(val label: String) { WOOD("木"), FIRE("火"),
 
 /** A declared six-palace interpretation convention, not a claim of a universal school. */
 internal object LiuRenReadingPolicy {
-    const val VERSION = "six-palace-question-chain-v4"
+    const val VERSION = "six-palace-answer-first-v5"
     const val MAX_STORED_CHARS = 2400
     val roles = listOf("起点", "过程", "趋向")
     private val json = Json { ignoreUnknownKeys = true }
@@ -64,24 +68,6 @@ internal object LiuRenReadingPolicy {
         LiuRenPalace.SU_XI -> "留意消息和推进"; LiuRenPalace.CHI_KOU -> "留意沟通分歧"
         LiuRenPalace.XIAO_JI -> "争取一小步落实"; LiuRenPalace.KONG_WANG -> "还要核实，不能当作已落实"
     }
-    private fun questionOutlook(question: String, topic: Topic, last: LiuRenPalace): String {
-        val subject = when (topic.name) {
-            "这次面试" -> if (Regex("怎么|怎样|如何|准备").containsMatchIn(question)) "面试准备" else "录用与下一步机会"
-            "这次考试" -> "考试发挥与结果"; "寻找这件失物" -> "能否找回这件失物"
-            "这段相处" -> "这段关系的推进"; "这次见面安排" -> "这次邀约能否落实"
-            "这次出行" -> "行程能否落实"; "这件工作安排" -> "这件工作的具体进展"
-            else -> "你最想确认的结果"
-        }
-        val outlook = when (last) {
-            LiuRenPalace.DA_AN -> "更偏向稳住已有条件，不宜把稳定当成突然的大突破"
-            LiuRenPalace.LIU_LIAN -> "还要留意等待和反复，别太早把事情当成已经定下来"
-            LiuRenPalace.SU_XI -> "重点看新消息和短期推进，再核实它能不能落实"
-            LiuRenPalace.CHI_KOU -> "最后仍要留意沟通与细节分歧，不宜急着作定论"
-            LiuRenPalace.XIAO_JI -> "可以争取一次具体的小推进，但小进展不等于全部目标达成"
-            LiuRenPalace.KONG_WANG -> "目前不宜认定已落实，先核实信息、准备备选"
-        }
-        return "问$subject，$outlook。"
-    }
     internal data class Topic(val name: String, val focuses: List<String>, val anchors: List<String>, val action: String)
     fun sensitive(question: String) = listOf("手术", "诊断", "癌", "吃药", "疾病", "病情", "治愈", "怀孕", "检查结果",
         "投资", "股票", "彩票", "官司", "诉讼", "判刑").any(question::contains)
@@ -94,11 +80,16 @@ internal object LiuRenReadingPolicy {
                 listOf("考试", "复习", "成绩", "考场", "题", "发挥"), "优先补一处复习薄弱点，确认考试时间和路线；成绩出来后再决定下一步。")
             found("丢", "不见", "找回", "找不到", "失物") -> Topic("寻找这件失物", listOf("已有线索", "查找与回溯", "新线索是否落实"),
                 listOf("失物", "寻找", "线索", "查找", "找回", "找"), "从最后确认使用的位置倒着回想，再问相关场所的失物招领；没有线索时别凭签象猜方位。")
-            found("复合", "分手", "恋爱", "表白", "感情", "喜欢我", "对象") -> Topic("这段相处", listOf("你们的交流基础", "表达与回应", "是否有明确互动"),
-                listOf("相处", "关系", "交流", "表达", "回应", "沟通"), "用一次清楚而不施压的沟通表达自己的想法，观察真实回应，保留彼此的边界。")
+            found("复合", "分手") -> Topic("恢复这段感情", listOf("分开后的联系", "旧矛盾与回应", "是否重新确认关系"),
+                listOf("复合", "恢复", "重新", "前任", "关系", "联系"), "先想清楚导致分开的原因是否有改变，再尝试一次不施压的联系；看真实回应，别只靠猜测。")
+            found("脱单", "单身", "桃花", "女朋友", "男朋友", "恋爱", "表白", "感情", "喜欢我", "对象", "相亲") -> Topic("恋爱与桃花", listOf("结识新人的机会", "相识与交往", "能否确定恋爱关系"),
+                listOf("恋爱", "桃花", "脱单", "相识", "对象", "感情", "交往", "心动", "伴侣", "谈成", "确定关系", "在一起"),
+                "多去能持续认识人的活动，聊得来后主动表达兴趣；留意双方是否愿意继续接触，别把一次好感当成恋爱已定。")
+            found("旅行", "旅游", "出行", "出游", "航班", "车票", "高铁", "公交", "换乘", "准时", "赶上") -> Topic("这次出行", listOf("出行准备", "路线与临时变化", "行程是否落实"),
+                listOf("出行", "行程", "路线", "时间", "换乘", "赶上", "出游", "交通"), "核对车次、换乘时间和备选交通，把最后一段的余量留足；票还没买就先确认能否买到。")
             found("见面", "约会", "赴约", "聚会", "朋友") -> Topic("这次见面安排", listOf("邀约与时间安排", "商量地点和时刻", "约定是否落实"),
-                listOf("见面", "邀约", "安排", "时间", "地点", "约定"), "把具体日期、地点和备选时段一次说清，再请对方确认；没有确认就保留备选安排。")
-            found("旅行", "旅游", "出门", "出行", "出游", "航班", "车票") -> Topic("这次出行", listOf("出行准备", "路线与临时变化", "行程是否落实"),
+                listOf("见面", "邀约", "安排", "时间", "地点", "约定", "约成"), "把具体日期、地点和备选时段一次说清，再请对方确认；没有确认就保留备选安排。")
+            found("出门", "路上") -> Topic("这次出行", listOf("出行准备", "路线与临时变化", "行程是否落实"),
                 listOf("出行", "行程", "路线", "时间", "准备", "车票"), "检查票证、天气和路线，给换乘留出余量，再准备一个能执行的备选方案。")
             found("工作", "求职", "上班", "项目", "合作", "入职") -> Topic("这件工作安排", listOf("任务与准备", "沟通和执行", "是否有具体进展"),
                 listOf("工作", "任务", "项目", "合作", "进展", "执行"), "先确认要求、责任和截止时间，推进一项能交付的小成果，再核实对方反馈。")
@@ -136,9 +127,10 @@ internal object LiuRenReadingPolicy {
                 LiuRenRelation.CONTROLLED_BY -> "后宫克前宫，后段会反过来约束前段；不能只因开头顺就认定最后稳。"
             }, relation(from, to)) }
         return LiuRenReading(question,
-            if (caution) "你问的是“${question.take(100)}”。三宫可以解释民俗象意，但不能判断这类医疗、财务或法律结果；阿噜先陪你整理可核实的条件。"
-            else "关于“${question.take(60)}”：起头${movement(palaces[0])}，中途${movement(palaces[1])}，后段${movement(palaces[2])}。" + questionOutlook(question, topic, palaces[2]),
-            stages, links, if (caution) "把担心、已有事实和待确认的问题分开，向有资质的专业人士核实；小盘不替你作现实判断。" else topic.action)
+            if (caution) "这类医疗、财务或法律结果不能用这课判断，阿噜陪你整理需要核实的事情。"
+            else LiuRenConciseAnswer.answer(cast, topic),
+            stages, links, if (caution) "把已有事实和待确认的问题分开，向有资质的专业人士核实。" else topic.action,
+            if (caution) "三宫描述的是民俗象意，不能代替这类事情的实际判断。" else LiuRenConciseAnswer.reason(cast, topic))
     }
     fun encode(reading: LiuRenReading) = json.encodeToString(LiuRenReading.serializer(), reading)
     fun decode(raw: String, cast: LiuRenCast): LiuRenReading? = runCatching {
@@ -146,14 +138,25 @@ internal object LiuRenReadingPolicy {
         json.decodeFromString(LiuRenReading.serializer(), raw).takeIf { valid(it, cast) }
     }.getOrNull()
     fun decode(data: JsonObject, cast: LiuRenCast): LiuRenReading? = decode(data.toString(), cast)
+    /** The model writes only the useful answer. Computed palaces/links never come from it. */
+    fun decodeRemote(data: JsonObject, cast: LiuRenCast): LiuRenReading? = runCatching {
+        fun field(name: String): String {
+            val value = data[name]?.jsonPrimitive ?: return ""
+            return if (value.isString) value.contentOrNull?.trim().orEmpty() else ""
+        }
+        if (data.toString().length > 1800) return null
+        val reading = local(cast).copy(summary = field("answer"), reason = field("reason"), advice = field("advice"))
+        reading.takeIf { valid(it, cast) }
+    }.getOrNull()
     private fun valid(reading: LiuRenReading, cast: LiuRenCast): Boolean {
-        if (canonicalQuestion(reading.question) != canonicalQuestion(cast.question) || reading.summary.length !in 20..240 || reading.advice.length !in 12..180 ||
+        if (canonicalQuestion(reading.question) != canonicalQuestion(cast.question) || reading.summary.length !in 6..140 ||
+            reading.reason.length !in 10..180 || reading.advice.length !in 6..180 ||
             reading.stages.size != 3 || reading.links.size != 2) return false
         val palaces = palaces(cast)
         if (reading.stages.withIndex().any { (index, stage) -> stage.palace != palaces[index].title || stage.text.length !in 20..160 }) return false
         if (reading.links.withIndex().any { (index, link) -> link.from != palaces[index].title || link.to != palaces[index + 1].title ||
                 link.relation != relation(palaces[index], palaces[index + 1]) || link.text.length !in 20..180 }) return false
-        val text = listOf(reading.summary, reading.advice).plus(reading.stages.map { it.text }).plus(reading.links.map { it.text })
+        val text = listOf(reading.summary, reading.reason, reading.advice).plus(reading.stages.map { it.text }).plus(reading.links.map { it.text })
             .joinToString("\n").replace(cast.question, "").replace(cast.question.take(100), "")
             .replace(cast.question.take(60), "").replace(cast.question.take(50), "").replace(cast.question.take(45), "")
         fun assertion(pattern: Regex): Boolean = pattern.findAll(text).any { match ->
@@ -166,8 +169,13 @@ internal object LiuRenReadingPolicy {
         }
         if (assertion(Regex("保证|必定|一定会|百分之百|100%|必然|包你|肯定会|注定"))) return false
         val anchors = targetKeywords(cast.question)
-        if (!sensitive(cast.question) && (anchors.isEmpty() || reading.stages.any { stage -> anchors.none(stage.text::contains) } ||
-                anchors.none(reading.summary::contains) || anchors.none(reading.advice::contains))) return false
+        if (!sensitive(cast.question) && (anchors.isEmpty() || anchors.none((reading.summary + reading.reason)::contains))) return false
+        if (Regex("保持微笑|温柔相待|让念头|照顾好自己").containsMatchIn(reading.summary) && anchors.none(reading.summary::contains)) return false
+        // Extra palace names in a short reason would describe a different course.
+        if (LiuRenPalace.entries.any { it !in palaces && reading.reason.contains(it.title) }) return false
+        if (!sensitive(cast.question) && !LiuRenConciseAnswer.explainsChain(reading.reason, palaces)) return false
+        if (topic(cast.question).name == "寻找这件失物" &&
+            Regex("最后.{0,12}(?:出现|找到)|(?:两|三|四|五|多)遍(?:以上|才能)|不是彻底丢失|说明你.{0,8}找过").containsMatchIn(reading.summary + reading.reason)) return false
         if (sensitive(cast.question) && (!Regex("不能|无法|不可|不判断|不预测").containsMatchIn(reading.summary) ||
                 assertion(Regex("会痊愈|能治愈|不用就医|能盈利|会涨|会跌|会胜诉|会败诉")))) return false
         return encode(reading).length <= MAX_STORED_CHARS
