@@ -27,9 +27,32 @@ data class DraftUi(
     val timeNeedsReview: Boolean = false,
     val timeHint: String = "未提及时间，确认入账时记录此刻"
 ) {
+    /** Receipt metadata remains stored, while only a human note or actionable warning is shown. */
+    val displayNote: String get() = draftNoteForDisplay(note)
     /** A visible suggested timestamp can be accepted by confirming the whole draft. */
     val requiresTimeInput: Boolean get() = timeNeedsReview && timestamp == null
     val isValid: Boolean get() = Formatters.yuanTextToFen(amountText) != null && !requiresTimeInput
+}
+
+internal fun draftNoteForDisplay(note: String): String {
+    if (!note.trimStart().startsWith("图片状态：")) return note
+    val completed = setOf("支付成功", "已支付", "已完成", "交易成功", "转账成功", "已收款", "确认收款", "收款成功", "已存入零钱", "状态待确认", "请核对", "可修改")
+    return note.trimStart().removePrefix("图片状态：").split('，', ',', '；', ';', '\n').map(String::trim).mapNotNull { part ->
+        when {
+            part.isBlank() || part in completed || part.startsWith("支付方式：") ||
+                part.startsWith("图中无相关账单时间") || part.startsWith("暂按系统时间") ||
+                part == "日期或时间需核对" -> null
+            part.startsWith("金额来自关联聊天推定") -> "核对金额"
+            else -> part.removePrefix("备注：")
+        }
+    }.distinct().joinToString(" · ")
+}
+
+internal fun chatMessageDisplayText(text: String): String {
+    val codec = com.jiligulu.app.core.ai.ImageReceiptCodec
+    if (!codec.isImageText(text)) return text
+    val rows = text.trim().removePrefix(codec.HEADER).lines().count { it.isNotBlank() && !it.startsWith("备注：") }
+    return if (rows > 0) "账单图片 · $rows 笔" else "账单图片"
 }
 
 object BillTypeSerializer : KSerializer<BillType> {

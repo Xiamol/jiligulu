@@ -1,6 +1,8 @@
 package com.jiligulu.app.ui.add
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -11,56 +13,84 @@ import androidx.compose.ui.unit.dp
 import com.jiligulu.app.core.util.Formatters
 import com.jiligulu.app.ui.components.GuluDialog
 import com.jiligulu.app.ui.components.CategoryBadge
+import com.jiligulu.app.ui.components.SpringLazyColumn
+import com.jiligulu.app.domain.category.CategorySuggestions
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 
 /** A bounded list with a fixed confirmation footer; no bill is changed while suggestions arrive. */
 @Composable
 internal fun PendingReclassificationDialog(
-    state: PendingReclassificationState, onDismiss: () -> Unit, onConfirm: (Set<Long>) -> Unit
+    state: PendingReclassificationState, onDismiss: () -> Unit, onConfirm: (Set<Long>) -> Unit,
+    onRetry: () -> Unit = {}
 ) {
     var selected by remember { mutableStateOf(emptySet<Long>()) }
     var seen by remember { mutableStateOf(emptySet<Long>()) }
-    LaunchedEffect(state.proposals) {
-        val current = state.proposals.map { it.original.id }.toSet()
+    var expandedId by remember { mutableStateOf<Long?>(null) }
+    val bills = state.bills.ifEmpty { state.proposals.map { it.original } }
+    val proposals = remember(state.proposals) { state.proposals.associateBy { it.original.id } }
+    val ready = selected.intersect(proposals.keys)
+    val newNames = state.proposals.filter { it.original.id in ready && it.targetCategoryId == null }
+        .map { it.suggestion.category }.distinctBy(CategorySuggestions::key)
+    LaunchedEffect(bills) {
+        val current = bills.map { it.id }.toSet()
         selected = (selected + (current - seen)).intersect(current)
         seen = current
     }
     GuluDialog("把待定收拾好", onDismiss = onDismiss, compact = true, dense = true, busy = state.saving,
-        confirmLabel = if (state.result != null) "收好啦" else "重新分类 (${selected.size})",
+        confirmLabel = if (state.result != null) "收好啦" else "确认 ${ready.size} 笔",
         dismissLabel = if (state.result == null) "先等等" else null,
-        confirmEnabled = state.result != null || (!state.loading && selected.isNotEmpty()),
-        onConfirm = { if (state.result != null) onDismiss() else onConfirm(selected) }) {
+        confirmEnabled = state.result != null || ready.isNotEmpty(),
+        onConfirm = { if (state.result != null) onDismiss() else onConfirm(ready) }) {
         state.result?.let { Text(it, style = MaterialTheme.typography.bodyMedium) } ?: run {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (state.loading) CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 1.5.dp)
-                Text(if (state.loading) "分类中 ${state.processed}/${state.total}"
-                    else "${state.total} 笔待定 · ${state.proposals.size} 笔有了建议",
-                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(if (state.loading) "正在建议 ${state.processed}/${state.total}"
+                    else "${state.total} 笔待定 · 可分类 ${ready.size} 笔",
+                    modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                TextButton(onClick = onRetry, enabled = !state.loading && !state.saving,
+                    contentPadding = PaddingValues(horizontal = 3.dp), modifier = Modifier.height(30.dp)) { Text("再建议") }
             }
-            state.proposals.forEach { item ->
-                Row(Modifier.fillMaxWidth().testTag("pending-reclass-${item.original.id}"),
+            if (bills.isNotEmpty()) SpringLazyColumn(Modifier.fillMaxWidth()
+                .height(minOf(248, bills.size * 62).dp).testTag("pending-bills-preview"), handOffOnRepeat = true) {
+            items(bills, key = { it.id }) { bill ->
+                val item = proposals[bill.id]
+                Row(Modifier.fillMaxWidth().padding(vertical = 5.dp).testTag("pending-reclass-${bill.id}"),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                    Checkbox(item.original.id in selected, onCheckedChange = { checked ->
-                        selected = if (checked) selected + item.original.id else selected - item.original.id
-                    }, enabled = !state.loading && !state.saving, modifier = Modifier.size(30.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(item.original.detail.ifBlank { "这笔账" }, style = MaterialTheme.typography.bodyMedium,
-                            maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text((if (item.original.type.name == "INCOME") "+" else "−") + "¥" +
-                            Formatters.fenToYuanText(item.original.amountFen), style = MaterialTheme.typography.labelSmall,
+                    Checkbox(bill.id in selected, onCheckedChange = { checked ->
+                        selected = if (checked) selected + bill.id else selected - bill.id
+                    }, enabled = !state.saving, modifier = Modifier.size(30.dp).testTag("pending-select-${bill.id}"))
+                    Column(Modifier.weight(1f).clickable { expandedId = if (expandedId == bill.id) null else bill.id }) {
+                        Text(bill.detail.ifBlank { "这笔账" }, style = MaterialTheme.typography.bodyMedium,
+                            maxLines = if (expandedId == bill.id) 4 else 1, overflow = TextOverflow.Ellipsis)
+                        Text((if (bill.type.name == "INCOME") "+" else "−") + "¥" +
+                            Formatters.fenToYuanText(bill.amountFen) + " · " + Instant.ofEpochMilli(bill.timestamp)
+                                .atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("M/d HH:mm")),
+                            maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        if (expandedId == bill.id && bill.note.isNotBlank()) Text(bill.note,
+                            maxLines = 3, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    CategoryBadge(item.suggestion.category, item.suggestion.iconEmoji, size = 24.dp)
-                    Text(item.suggestion.category, style = MaterialTheme.typography.labelMedium,
-                        modifier = Modifier.widthIn(max = 78.dp), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    if (item != null) CategoryBadge(item.suggestion.category, item.suggestion.iconEmoji, size = 22.dp)
+                    Text(item?.suggestion?.category?.let { it + if (item?.targetCategoryId == null) "·新" else "" } ?: "待定",
+                        style = MaterialTheme.typography.labelMedium, modifier = Modifier.widthIn(max = 78.dp),
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
                         color = MaterialTheme.colorScheme.primary)
                 }
             }
+            }
+            if (newNames.isNotEmpty()) Text("将创建：${newNames.joinToString("、")}", maxLines = 2,
+                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.testTag("pending-new-categories"))
             if (!state.loading) Text(when {
                 state.total == 0 -> "待定里没有账单，已经整整齐齐啦 ♡"
-                state.proposals.isEmpty() -> "还没有确定的分类，账单会继续留在待定。"
-                state.total > state.proposals.size -> "${state.total - state.proposals.size} 笔还不确定，先留在待定。"
-                else -> "确认只更换分类，金额、日期和夹的照片都保留。"
+                state.proposals.isEmpty() -> "还没匹配的账单继续留在待定"
+                state.total > state.proposals.size -> "${state.total - state.proposals.size} 笔未匹配，先留在待定"
+                else -> "选好后确认，金额和日期保留"
             }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             state.error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
         }

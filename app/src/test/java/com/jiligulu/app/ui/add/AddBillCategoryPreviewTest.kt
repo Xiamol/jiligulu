@@ -75,14 +75,14 @@ class AddBillCategoryPreviewTest {
     @Test fun newCategoryIsPreviewedWithoutWritingAndRepeatedTextReusesIt() = runTest {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
         var calls = 0
-        val vm = model { _, _, _ -> calls++; AiBillDraft(category = "摄影", isNewCategory = true) }
+        val vm = model { _, _, _ -> calls++; AiBillDraft(category = "陶艺", isNewCategory = true) }
         backgroundScope.launch { vm.categories.collect {} }; runCurrent()
-        vm.prepareCategory("镜头清洁", "", BillType.EXPENSE, true)
+        vm.prepareCategory("陶瓷釉料", "", BillType.EXPENSE, true)
         advanceTimeBy(650); runCurrent()
-        assertEquals("摄影", vm.categoryPreview.value.name)
+        assertEquals("陶艺", vm.categoryPreview.value.name)
         assertNull(vm.categoryPreview.value.categoryId)
         assertNotNull(vm.categoryPreview.value.proposal)
-        vm.prepareCategory("镜头清洁", "", BillType.EXPENSE, true)
+        vm.prepareCategory("陶瓷釉料", "", BillType.EXPENSE, true)
         advanceTimeBy(1000); runCurrent()
         assertEquals(1, calls)
         vm.cancelCategoryPreview()

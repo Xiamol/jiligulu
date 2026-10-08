@@ -24,6 +24,8 @@ import com.jiligulu.app.core.ai.DeepSeekClient
 import com.jiligulu.app.core.ai.ManualCategoryClassifier
 import com.jiligulu.app.domain.category.CategoryEngine
 import com.jiligulu.app.domain.category.CategoryDefaults
+import com.jiligulu.app.domain.category.CategorySuggestions
+import com.jiligulu.app.core.ai.AiParseResult
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.currentCoroutineContext
@@ -63,6 +65,7 @@ data class ManualPhotoState(val path: String = "", val importing: Boolean = fals
 data class PendingReclassificationState(
     val open: Boolean = false, val loading: Boolean = false, val saving: Boolean = false,
     val total: Int = 0, val processed: Int = 0, val proposals: List<CategoryReclassification> = emptyList(),
+    val bills: List<BillEntity> = emptyList(),
     val error: String? = null, val result: String? = null
 )
 
@@ -159,8 +162,8 @@ class AddBillViewModel(
         val text = listOf(detail.trim(), note.trim()).filter { it.isNotEmpty() }.joinToString(" · ")
         val inputKey = manualCategoryInputKey(detail, note, type)
         val catalog = categories.value
-        val local = CategoryEngine.suggest(text, catalog)?.takeUnless { CategoryDefaults.isVacuum(it) }
-        if (local != null) { _categoryPreview.value = ManualCategoryPreview(inputKey = inputKey, name = local.name, categoryId = local.id); return }
+        val local = PendingCategoryClassifier.localSuggestion(text, type, catalog)
+        if (local != null) { publishCategory(local, catalog, inputKey); return }
         val key = inputKey + "|" + catalog.hashCode()
         previewCache[key]?.let { publishCategory(it, catalog, inputKey); return }
         _categoryPreview.value = ManualCategoryPreview(inputKey = inputKey, resolving = true)
@@ -181,9 +184,14 @@ class AddBillViewModel(
     }
 
     private fun publishCategory(proposed: AiBillDraft, catalog: List<CategoryEntity>, inputKey: String) {
-        val existing = catalog.firstOrNull { it.name.equals(proposed.category, true) }
-        _categoryPreview.value = ManualCategoryPreview(inputKey = inputKey, name = existing?.name ?: proposed.category,
-            categoryId = existing?.id, proposal = proposed.takeIf { existing == null })
+        val checked = ManualCategoryClassifier.suggestion(AiParseResult(bills = listOf(proposed.copy(targetId = 1))), catalog)
+        if (checked == null) {
+            _categoryPreview.value = ManualCategoryPreview(inputKey = inputKey, error = "还没找到合适分类，选一个也可以")
+            return
+        }
+        val existing = CategorySuggestions.existing(checked.category, catalog)
+        _categoryPreview.value = ManualCategoryPreview(inputKey = inputKey, name = checked.category,
+            categoryId = existing?.id, proposal = checked.takeIf { existing == null })
     }
 
     /**
@@ -206,9 +214,11 @@ class AddBillViewModel(
     private val _reclassification = MutableStateFlow(PendingReclassificationState())
     val reclassification = _reclassification.asStateFlow()
     private var reclassifyJob: Job? = null
+    private var reclassificationEpoch = 0L
 
     fun closeReclassification() {
         if (_reclassification.value.saving) return
+        reclassificationEpoch++
         reclassifyJob?.cancel()
         _reclassification.value = PendingReclassificationState()
     }
@@ -216,47 +226,62 @@ class AddBillViewModel(
     fun preparePendingReclassification() {
         if (_reclassification.value.loading || _reclassification.value.saving) return
         reclassifyJob?.cancel()
-        _reclassification.value = PendingReclassificationState(open = true, loading = true)
+        val epoch = ++reclassificationEpoch
+        _reclassification.value = _reclassification.value.copy(open = true, loading = true,
+            processed = 0, error = null, result = null)
         reclassifyJob = viewModelScope.launch {
             try {
                 val pending = categoryAdminRepository.pendingBills()
                 val catalog = categoryRepository.getAll()
-                _reclassification.value = _reclassification.value.copy(total = pending.size)
-                val suggested = mutableListOf<CategoryReclassification>()
-                // Semantic batches, including familiar words: “苹果耳机” must not be preempted by “水果”.
+                currentCoroutineContext().ensureActive()
+                if (epoch != reclassificationEpoch) return@launch
+                val suggested = linkedMapOf<Long, CategoryReclassification>()
+                pending.forEach { bill -> PendingCategoryClassifier.localSuggestion(bill, catalog)?.let { draft ->
+                    suggested[bill.id] = CategoryReclassification(bill, draft, CategorySuggestions.existing(draft.category, catalog)?.id)
+                } }
+                // All bills are visible immediately, including those without a confident suggestion.
+                _reclassification.value = _reclassification.value.copy(total = pending.size, bills = pending,
+                    proposals = suggested.values.toList())
+                // Remote semantics may refine a local match or suggest an appropriate new name.
                 pending.chunked(PendingCategoryClassifier.BATCH_SIZE).forEach { batch ->
                     val remote = remotePendingCategories(batch, catalog)
                     currentCoroutineContext().ensureActive()
-                    batch.forEach { bill -> remote[bill.id]?.let { draft ->
-                        val existing = catalog.firstOrNull { it.name.equals(draft.category, true) }
+                    if (epoch != reclassificationEpoch) return@launch
+                    batch.forEach { bill -> remote[bill.id]?.let { raw ->
+                        val draft = ManualCategoryClassifier.suggestion(AiParseResult(bills = listOf(raw.copy(targetId = 1))), catalog)
+                            ?: return@let
+                        val existing = CategorySuggestions.existing(draft.category, catalog)
                         if (draft.category != CategoryDefaults.VACUUM_NAME && (existing == null || existing.deletable))
-                            suggested += CategoryReclassification(bill, draft, existing?.id)
+                            suggested[bill.id] = CategoryReclassification(bill, draft.copy(targetId = bill.id), existing?.id)
                     } }
-                    _reclassification.value = _reclassification.value.copy(proposals = suggested.toList(),
+                    _reclassification.value = _reclassification.value.copy(proposals = suggested.values.toList(),
                         processed = _reclassification.value.processed + batch.size)
                 }
                 _reclassification.value = _reclassification.value.copy(loading = false)
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) {
+                if (epoch != reclassificationEpoch) return@launch
                 _reclassification.value = _reclassification.value.copy(loading = false,
-                    error = "联网分类没能完成，已找到的建议仍可确认，其余留在待定")
+                    error = "联网建议暂未完成，可确认已有建议")
             }
         }
     }
 
     fun confirmPendingReclassification(ids: Set<Long>) {
         val state = _reclassification.value
-        if (state.loading || state.saving || !state.open) return
+        if (state.saving || !state.open) return
         val chosen = state.proposals.filter { it.original.id in ids }
         if (chosen.isEmpty()) return
-        _reclassification.value = state.copy(saving = true, error = null)
+        reclassifyJob?.cancel()
+        reclassificationEpoch++
+        _reclassification.value = state.copy(loading = false, saving = true, error = null)
         reclassifyJob = viewModelScope.launch {
             try {
                 val result = categoryAdminRepository.applyReclassification(chosen)
                 _reclassification.value = PendingReclassificationState(open = true,
                     result = "${result.moved} 笔重新分好类啦" + if (result.skipped > 0) "，${result.skipped} 笔已变化，先保留原样" else " ♡")
             } catch (cancelled: CancellationException) { throw cancelled }
-            catch (_: Exception) { _reclassification.value = state.copy(error = "没有改动账本，请再试一次") }
+            catch (_: Exception) { _reclassification.value = state.copy(loading = false, error = "没有改动账本，请再试一次") }
         }
     }
 

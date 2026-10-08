@@ -3,6 +3,8 @@ package com.jiligulu.app.data.repository
 import androidx.room.withTransaction
 import com.jiligulu.app.data.local.AppDatabase
 import com.jiligulu.app.domain.category.CategoryDefaults
+import com.jiligulu.app.domain.category.CategorySuggestions
+import com.jiligulu.app.data.local.entity.IconType
 
 /** 删除分类的结果。用显式类型而不是布尔，让「被拒绝」与「真失败」在调用侧可分。 */
 sealed interface CategoryDeletionResult {
@@ -58,20 +60,21 @@ class CategoryAdminRepository(
                 if (current == null || current != original || current.deletedAt != null || current.categoryId != vacuum) {
                     skipped++; return@forEach
                 }
-                val name = proposal.suggestion.category.trim()
-                if (name.isBlank() || name == CategoryDefaults.VACUUM_NAME || name.length > 32) {
+                val name = CategorySuggestions.name(proposal.suggestion.category)
+                if (name == null || name == CategoryDefaults.VACUUM_NAME) {
                     skipped++; return@forEach
                 }
-                val target = categoryDao.findByName(name)
+                val target = CategorySuggestions.existing(name, categoryDao.findAllOnce())
                 if (proposal.targetCategoryId != null && (target?.id != proposal.targetCategoryId || target?.deletable != true)) {
                     skipped++; return@forEach
                 }
                 if (target != null && !target.deletable) { skipped++; return@forEach }
                 val targetId = target?.id ?: run {
                     val index = categoryDao.count()
+                    val icon = CategorySuggestions.icon(name, proposal.suggestion.iconEmoji)
                     categoryDao.insert(com.jiligulu.app.data.local.entity.CategoryEntity(
-                        name = name, iconValue = proposal.suggestion.iconEmoji.take(16),
-                        keywords = proposal.suggestion.keywords.take(160),
+                        name = name, iconValue = icon, iconType = if (icon.startsWith("builtin_")) IconType.BUILTIN else IconType.EMOJI,
+                        keywords = CategorySuggestions.keywords(name, proposal.suggestion.keywords),
                         colorIndex = index, colorHue = com.jiligulu.app.domain.color.GoldenAnglePalette.hueFor(index),
                         createdBy = com.jiligulu.app.data.local.entity.CreatedBy.AI))
                 }

@@ -368,7 +368,8 @@ fun AddBillScreen(onBack: () -> Unit, vm: AddBillViewModel = viewModel(factory =
     if (calculatorOpen) CalculatorDialog(amountText, onDismiss = { calculatorOpen = false },
         onUse = { amountText = it; calculatorOpen = false })
     if (reclassification.open) PendingReclassificationDialog(reclassification,
-        onDismiss = vm::closeReclassification, onConfirm = vm::confirmPendingReclassification)
+        onDismiss = vm::closeReclassification, onConfirm = vm::confirmPendingReclassification,
+        onRetry = vm::preparePendingReclassification)
 
     // ---------- 删除分类的确认框 ----------
     pendingDelete?.let { pending ->

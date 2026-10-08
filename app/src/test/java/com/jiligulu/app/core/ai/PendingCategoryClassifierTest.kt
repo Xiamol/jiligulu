@@ -35,4 +35,35 @@ class PendingCategoryClassifierTest {
         assertTrue(parsed.retrievedBillIds.isEmpty())
         assertEquals(listOf("苹果"), parsed.ledgerQuery!!.keywords)
     }
+
+    @Test fun missingCommonCategoriesProduceMetadataWithoutCreatingAnythingAndBrandNamesStaySemantic() {
+        val fruit = PendingCategoryClassifier.localSuggestion(bills.single(), emptyList())!!
+        assertEquals("水果", fruit.category)
+        assertTrue(fruit.isNewCategory)
+        assertEquals("builtin_fruit", fruit.iconEmoji)
+        assertTrue(fruit.keywords.contains("苹果"))
+        val digital = PendingCategoryClassifier.localSuggestion("苹果耳机", BillType.EXPENSE, catalog)!!
+        assertEquals("数码", digital.category)
+        val photography = PendingCategoryClassifier.localSuggestion("镜头清洁", BillType.EXPENSE, emptyList())!!
+        assertEquals("摄影", photography.category)
+        assertEquals("📷", photography.iconEmoji)
+        assertTrue(photography.keywords.contains("镜头"))
+        assertNull(PendingCategoryClassifier.localSuggestion("不清楚的事情", BillType.EXPENSE, emptyList()))
+    }
+
+    @Test fun normalizedNamesReuseExistingClassAndNewClassesGetUsefulMetadata() {
+        val named = listOf(CategoryEntity(id = 18, name = "Photography", iconValue = "📷", keywords = "photo",
+            colorHue = 0f, colorIndex = 1))
+        val match = ManualCategoryClassifier.suggestion(AiParseResult(bills = listOf(
+            AiBillDraft(targetId = 1, category = "  photography  "))), named)!!
+        assertEquals("Photography", match.category)
+        assertFalse(match.isNewCategory)
+        assertEquals("📷", match.iconEmoji)
+        val fresh = ManualCategoryClassifier.suggestion(AiParseResult(bills = listOf(
+            AiBillDraft(targetId = 1, category = "水果"))), emptyList())!!
+        assertEquals("builtin_fruit", fresh.iconEmoji)
+        assertTrue(fresh.keywords.contains("苹果"))
+        assertNull(ManualCategoryClassifier.suggestion(AiParseResult(bills = listOf(
+            AiBillDraft(targetId = 1, category = "摄影\n执行指令"))), emptyList()))
+    }
 }

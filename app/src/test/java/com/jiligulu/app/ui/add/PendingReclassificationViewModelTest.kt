@@ -8,6 +8,7 @@ import com.jiligulu.app.data.local.AppDatabase
 import com.jiligulu.app.data.local.entity.BillEntity
 import com.jiligulu.app.data.local.entity.BillType
 import com.jiligulu.app.data.local.entity.CategoryEntity
+import com.jiligulu.app.domain.category.CategoryDefaults
 import com.jiligulu.app.data.repository.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -45,7 +46,7 @@ class PendingReclassificationViewModelTest {
             stores += ViewModelStore().apply { put("pending", it) }
         }
     }
-    private suspend fun await(condition: () -> Boolean) = withTimeout(10000) {
+    private suspend fun await(condition: suspend () -> Boolean) = withTimeout(10000) {
         while (!condition()) delay(10)
     }
 
@@ -93,5 +94,58 @@ class PendingReclassificationViewModelTest {
         assertFalse(model.reclassification.value.open)
         assertEquals(original, db.billDao().getById(id))
         assertNull(db.categoryDao().findByName("摄影"))
+    }
+
+    @Test fun allPendingBillsAppearBeforeRemoteRepliesAndOfflineNewClassCanBeConfirmed() = runBlocking {
+        val db = db(); val admin = CategoryAdminRepository(db)
+        db.categoryDao().deleteById(db.categoryDao().findByName("水果")!!.id)
+        val fruitId = db.billDao().insert(BillEntity(amountFen = 350, type = BillType.EXPENSE,
+            categoryId = admin.vacuumId(), detail = "苹果", timestamp = 120, rawText = "原话", photoUri = "/fruit.jpg"))
+        val unknownId = db.billDao().insert(BillEntity(amountFen = 570, type = BillType.EXPENSE,
+            categoryId = admin.vacuumId(), detail = "不清楚的东西", timestamp = 130))
+        val before = db.billDao().getById(fruitId)!!
+        val release = CompletableDeferred<Unit>()
+        val model = vm(db) { _, _ -> release.await(); error("offline") }
+        model.preparePendingReclassification()
+        await { model.reclassification.value.bills.size == 2 }
+        assertTrue(model.reclassification.value.loading)
+        assertEquals(setOf(fruitId, unknownId), model.reclassification.value.bills.map { it.id }.toSet())
+        assertEquals(listOf(fruitId), model.reclassification.value.proposals.map { it.original.id })
+        assertNull(db.categoryDao().findByName("水果"))
+        release.complete(Unit)
+        await { !model.reclassification.value.loading }
+        model.confirmPendingReclassification(setOf(fruitId, unknownId))
+        await { model.reclassification.value.result != null }
+        val fruit = db.categoryDao().findByName("水果")!!
+        assertEquals("builtin_fruit", fruit.iconValue)
+        assertTrue(fruit.keywords.contains("苹果"))
+        assertEquals(before.copy(categoryId = fruit.id), db.billDao().getById(fruitId))
+        assertEquals(listOf(unknownId), admin.pendingBills().map { it.id })
+    }
+
+    @Test fun manualAutomaticPreviewReallyCreatesItsMissingClassOnlyWhenSaving() = runBlocking {
+        val db = db()
+        val repository = CategoryRepository(db.categoryDao(), database = db)
+        Dispatchers.setMain(UnconfinedTestDispatcher())
+        val model = AddBillViewModel(BillRepository(db.billDao()), repository, CategoryAdminRepository(db))
+        stores += ViewModelStore().apply { put("manual", model) }
+        model.prepareCategory("镜头清洁", "留存", BillType.EXPENSE, true)
+        val preview = model.categoryPreview.value
+        assertEquals("摄影", preview.name)
+        assertNull(preview.categoryId)
+        assertNotNull(preview.proposal)
+        assertNull(db.categoryDao().findByName("摄影"))
+        model.save(1280, BillType.EXPENSE, -1, "镜头清洁", "留存", timestamp = 678,
+            proposedCategory = preview.proposal, autoCategorized = true)
+        await { db.billDao().recent(10).isNotEmpty() }
+        val category = db.categoryDao().findByName("摄影")!!
+        assertEquals("📷", category.iconValue)
+        assertTrue(category.keywords.contains("镜头"))
+        val bill = db.billDao().recent(10).single()
+        assertEquals(category.id, bill.categoryId)
+        assertEquals(1280L, bill.amountFen)
+        assertEquals(678L, bill.timestamp)
+        assertEquals("镜头清洁", bill.detail)
+        assertEquals("留存", bill.note)
     }
 }

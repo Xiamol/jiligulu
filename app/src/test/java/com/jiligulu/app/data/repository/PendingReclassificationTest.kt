@@ -2,6 +2,7 @@ package com.jiligulu.app.data.repository
 
 import android.app.Application
 import android.content.Context
+import androidx.room.withTransaction
 import com.jiligulu.app.core.ai.AiBillDraft
 import com.jiligulu.app.data.local.AppDatabase
 import com.jiligulu.app.data.local.entity.BillEntity
@@ -10,6 +11,10 @@ import com.jiligulu.app.data.local.entity.CategoryEntity
 import com.jiligulu.app.data.local.entity.CreatedBy
 import com.jiligulu.app.domain.category.CategoryDefaults
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.Dispatchers
 import org.junit.After
 import org.junit.Assert.*
 import org.junit.Test
@@ -85,6 +90,37 @@ class PendingReclassificationTest {
         assertEquals(2, admin.applyReclassification(proposals + proposals).moved)
         assertEquals(0, admin.applyReclassification(proposals).moved)
         assertEquals(1, db.categoryDao().findAllOnce().count { it.name == "摄影" })
+    }
+
+    @Test fun differentlySpelledSameCategoryIsCreatedOnceAndOnlyBillOwnershipChanges() = runBlocking {
+        val db = db(); val admin = CategoryAdminRepository(db)
+        val originals = (1..2).map { index ->
+            val id = db.billDao().insert(BillEntity(amountFen = 1299, type = BillType.EXPENSE,
+                categoryId = admin.vacuumId(), detail = "镜头$index", note = "原始备注", timestamp = 777,
+                photoUri = "/owned/photo-$index.jpg", rawText = "保留原文"))
+            db.billDao().getById(id)!!
+        }
+        val proposals = originals.mapIndexed { index, bill -> CategoryReclassification(bill,
+            AiBillDraft(category = if (index == 0) "Photography" else " photography ",
+                amountYuan = 999999.0, detail = "不能覆盖", timeExpression = "明天")) }
+        assertEquals(CategoryReclassificationResult(2, 0), admin.applyReclassification(proposals))
+        val category = db.categoryDao().findAllOnce().single { it.name.equals("Photography", true) }
+        assertTrue(category.iconValue.isNotBlank())
+        assertTrue(category.keywords.isNotBlank())
+        originals.forEach { assertEquals(it.copy(categoryId = category.id), db.billDao().getById(it.id)) }
+    }
+
+    @Test fun concurrentManualCreationsUseOneTransactionalNameAndKeepNestedTransactionsSafe() = runBlocking {
+        val db = db()
+        val repository = CategoryRepository(db.categoryDao(), database = db)
+        val ids = coroutineScope {
+            listOf("Photography", " photography ", "PHOTOGRAPHY").map { name ->
+                async(Dispatchers.Default) { repository.createCategory(name) }
+            }.awaitAll()
+        }
+        assertEquals(1, ids.toSet().size)
+        assertEquals(1, db.categoryDao().findAllOnce().count { it.name.equals("Photography", true) })
+        db.withTransaction { assertEquals(ids.first(), repository.createCategory("photography")) }
     }
 
     @Test fun upgradingOldCatalogPreservesCustomNamesIconsAndLaterPresetDeletions() = runBlocking {

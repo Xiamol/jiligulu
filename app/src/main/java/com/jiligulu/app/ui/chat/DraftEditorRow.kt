@@ -56,9 +56,9 @@ internal fun DraftEditorRow(
         categories.firstOrNull { it.name.equals(draft.categoryName, true) }
     }
     val moneyColor = if (draft.type == BillType.EXPENSE) ExpenseCoral else IncomeGreen
-    val timeLabel = remember(draft.timestamp) {
+    val timeLabel = remember(draft.timestamp, draft.requiresTimeInput, draft.timeNeedsReview) {
         draft.timestamp?.let { Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault())
-            .format(DateTimeFormatter.ofPattern("M/d HH:mm")) }
+            .format(DateTimeFormatter.ofPattern("M/d HH:mm")) + if (draft.timeNeedsReview) "·核对" else "" }
             ?: if (draft.requiresTimeInput) "时间待补充" else "此刻"
     }
     Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
@@ -132,14 +132,9 @@ internal fun DraftEditorRow(
                 Modifier.size(26.dp).clickable(enabled = enabled, onClick = uiTap(UiCue.TOGGLE) { showNote = !showNote }).padding(5.dp),
                 tint = MaterialTheme.colorScheme.primary.copy(alpha = .7f))
         }
-        if (draft.note.isNotBlank() && !showNote) Text(draft.note, maxLines = 1,
+        if (draft.displayNote.isNotBlank() && !showNote) Text(draft.displayNote, maxLines = 1,
                 overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 37.dp))
-        if (draft.requiresTimeInput || draft.timeNeedsReview) {
-            Text(if (draft.requiresTimeInput) "补好时间就可以入账啦" else "时间供你核对 · 确认入账即接受",
-                style = MaterialTheme.typography.labelSmall,
-                color = if (draft.requiresTimeInput) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
-        }
         if (showNote) {
             OutlinedTextField(draft.note, onValueChange = { value -> onUpdate { it.copy(note = value) } },
                 modifier = Modifier.fillMaxWidth().testTag("draft-note-$tag"), placeholder = { Text("留一句小备注 ♡") },
@@ -151,8 +146,6 @@ internal fun DraftEditorRow(
             onUpdate { it.copy(timestamp = timestamp, timeNeedsReview = false,
                 timeHint = if (timestamp == null) "确认入账时记录此刻" else "已手动调整时间") }
         }, enabled = enabled, allowCurrentTime = !draft.requiresTimeInput)
-        Text(draft.timeHint, style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
     if (showCategories) DraftCategoryPicker(draft, categories, tag, onDismiss = { showCategories = false },
         onSelect = { selected ->

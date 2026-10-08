@@ -354,6 +354,7 @@ fun ChatScreen(
 
 @Composable
 private fun UserBubble(text: String) {
+    val displayText = remember(text) { chatMessageDisplayText(text) }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
         Box(
             modifier = Modifier
@@ -368,7 +369,7 @@ private fun UserBubble(text: String) {
             // another message or intercepts the editable ledger cards beside it.
             SelectionContainer {
                 Text(
-                    text,
+                    displayText,
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onPrimaryContainer
                 )
@@ -447,14 +448,6 @@ internal fun DraftCardView(
             }
         }
         }
-        Spacer(Modifier.height(4.dp))
-        Text(
-            "「${card.rawInput}」",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis
-        )
         Spacer(Modifier.height(8.dp))
 
         if (!expanded || card.status == ChatItem.DraftCard.Status.CONFIRMED) {
@@ -466,7 +459,8 @@ internal fun DraftCardView(
                     val category = categories.firstOrNull { it.name.equals(draft.categoryName, true) }
                     CategoryBadge(draft.categoryName, category?.iconValue ?: draft.iconEmoji, size = 28.dp)
                     Column(Modifier.weight(1f)) {
-                        Text(draft.detail.ifBlank { draft.categoryName }, style = MaterialTheme.typography.bodyMedium)
+                        Text(draft.detail.ifBlank { draft.categoryName }, style = MaterialTheme.typography.bodyMedium,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis)
                         draft.timestamp?.let { timestamp ->
                             Text(
                                 Instant.ofEpochMilli(timestamp).atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("M月d日 HH:mm")),

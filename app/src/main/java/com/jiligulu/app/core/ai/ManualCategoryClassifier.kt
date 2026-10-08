@@ -2,6 +2,7 @@ package com.jiligulu.app.core.ai
 
 import com.jiligulu.app.data.local.entity.BillType
 import com.jiligulu.app.data.local.entity.CategoryEntity
+import com.jiligulu.app.domain.category.CategorySuggestions
 import kotlinx.serialization.json.*
 
 /** Category-only request: no ledger, chat history, dates or editable financial facts are sent. */
@@ -18,11 +19,10 @@ object ManualCategoryClassifier {
 
     fun suggestion(result: AiParseResult, categories: List<CategoryEntity>): AiBillDraft? {
         val draft = result.bills.singleOrNull()?.takeIf { it.targetId == 1L } ?: return null
-        val name = draft.category.trim()
-        if (name.isBlank() || name.length > 32 || name.any(Char::isISOControl) ||
-            listOf("零钱通支付", "微信支付", "支付宝支付", "银行卡支付", "支付方式").any { name.contains(it) }) return null
-        val existing = categories.firstOrNull { it.name.equals(name, true) }
+        val name = CategorySuggestions.name(draft.category) ?: return null
+        val existing = CategorySuggestions.existing(name, categories)
         return draft.copy(category = existing?.name ?: name, isNewCategory = existing == null,
-            iconEmoji = existing?.iconValue ?: draft.iconEmoji.take(16), keywords = existing?.keywords ?: draft.keywords.take(160))
+            iconEmoji = existing?.iconValue ?: CategorySuggestions.icon(name, draft.iconEmoji),
+            keywords = existing?.keywords ?: CategorySuggestions.keywords(name, draft.keywords))
     }
 }

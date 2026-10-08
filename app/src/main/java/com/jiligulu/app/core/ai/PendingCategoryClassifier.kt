@@ -3,6 +3,7 @@ package com.jiligulu.app.core.ai
 import com.jiligulu.app.data.local.entity.BillEntity
 import com.jiligulu.app.data.local.entity.CategoryEntity
 import com.jiligulu.app.domain.category.CategoryDefaults
+import com.jiligulu.app.domain.category.CategorySuggestions
 import kotlinx.serialization.json.*
 
 object PendingCategoryClassifier {
@@ -29,4 +30,15 @@ object PendingCategoryClassifier {
             if (checked.category == CategoryDefaults.VACUUM_NAME) null else id to checked.copy(targetId = id)
         }.toMap()
     }
+
+    fun localSuggestion(bill: BillEntity, categories: List<CategoryEntity>): AiBillDraft? =
+        localSuggestion(listOf(bill.detail, bill.note).filter(String::isNotBlank).joinToString(" · "), bill.type, categories)
+            ?.copy(targetId = bill.id)
+
+    fun localSuggestion(text: String, type: com.jiligulu.app.data.local.entity.BillType,
+        categories: List<CategoryEntity>): AiBillDraft? = CategorySuggestions.local(text, type, categories)?.let { match ->
+            val existing = CategorySuggestions.existing(match.name, categories)
+            AiBillDraft(category = match.name, iconEmoji = match.iconValue, keywords = match.keywords,
+                isNewCategory = existing == null)
+        }
 }

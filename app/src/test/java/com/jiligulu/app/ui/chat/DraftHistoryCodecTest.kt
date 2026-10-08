@@ -39,4 +39,23 @@ class DraftHistoryCodecTest {
         assertFalse(draft.copy(timestamp = null).isValid)
         assertFalse(draft.copy(amountText = "0").isValid)
     }
+
+    @Test fun receiptTechnicalMetadataDoesNotCrowdTheVisibleNoteButSurvivesStorage() {
+        val raw = "图片状态：支付成功，支付方式：零钱通支付，图中无相关账单时间，暂按系统时间，可修改；备注：买给妈妈"
+        val draft = DraftUi(amountText = "3.5", note = raw, detail = "水果")
+        assertEquals("买给妈妈", draft.displayNote)
+        val restored = DraftHistoryCodec.decode(DraftHistoryCodec.encode(listOf(draft))).single()
+        assertEquals(raw, restored.note)
+        assertEquals("买给妈妈", restored.displayNote)
+        assertEquals("待付款", draftNoteForDisplay("图片状态：待付款，支付方式：微信支付"))
+        assertEquals("核对金额", draftNoteForDisplay("图片状态：已收款，金额来自关联聊天推定，请核对"))
+        assertEquals("我的备注，时间可修改", draftNoteForDisplay("我的备注，时间可修改"))
+    }
+
+    @Test fun importedImageMessageHasACompactDisplayWithoutEditingItsRawPayload() {
+        val raw = "【图片记账】\n2026-10-08 12:00；支出；金额3.5元；奶茶；支付成功\n2026-10-08 13:00；收入；金额20元；收款自朋友；已收款\n备注：周末"
+        assertEquals("账单图片 · 2 笔", chatMessageDisplayText(raw))
+        assertEquals(2, com.jiligulu.app.core.ai.ImageReceiptCodec.parseText(raw).bills.size)
+        assertEquals("今天奶茶3.5元", chatMessageDisplayText("今天奶茶3.5元"))
+    }
 }
