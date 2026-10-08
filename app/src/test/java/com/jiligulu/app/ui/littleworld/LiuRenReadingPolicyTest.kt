@@ -24,7 +24,9 @@ class LiuRenReadingPolicyTest {
         assertEquals(cast.question, reading.question)
         assertEquals(listOf("大安", "速喜", "小吉"), reading.stages.map { it.palace })
         assertEquals(listOf("大安" to "速喜", "速喜" to "小吉"), reading.links.map { it.from to it.to })
-        assertTrue(reading.summary.contains("明天终面")); assertTrue(reading.summary.contains("笔试已过"))
+        assertTrue(reading.summary.startsWith("明天")); assertTrue(reading.summary.contains("录用"))
+        assertTrue(reading.question.contains("笔试已过"))
+        assertFalse((reading.summary + reading.reason + reading.advice).contains("尚未笔试"))
         assertTrue(reading.stages[0].text.contains("准备"))
         assertTrue(reading.stages[1].text.contains("交流") || reading.stages[1].text.contains("流程"))
         assertTrue(reading.stages[2].text.contains("录用"))
@@ -40,7 +42,8 @@ class LiuRenReadingPolicyTest {
         assertEquals("小吉", steadyThenFast.stages.last().palace)
         assertEquals("小吉", fastThenSteady.stages.last().palace)
         assertEquals(listOf("速喜", "大安", "小吉"), fastThenSteady.stages.map { it.palace })
-        assertNotEquals(steadyThenFast.summary, fastThenSteady.summary)
+        // The outcome can be similar; the visible short reasoning must explain the different path.
+        assertNotEquals(steadyThenFast.reason, fastThenSteady.reason)
         assertNotEquals(steadyThenFast.stages[0], fastThenSteady.stages[0])
         assertNotEquals(steadyThenFast.stages[1], fastThenSteady.stages[1])
         assertNotEquals(steadyThenFast.links, fastThenSteady.links)
@@ -99,8 +102,7 @@ class LiuRenReadingPolicyTest {
         val reading = LiuRenReadingPolicy.local(cast)
         assertEquals(reading, accepted(reading, cast))
         val generic = "让念头在窗边坐一坐，照顾好自己，保持微笑慢慢等待，一切都值得温柔相待。"
-        assertNull(accepted(reading.copy(stages = reading.stages.map { it.copy(text = generic) }), cast))
-        assertNull(accepted(reading.copy(summary = generic, advice = generic), cast))
+        assertNull(accepted(reading.copy(summary = generic, reason = generic, advice = generic), cast))
     }
 
     @Test fun relationMustMatchTheActualAdjacentPairIncludingItsDirection() {
@@ -131,13 +133,14 @@ class LiuRenReadingPolicyTest {
         assertNull(accepted(correct.copy(links = correct.links.mapIndexed { i, link -> if (i == 0) link.copy(to = "小吉") else link }), cast))
     }
 
-    @Test fun mentioningTheCorrectPalacesWithoutAnsweringTheQuestionIsNotAValidReading() {
+    @Test fun groundedMainAnswerDoesNotRequireLiteralTopicWordsInEveryStageButGenericMainTextIsRejected() {
         val cast = fixture(); val correct = LiuRenReadingPolicy.local(cast)
         val generic = "让念头在窗边坐一坐，照顾好自己，保持微笑慢慢等待，一切都值得温柔相待。"
-        assertNull(accepted(correct.copy(stages = correct.stages.map { it.copy(text = generic) }), cast))
+        val natural = "先认清现有条件，中途根据变化调整，再听到真实反馈后判断是否落实，而不是越急越快。"
+        val noRepeatedTopicWords = correct.copy(stages = correct.stages.map { it.copy(text = natural) })
+        assertEquals(noRepeatedTopicWords, accepted(noRepeatedTopicWords, cast))
         assertNull(accepted(correct.copy(summary = generic), cast))
-        assertNull(accepted(correct.copy(advice = generic), cast))
-        assertNull(accepted(correct.copy(stages = correct.stages.mapIndexed { i, stage -> if (i == 1) stage.copy(text = generic) else stage }), cast))
+        assertNull(accepted(correct.copy(summary = generic, reason = generic, advice = generic), cast))
     }
 
     @Test fun outcomeGuaranteesInAnyPartAreRejectedWhileCautiousNegationIsAllowed() {
@@ -182,6 +185,7 @@ class LiuRenReadingPolicyTest {
         assertNull(LiuRenReadingPolicy.decode("{}", cast))
         assertNull(LiuRenReadingPolicy.decode("[]", cast))
         assertNull(accepted(correct.copy(summary = "小吉"), cast))
+        assertNull(accepted(correct.copy(reason = ""), cast))
         assertNull(accepted(correct.copy(stages = correct.stages.map { it.copy(text = "顺利") }), cast))
         assertNull(accepted(correct.copy(advice = "加油"), cast))
         val source = Json.parseToJsonElement(LiuRenReadingPolicy.encode(correct)).jsonObject
