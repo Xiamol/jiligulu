@@ -14,17 +14,20 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import com.jiligulu.app.R
 import com.jiligulu.app.core.audio.UiSound
 import com.jiligulu.app.ui.components.SpringScrollColumn
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.coroutineScope
 import java.time.LocalDate
 import java.time.Instant
 import java.time.ZoneId
@@ -42,9 +45,9 @@ internal fun ColumnScope.FortuneWheelGame(boardSize: Dp, foreground: Boolean,
     val liuRenStore = remember(context) { XiaoLiuRenStore(context.getSharedPreferences("gulu_xiao_liuren", Context.MODE_PRIVATE)) }
     var sign by rememberSaveable { mutableStateOf(prefs.getString("sign", DailyLuckEngine.signs.first()).orEmpty()) }
     var rewrittenDay by remember { mutableStateOf(prefs.getString("rewritten_day", "").orEmpty()) }
-    var liuRenRewrittenDay by remember { mutableStateOf(prefs.getString("liuren_rewritten_day", "").orEmpty()) }
+    var liuRenRewriteRevision by remember { mutableIntStateOf(0) }
     var signPicker by remember { mutableStateOf(false) }
-    var stamp by remember { mutableStateOf(false) }
+    var stampEvent by remember { mutableIntStateOf(0) }
     var resultText by rememberSaveable { mutableStateOf(prefs.getString("last_task", "").orEmpty()) }
     var savedAngle by rememberSaveable { mutableFloatStateOf(0f) }
     val angle = remember { Animatable(savedAngle) }
@@ -61,7 +64,16 @@ internal fun ColumnScope.FortuneWheelGame(boardSize: Dp, foreground: Boolean,
             delay((Duration.between(now, midnight).toMillis() + 50).coerceAtLeast(1_000))
         }
     }
-    LaunchedEffect(stamp) { if (stamp) { delay(1550); stamp = false } }
+    DisposableEffect(prefs) {
+        val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == FortuneRewriteKind.LIU_REN.preferenceKey || key == FortuneRewriteUsage.LIU_REN_RECEIPTS_KEY)
+                liuRenRewriteRevision++
+            if (key == FortuneRewriteKind.HOROSCOPE.preferenceKey)
+                rewrittenDay = prefs.getString(FortuneRewriteKind.HOROSCOPE.preferenceKey, "").orEmpty()
+        }
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+        onDispose { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
     LaunchedEffect(spinning, foreground) {
         if (spinning && foreground) {
             var last = (angle.value / 60f).toInt()
@@ -133,9 +145,12 @@ internal fun ColumnScope.FortuneWheelGame(boardSize: Dp, foreground: Boolean,
             } else if (fortunePage == "liuren") {
                 SpringScrollColumn(Modifier.fillMaxWidth().heightIn(max = (availableHeight - 72.dp).coerceAtLeast(1.dp)),
                     horizontalAlignment = Alignment.CenterHorizontally, handOffOnRepeat = true) {
-                    XiaoLiuRenPane(liuRenStore, liuRenRewrittenDay == date.toString(), onRewrite = {
-                        if (rewriteUsage.mark(FortuneRewriteKind.LIU_REN, date)) {
-                            UiSound.pet(context); liuRenRewrittenDay = date.toString(); stamp = true
+                    XiaoLiuRenPane(liuRenStore, rewriteStateFor = { cast ->
+                        liuRenRewriteRevision // Observe changes from this screen or a reopened owner.
+                        rewriteUsage.liuRenState(cast, date)
+                    }, onRewrite = { cast ->
+                        if (rewriteUsage.rewriteLiuRen(cast, date)) {
+                            UiSound.pet(context); liuRenRewriteRevision++; stampEvent++
                         }
                     })
                 }
@@ -160,19 +175,46 @@ internal fun ColumnScope.FortuneWheelGame(boardSize: Dp, foreground: Boolean,
                 }
                 TextButton(onClick = {
                     if (rewriteUsage.mark(FortuneRewriteKind.HOROSCOPE, date)) {
-                        UiSound.pet(context); rewrittenDay = date.toString(); stamp = true
+                        UiSound.pet(context); rewrittenDay = date.toString(); stampEvent++
                     }
                 }, enabled = rewrittenDay != date.toString()) {
                     Text(if (rewrittenDay == date.toString()) "阿噜盖过章啦 ♡" else "让阿噜逆天改命")
                 }
             }
         }
-        if (stamp) Column(Modifier.matchParentSize().background(Color(0xFFFAF7F0).copy(alpha = .93f)),
-            verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
-            Image(painterResource(R.drawable.gulu_luck_stamp), null, Modifier.size(172.dp))
-            Text("逆天改命 · 阿噜盖章", fontFamily = com.jiligulu.app.ui.theme.GuluBrandFont,
-                fontSize = 23.sp, color = Color(0xFF8B74A4))
+        if (stampEvent > 0) FortuneStampOverlay(stampEvent, { stampEvent = 0 })
+    }
+}
+
+/** This effect exists only after a successful stamp; reopening a receipt never replays it. */
+@Composable
+private fun BoxScope.FortuneStampOverlay(event: Int, onFinished: () -> Unit) {
+    val scale = remember { Animatable(1.38f) }
+    val rotation = remember { Animatable(-12f) }
+    val opacity = remember { Animatable(1f) }
+    LaunchedEffect(event) {
+        scale.snapTo(1.38f); rotation.snapTo(-12f); opacity.snapTo(1f)
+        coroutineScope {
+            launch { scale.animateTo(1f, tween(230, easing = FastOutSlowInEasing)) }
+            launch { rotation.animateTo(-4f, tween(230, easing = FastOutSlowInEasing)) }
         }
+        delay(700)
+        opacity.animateTo(0f, tween(360))
+        onFinished()
+    }
+    Column(Modifier.matchParentSize().testTag("fortune-stamp-overlay").graphicsLayer { alpha = opacity.value }
+        .background(Color(0xFFFAF7F0).copy(alpha = .94f)),
+        verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
+        Column(Modifier.graphicsLayer {
+            scaleX = scale.value; scaleY = scale.value; rotationZ = rotation.value
+        }, horizontalAlignment = Alignment.CenterHorizontally) {
+            Image(painterResource(R.drawable.gulu_luck_stamp), null, Modifier.size(150.dp))
+            Text("大吉", Modifier.testTag("fortune-stamp-title"), fontFamily = com.jiligulu.app.ui.theme.GuluBrandFont,
+                fontSize = 44.sp, color = Color(0xFF8B74A4))
+        }
+        Spacer(Modifier.height(12.dp))
+        Text("阿噜为你逆天改命", fontFamily = com.jiligulu.app.ui.theme.GuluBrandFont,
+            fontSize = 22.sp, color = Color(0xFF8B74A4))
     }
 }
 
