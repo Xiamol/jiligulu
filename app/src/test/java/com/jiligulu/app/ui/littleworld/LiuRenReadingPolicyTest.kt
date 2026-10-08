@@ -57,7 +57,7 @@ class LiuRenReadingPolicyTest {
         val partial = LiuRenReadingPolicy.local(fixture(digits = "131"))
         assertEquals(listOf("大安", "速喜", "速喜"), partial.stages.map { it.palace })
         assertTrue(partial.links.last().text.contains("同宫"))
-        assertNull(accepted(repeated.copy(stages = repeated.stages.distinct()), sameCast))
+        assertNull(accepted(repeated.copy(stages = repeated.stages.distinctBy { it.palace }), sameCast))
     }
 
     @Test fun everyFiveElementPairHasTheCorrectDirectionAndTheDeclaredSixPalaceMapping() {
