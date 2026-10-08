@@ -87,6 +87,7 @@ internal fun ColumnScope.FortuneWheelGame(boardSize: Dp, foreground: Boolean,
     }
     BoxWithConstraints(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
         val compact = maxHeight < 520.dp
+        val availableHeight = maxHeight
         Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Row(Modifier.widthIn(max = 320.dp).fillMaxWidth()) {
                 listOf("wheel" to "转一转", "luck" to "今日运势", "liuren" to "小六壬").forEach { (page, title) ->
@@ -132,7 +133,7 @@ internal fun ColumnScope.FortuneWheelGame(boardSize: Dp, foreground: Boolean,
                 var selection by remember(date) { mutableStateOf(liuRenStore.loadForDay(date) {
                     XiaoLiuRenCalendar.forDate(date, XiaoLiuRen.shichen(LocalTime.now().hour))
                 }) }
-                SpringScrollColumn(Modifier.fillMaxWidth().heightIn(max = (maxHeight - 72.dp).coerceAtLeast(1.dp)),
+                SpringScrollColumn(Modifier.fillMaxWidth().heightIn(max = (availableHeight - 72.dp).coerceAtLeast(1.dp)),
                     horizontalAlignment = Alignment.CenterHorizontally, handOffOnRepeat = true) {
                     XiaoLiuRenPane(selection, rewrittenDay == date.toString(), onSelect = {
                         liuRenStore.save(date, it); selection = it
