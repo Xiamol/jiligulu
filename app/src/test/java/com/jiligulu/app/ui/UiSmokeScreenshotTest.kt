@@ -6,6 +6,8 @@ import androidx.activity.compose.setContent
 import android.os.Handler
 import android.os.Looper
 import android.view.PixelCopy
+import android.view.MotionEvent
+import android.os.SystemClock
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotDisplayed
@@ -95,6 +97,7 @@ import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestCoroutineScheduler
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -362,8 +365,8 @@ class UiSmokeScreenshotTest {
             awaitText("保存修改")
             compose.onNodeWithContentDescription("细则").assertIsDisplayed()
             capture("bill-detail-light", dialog = true)
-            compose.onNode(hasText("关闭") and hasAnyAncestor(hasAnyDescendant(hasText("这一笔小账"))))
-                .performSemanticsAction(SemanticsActions.OnClick) { it() }
+            dismissTopDialogOutside("bill details from ledger")
+            compose.onAllNodesWithText("保存修改").fetchSemanticsNodes().let { assertTrue(it.isEmpty()) }
 
             compose.onNodeWithText("统计").performClick()
             awaitText("每日收支")
@@ -375,10 +378,11 @@ class UiSmokeScreenshotTest {
             awaitText("吃饭的小账单")
             visibleClickableText("牛肉面").performClick()
             awaitText("保存修改")
-            compose.onNode(hasText("关闭") and hasAnyAncestor(hasAnyDescendant(hasText("这一笔小账"))))
-                .performSemanticsAction(SemanticsActions.OnClick) { it() }
+            dismissTopDialogOutside("bill details from category")
+            compose.onAllNodesWithText("保存修改").fetchSemanticsNodes().let { assertTrue(it.isEmpty()) }
             val remainingCategoryDialog = compose.onAllNodes(hasText("吃饭的小账单") and hasAnyAncestor(isDialog()))
-            if (remainingCategoryDialog.fetchSemanticsNodes().isNotEmpty()) visibleClickableText("关闭").performClick()
+            if (remainingCategoryDialog.fetchSemanticsNodes().isNotEmpty()) dismissTopDialogOutside("category bills")
+            compose.onAllNodes(hasText("吃饭的小账单") and hasAnyAncestor(isDialog())).fetchSemanticsNodes().let { assertTrue(it.isEmpty()) }
             statisticsList.performScrollToIndex(0)
             awaitText("每日收支")
             compose.onAllNodesWithText("保存修改").fetchSemanticsNodes().let { assertTrue(it.isEmpty()) }
@@ -395,7 +399,7 @@ class UiSmokeScreenshotTest {
             awaitText("阿噜使用手册 ♡")
             awaitText("见面啦，我是阿噜")
             capture("handbook-light", dialog = true)
-            compose.onNodeWithText("知道啦").performClick()
+            dismissTopDialogOutside("handbook")
             compose.onNodeWithText("阿噜使用手册 ♡").assertDoesNotExist()
             compose.onNodeWithContentDescription("返回").performClick()
             compose.onNodeWithText("账本").performClick()
@@ -757,8 +761,9 @@ class UiSmokeScreenshotTest {
             }
             awaitTag("announcement-body")
             capture("announcement-popup", dialog = true)
-            compose.onNodeWithText("关闭").performClick()
+            dismissTopDialogOutside("announcement")
             awaitTag("announcement-body", present = false)
+            assertTrue("Closing an announcement does not mute it", "holiday-demo" !in runBlocking { prefs.readAnnouncements().mutedIds })
             compose.onNodeWithTag("announcement-board").performClick()
             awaitTag("announcement-body")
             compose.onNodeWithText("这条不再弹出").performClick()
@@ -836,7 +841,8 @@ class UiSmokeScreenshotTest {
             }
             compose.onNodeWithContentDescription("采样速度说明").performClick()
             awaitText("仅对 App 内的背景折射起效", substring = true)
-            compose.onNodeWithText("知道啦").performClick()
+            dismissTopDialogOutside("sampling speed explanation")
+            compose.onNodeWithContentDescription("采样速度说明").assertIsDisplayed()
             compose.onNodeWithTag("settings-tab-提醒").performClick()
             awaitSettingsPage("提醒", "喝水提醒")
             // Pager may keep the interaction page composed beside the visible reminder page.
@@ -985,7 +991,8 @@ class UiSmokeScreenshotTest {
                 compose.onAllNodesWithText("吃饭").onLast().performClick()
                 awaitText("午餐验收")
                 capture("statistics-category-dialog", dialog = true)
-                compose.onNodeWithText("关闭").performClick()
+                dismissTopDialogOutside("selected category details")
+                compose.onAllNodes(hasText("午餐验收") and hasAnyAncestor(isDialog())).fetchSemanticsNodes().let { assertTrue(it.isEmpty()) }
                 compose.runOnIdle { active.value = false }
                 awaitText("轻点分类看占比 · 左右滑动换一天")
                 compose.runOnIdle { activity.setContent {} }
@@ -1153,7 +1160,9 @@ class UiSmokeScreenshotTest {
             awaitText(if (wasSaved) "收藏" else "已收藏")
             assertEquals(collectionPosition, compose.onNodeWithText("翻翻收藏").getUnclippedBoundsInRoot())
             capture("little-world-fortune", dialog = true)
-            compose.onNodeWithText("知道啦").performClick()
+            dismissTopDialogOutside("daily fortune")
+            compose.onNodeWithText("翻翻收藏").assertDoesNotExist()
+            assertEquals(!wasSaved, runBlocking { todayFortune.id in c.littleWorld.snapshot().favoriteFortunes })
 
             render { com.jiligulu.app.ui.littleworld.WishBookScreen({}, {}) }
             awaitText("去海边的小旅行", substring = true)
@@ -1172,7 +1181,9 @@ class UiSmokeScreenshotTest {
             awaitText("31% · 正在攒")
             compose.onNodeWithText("放颗星星").assertIsDisplayed()
             assertEquals(31_000L, runBlocking { c.littleWorld.snapshot().wishes.first { it.id == activeId }.savedFen })
-            compose.onNodeWithText("收起来").performClick()
+            dismissTopDialogOutside("wish bottle after saving a deposit")
+            compose.onNodeWithText("放颗星星").assertDoesNotExist()
+            assertEquals(31_000L, runBlocking { c.littleWorld.snapshot().wishes.first { it.id == activeId }.savedFen })
             compose.onNodeWithText("纪念").performClick()
             awaitText("终于买到小相机", substring = true)
             capture("wishbook-completed")
@@ -1191,8 +1202,11 @@ class UiSmokeScreenshotTest {
             compose.onNodeWithText("旅行前给自己的一句话").performClick()
             awaitText("到海边的时候，记得慢慢走，吹一会儿风。")
             capture("future-note-letter", dialog = true)
-            compose.onNodeWithText("等它到达").performClick()
-            compose.onNodeWithText("收起来").performClick()
+            dismissTopDialogOutside("future letter reader")
+            compose.onNodeWithTag("future-note-body").assertDoesNotExist()
+            assertNull(runBlocking { c.littleWorld.snapshot().futureNotes.first { it.id == "ui-future-note" }.readAt })
+            dismissTopDialogOutside("future letter drawer")
+            compose.onNodeWithText("旅行前给自己的一句话").assertDoesNotExist()
             compose.onNodeWithText("写一封信").performClick()
             awaitText("写给未来的你")
             compose.onNodeWithContentDescription("标题").performTextReplacement("UI 保存的小信")
@@ -1259,6 +1273,29 @@ class UiSmokeScreenshotTest {
         compose.onNodeWithTag("home-day-bills").performScrollToIndex(0)
         awaitText("牛肉面")
         compose.onAllNodesWithText("牛肉面").onFirst().performClick()
+    }
+
+    /** Deliver the same platform outside-window event used by a user tapping beyond a Dialog. */
+    private fun dismissTopDialogOutside(flow: String) {
+        compose.waitForIdle()
+        val dialog = compose.runOnIdle {
+            // A child may already have closed, so getLatestDialog can still refer to its old
+            // instance while a parent drawer is visible underneath it.
+            val current = checkNotNull(ShadowDialog.getShownDialogs().lastOrNull { it.isShowing }) {
+                "No showing dialog to dismiss in $flow"
+            }
+            val now = SystemClock.uptimeMillis()
+            val outside = MotionEvent.obtain(now, now, MotionEvent.ACTION_OUTSIDE, -1f, -1f, 0)
+            try { assertTrue("Outside event was not handled in $flow", current.onTouchEvent(outside)) }
+            finally { outside.recycle() }
+            current
+        }
+        compose.waitUntil(8_000) {
+            shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(16))
+            !dialog.isShowing
+        }
+        compose.waitForIdle()
+        assertTrue("Dialog remained showing after outside dismissal in $flow", !dialog.isShowing)
     }
 
     private fun awaitWaterCup() {

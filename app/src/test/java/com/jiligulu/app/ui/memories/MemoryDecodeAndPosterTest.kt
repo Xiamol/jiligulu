@@ -103,7 +103,7 @@ class MemoryDecodeAndPosterTest {
         assertTrue(File(context.cacheDir, "memory-poster-noto.ttf").isFile)
     }
 
-    @Test @Config(sdk = [34]) fun modernResourceFontsRenderWithoutCreatingTheLargeCacheCopy() = runBlocking {
+    @Test @Config(sdk = [35]) fun modernResourceFontsRenderWithoutCreatingTheLargeCacheCopy() = runBlocking {
         MemoryPoster.clearMemoryCache()
         val context = context()
         assertEquals(400, MemoryPoster.posterTypeface(context, 400).weight)
@@ -113,7 +113,7 @@ class MemoryDecodeAndPosterTest {
         assertFalse(File(context.cacheDir, "memory-poster-noto.ttf").exists())
     }
 
-    @Test @Config(sdk = [34]) fun aResourceFontFailureFallsBackToTheSameReadableLegacyWeight() {
+    @Test @Config(sdk = [35]) fun aResourceFontFailureFallsBackToTheSameReadableLegacyWeight() {
         val context = context()
         val font = MemoryPoster.posterTypeface(context, 650) { _, _ -> error("Synthetic resource font failure") }
         assertEquals(650, font.weight)
