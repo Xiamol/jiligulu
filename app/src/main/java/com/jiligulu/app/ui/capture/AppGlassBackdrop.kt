@@ -5,6 +5,7 @@ import android.graphics.Rect
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.os.Build
 import android.view.PixelCopy
 import android.view.View
 import android.view.Window
@@ -23,6 +24,7 @@ internal object AppGlassBackdrop {
     // The small decorative lens does not need to copy an Activity at the page's
     // 60–120 Hz cadence. It remains event-driven and is completely idle at rest.
     private var minCopyIntervalMillis = GlobalGlassFrameRate.DEFAULT.intervalMillis
+    private var targetFps = GlobalGlassFrameRate.DEFAULT.fps
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var preferenceJob: Job? = null
     private var source=WeakReference<Window>(null)
@@ -33,6 +35,11 @@ internal object AppGlassBackdrop {
     private val windowLocation=IntArray(2)
     private var inFlight=false
     private var epoch=0L
+    private var drawnFrame=0L
+    private var committedFrame=0L
+    private var lastCommitAt=0L
+    private var motionUntil=0L
+    private var publishedTicket:OwnGlassFrameTicket?=null
     private var lastRequest=0L
     private var buffers=arrayOfNulls<Bitmap>(2)
     private var nextBuffer=0
@@ -73,7 +80,7 @@ internal object AppGlassBackdrop {
         handler.removeCallbacks(refreshTask);handler.removeCallbacks(drawTask)
         refreshPending=false;queued=false
     }
-    private fun forgetPublishedFrame() {publishedBitmap=null;publishedRect=null}
+    private fun forgetPublishedFrame() {publishedBitmap=null;publishedRect=null;publishedTicket=null}
     /** Coalesce only requested work. There is no timer while the scene and bubble are idle. */
     private fun deferRefresh() {
         refreshPending=true
@@ -85,6 +92,7 @@ internal object AppGlassBackdrop {
         preferenceJob=scope.launch {
             GlobalGlassPrefs(window.context).frameRate.collect {rate ->
                 minCopyIntervalMillis=rate.intervalMillis
+                targetFps=rate.fps
                 if(refreshPending) deferRefresh()
             }
         }
@@ -97,6 +105,7 @@ internal object AppGlassBackdrop {
     }
     private fun switchWindow(window:Window?) {
         epoch++
+        drawnFrame=0L;committedFrame=0L;lastCommitAt=0L;motionUntil=0L
         cancelRefresh()
         forgetPublishedFrame()
         source.get()?.let {old ->drawListener?.let {if(old.decorView.viewTreeObserver.isAlive) old.decorView.viewTreeObserver.removeOnDrawListener(it)}}
@@ -105,17 +114,38 @@ internal object AppGlassBackdrop {
         ScreenCaptureService.refreshGlassEnvironment()
         if(window==null || watched.get()==null) return
         val listener=ViewTreeObserver.OnDrawListener {
-            if(!queued) {queued=true;handler.post(drawTask)}
+            val frame=++drawnFrame
+            val frameEpoch=epoch
+            val commit=Runnable {
+                if(frameEpoch!=epoch||source.get()!==window)return@Runnable
+                val now=SystemClock.uptimeMillis()
+                if(lastCommitAt>0L&&now-lastCommitAt<50L)motionUntil=now+80L
+                lastCommitAt=now;committedFrame=maxOf(committedFrame,frame)
+                if(!publishedIsFresh())watched.get()?.clearOwnBackdrop()
+                if(!queued){queued=true;handler.post(drawTask)}
+            }
+            // Android recommends the commit callback with PixelCopy: OnDraw itself has
+            // not yet submitted this frame. Older/software windows have only post-draw.
+            if(Build.VERSION.SDK_INT>=29&&window.decorView.isHardwareAccelerated) {
+                runCatching {window.decorView.viewTreeObserver.registerFrameCommitCallback {
+                    if(Looper.myLooper()===handler.looper)commit.run()else handler.post(commit)
+                }}.onFailure {handler.post(commit)}
+            } else handler.post(commit)
         }
         drawListener=listener;window.decorView.viewTreeObserver.addOnDrawListener(listener)
         window.decorView.post {watched.get()?.refreshBackdrop()}
     }
     fun pause(window:Window) {if(owner.get()===window) {preferenceJob?.cancel();preferenceJob=null;owner.clear();switchWindow(null)}}
     fun available()=source.get()?.decorView?.isShown==true
+    private fun publishedIsFresh():Boolean =publishedTicket?.let {
+        OwnGlassFramePolicy.isFresh(it,epoch,committedFrame,SystemClock.uptimeMillis(),targetFps)
+    }==true
+    fun matchesCurrentContent(bitmap:Bitmap?)=bitmap!=null&&publishedBitmap===bitmap&&publishedIsFresh()
     /** Reproject the last trustworthy crop at the current coordinates, never its old offset. */
     fun cachedFor(view:View):AppGlassSample? {
         val window=source.get()?.takeIf {it.decorView.isShown} ?: return null
         val bitmap=publishedBitmap ?: return null
+        if(!publishedIsFresh())return null
         val rect=publishedRect ?: return null
         view.getLocationOnScreen(viewLocation);window.decorView.getLocationOnScreen(windowLocation)
         val x=(viewLocation[0]-windowLocation[0]-rect.left).toFloat()
@@ -145,24 +175,27 @@ internal object AppGlassBackdrop {
             ?: Bitmap.createBitmap(rect.width(),rect.height(),Bitmap.Config.ARGB_8888).also {buffers[index]=it}
         val offsetX=(x-rect.left).toFloat();val offsetY=(y-rect.top).toFloat()
         inFlight=true;lastRequest=SystemClock.uptimeMillis()
-        val copyEpoch=epoch
+        val ticket=OwnGlassFrameTicket(epoch,committedFrame,lastRequest)
         try { PixelCopy.request(window,rect,bitmap,{result ->
             scope.launch {
-            if(result==PixelCopy.SUCCESS && copyEpoch==epoch && source.get()===window && view.isAttachedToWindow) {
+            if(result==PixelCopy.SUCCESS && OwnGlassFramePolicy.isFresh(ticket,epoch,committedFrame,SystemClock.uptimeMillis(),targetFps) && source.get()===window && view.isAttachedToWindow) {
                 val previous=publishedBitmap
                 val sameGeometry = publishedRect==rect && publishedOffsetX==offsetX && publishedOffsetY==offsetY &&
                     publishedViewWidth==view.width && publishedViewHeight==view.height && !view.isPressed &&
                     previous!=null && previous.width==bitmap.width && previous.height==bitmap.height
-                val unchanged = sameGeometry && withContext(Dispatchers.Default) {
+                // Comparing on a background dispatcher is useful only for quiet scenes.
+                // During a swipe it adds another queue hop to a frame already delivered.
+                val unchanged = sameGeometry && SystemClock.uptimeMillis()>motionUntil && withContext(Dispatchers.Default) {
                     runCatching { previous!!.sameAs(bitmap) }.getOrDefault(false)
                 }
-                if(copyEpoch!=epoch || source.get()!==window || !view.isAttachedToWindow) {
+                if(!OwnGlassFramePolicy.isFresh(ticket,epoch,committedFrame,SystemClock.uptimeMillis(),targetFps) || source.get()!==window || !view.isAttachedToWindow) {
                     inFlight=false;forgetPublishedFrame();callback(null,0f,0f)
                     if(refreshPending) deferRefresh()
                     return@launch
                 }
                 if(!unchanged) {
                     publishedBitmap=bitmap;publishedRect=rect
+                    publishedTicket=ticket
                     publishedOffsetX=offsetX;publishedOffsetY=offsetY
                     publishedViewWidth=view.width;publishedViewHeight=view.height
                     nextBuffer=1-index
@@ -175,6 +208,10 @@ internal object AppGlassBackdrop {
                         // must not turn a single failed reprojection into endless copies.
                         if(viewLocation[0]-windowLocation[0]!=x || viewLocation[1]-windowLocation[1]!=y) deferRefresh()
                     }
+                }
+                else {
+                    publishedTicket=ticket
+                    if(!view.hasOwnBackdrop(previous))cachedFor(view)?.let {callback(it.bitmap,it.offsetX,it.offsetY)}
                 }
                 // No callback means no shader rebind or overlay invalidate when a page
                 // redraw changed only pixels outside this small lens region.

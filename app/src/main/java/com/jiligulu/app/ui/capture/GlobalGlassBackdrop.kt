@@ -27,6 +27,7 @@ internal object GlobalGlassBackdrop {
     private var frameAt = 0L
     private var frameRegion: GlassSampleRegion? = null
     private var frame: Bitmap? = null
+    private var ambientColor=GlassAmbientTone.NEUTRAL
     private val buffers = arrayOfNulls<Bitmap>(2)
     private var nextBuffer = 0
     private var targetFps = com.jiligulu.app.data.prefs.GlobalGlassFrameRate.DEFAULT.fps
@@ -75,7 +76,7 @@ internal object GlobalGlassBackdrop {
     fun setTargetFps(fps: Int) {
         targetFps = fps
         if(mutableState.value.phase==GlobalGlassPhase.ACTIVE) mutableState.value=mutableState.value.copy(
-            detail="全图光学近似 · 目标 $targetFps 帧/秒 · 仅本机内存")
+            detail="稳定透明材质 · 可信边缘近似 · 目标 $targetFps 帧/秒")
     }
     fun session(enabled: Boolean, phase: GlobalGlassPhase, detail: String) {
         if (!enabled) rendererUnavailable = false
@@ -86,7 +87,7 @@ internal object GlobalGlassBackdrop {
         !AppGlassBackdrop.available() && mutableState.value.phase == GlobalGlassPhase.ACTIVE &&
         watched.get()?.isShown == true
 
-    fun publish(region: GlassSampleRegion, pixels: IntArray, usable: Boolean) {
+    fun publish(region: GlassSampleRegion, pixels: IntArray, usable: Boolean, materialTone:Int=GlassAmbientTone.NEUTRAL) {
         if (!usable || !mutableState.value.authorizedThisSession || AppGlassBackdrop.available() || currentTarget() == null) {
             clearFrame()
             return
@@ -99,7 +100,8 @@ internal object GlobalGlassBackdrop {
             ?: Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also { buffers[index]?.eraseColor(0); buffers[index] = it }
         bitmap.setPixels(pixels, 0, width, 0, 0, width, height)
         frame = bitmap; frameRegion = region; frameAt = SystemClock.uptimeMillis()
-        mutableState.value = GlobalGlassState(true, GlobalGlassPhase.ACTIVE, "全图光学近似 · 目标 $targetFps 帧/秒 · 仅本机内存")
+        ambientColor=materialTone
+        mutableState.value = GlobalGlassState(true, GlobalGlassPhase.ACTIVE, "稳定透明材质 · 可信边缘近似 · 目标 $targetFps 帧/秒")
         watched.get()?.refreshBackdrop()
     }
     fun keepFresh(region: GlassSampleRegion):Boolean {
@@ -122,7 +124,7 @@ internal object GlobalGlassBackdrop {
         val region = sampled.copy(bubble = current, excluded = sampled.excluded.union(safeNow))
         val bitmap = frame ?: return null
         return try {
-            (lens ?: GlobalEdgeLens().also { lens = it }).bind(bitmap, region, view.width, view.height, lightX, lightY)
+            (lens ?: GlobalEdgeLens().also { lens = it }).bind(bitmap, region, view.width, view.height, lightX, lightY,ambientColor)
         } catch (failure: Exception) {
             rendererUnavailable = true
             mutableState.value = GlobalGlassState(true, GlobalGlassPhase.PAUSED, "设备当前无法使用光学，保留基础透明玻璃")
@@ -135,6 +137,7 @@ internal object GlobalGlassBackdrop {
 
     fun clearFrame() {
         frame = null; frameRegion = null; frameAt = 0L
+        ambientColor=GlassAmbientTone.NEUTRAL
         watched.get()?.clearGlobalBackdrop()
         buffers.forEach { it?.eraseColor(0) }
     }

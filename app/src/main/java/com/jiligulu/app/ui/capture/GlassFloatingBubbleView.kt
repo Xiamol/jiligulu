@@ -23,7 +23,7 @@ import kotlin.math.min
 
 /**
  * Transparent overlay material: the real window shows through a light violet glass shell.
- * Cached lighting supplies depth; GlassOverlayHost uses platform blur without raw pixel capture.
+ * Cached lighting supplies depth; own-window fresh pixels and a stable global material stay separate.
  * The service owns touch/drag placement; pressing only transforms drawing inside this view.
  */
 class GlassFloatingBubbleView @JvmOverloads constructor(
@@ -160,6 +160,9 @@ class GlassFloatingBubbleView @JvmOverloads constructor(
         if (if(usingGlobalBackdrop) !GlobalGlassBackdrop.available() else !AppGlassBackdrop.available()) {
             backdrop=null;backdropPaint.shader=null
         }
+        if(!usingGlobalBackdrop&&backdrop!=null&&!AppGlassBackdrop.matchesCurrentContent(backdrop)) {
+            backdrop=null;backdropPaint.shader=null
+        }
         if(backdropPaint.shader!=null) canvas.drawPath(glassPath,backdropPaint)
         canvas.drawRoundRect(glassBounds, radius, radius, glassPaint)
         canvas.drawPath(glassPath, glowPaint)
@@ -241,6 +244,8 @@ class GlassFloatingBubbleView @JvmOverloads constructor(
     }
 
     fun clearBackdrop() {backdrop=null;backdropPaint.shader=null;usingGlobalBackdrop=false;invalidate()}
+    internal fun clearOwnBackdrop() {if(!usingGlobalBackdrop&&backdrop!=null){backdrop=null;backdropPaint.shader=null;invalidate()}}
+    internal fun hasOwnBackdrop(bitmap:Bitmap?)=!usingGlobalBackdrop&&bitmap!=null&&backdrop===bitmap&&backdropPaint.shader!=null
     internal fun clearGlobalBackdrop() {if(usingGlobalBackdrop) clearBackdrop()}
     override fun onAttachedToWindow() {super.onAttachedToWindow();GlobalGlassBackdrop.watch(this);AppGlassBackdrop.watch(this);postDelayed(backdropRefreshTask,100)}
 

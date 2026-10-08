@@ -265,13 +265,14 @@ class ScreenCaptureService : Service() {
                     val plane = image.planes[0]
                     val usable = GlobalGlassSampling.copyRing(plane.buffer, plane.rowStride, plane.pixelStride, region, ringPixels)
                     val changed = frameHistory.changed(region, ringPixels)
+                    val materialTone=if(usable)GlassAmbientTone.estimate(ringPixels)else GlassAmbientTone.NEUTRAL
                     image.close()
                     val pixels = ringPixels
                     handler.post {
                         if (!closed && epoch == generation && globalRequested && samplingActive && !capturing) {
                             processedFrames++; processingNanos += System.nanoTime() - before
                             if (usable) {
-                                if (changed || !GlobalGlassBackdrop.keepFresh(region)) GlobalGlassBackdrop.publish(region, pixels, true)
+                                if (changed || !GlobalGlassBackdrop.keepFresh(region)) GlobalGlassBackdrop.publish(region, pixels, true,materialTone)
                             } else GlobalGlassBackdrop.session(true, GlobalGlassPhase.PAUSED, "画面受保护或没有可信采样，使用基础透明玻璃")
                             if (processedFrames == 1 || processedFrames % 120 == 0) android.util.Log.i("GlobalGlass",
                                 "frames=$processedFrames roi=${region.roi.width}x${region.roi.height} capture=${w}x$h avgProcessMs=${processingNanos / processedFrames / 1_000_000}")

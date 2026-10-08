@@ -127,7 +127,7 @@ fun FloatingCaptureSettings() {
     GlassSamplingSettings(glassPrefs, enabled = Build.VERSION.SDK_INT >= 33)
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text("全局液态玻璃", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-        SettingHelpButton("全局液态玻璃", "当前状态：${globalStatus.detail}\n\n默认关闭。关闭时，采样速度仍对 App 内玻璃起效。开启后需要本次系统屏幕共享授权，系统共享标识和可停止的通知会持续显示；每次重新启动都需要重新授权。\n\n效果覆盖整个悬浮图标。App 内从本应用真实背景取样；App 外的系统共享画面会包含悬浮球本身，因此使用周围未遮挡画面近似重建中心，中心细小文字不保证完整，不能等同于 App 内真实背景。\n\n画面只在本机内存中用于玻璃效果，不保存、上传或识别。采样速度默认每秒 30 次，实际受设备画面与处理速度限制，较高档位会增加耗电；静止时不持续重绘。隐藏、锁屏或关闭屏幕时全局采样暂停，系统结束共享时停止。")
+        SettingHelpButton("全局液态玻璃", "当前状态：${globalStatus.detail}\n\n默认关闭。关闭时，采样速度仍对 App 内玻璃起效。开启后需要本次系统屏幕共享授权，系统共享标识和可停止的通知会持续显示；每次重新启动都需要重新授权。\n\nApp 内从本应用新鲜背景取样，快速画面无法同步时暂退为透明材质，样本跟上后恢复。跨窗口采样有时延，不能保证严格同帧。App 外共享画面含悬浮球本身，只使用未遮挡画面做可信边缘折射和轻透明色调；中心不重建被遮住的文字，不等同于真实底层画面。\n\n画面只在本机内存中用于玻璃效果，不保存、上传或识别。采样速度默认每秒 30 次，实际受设备画面与处理速度限制，较高档位会增加耗电；静止时不持续重绘。隐藏、锁屏或关闭屏幕时全局采样暂停，系统结束共享时停止。")
         Switch(checked = globalDesired, enabled = Build.VERSION.SDK_INT >= 33 && (globalDesired || enabled && running && !hidden),
             onCheckedChange = { value ->
                 com.jiligulu.app.core.audio.UiSound.toggle(context)
@@ -165,7 +165,7 @@ fun FloatingCaptureSettings() {
         onConfirm = { explainGlobal = false; authorizeGlobal() }) {
         Text("需要共享整个屏幕，系统共享标识和可停止的通知会持续显示。画面仅在本机内存中使用，不保存、上传或识别。",
             style = MaterialTheme.typography.bodySmall)
-        Text("玻璃效果覆盖整个图标。App 内使用真实背景；App 外因共享画面包含悬浮球，中心从周围未遮挡画面近似重建，细小文字不保证完整。",
+        Text("App 内使用新鲜背景采样，快速画面跟不上时暂用透明材质；App 外只折射可信边缘，中心用轻透明色调保持稳定，不重建被遮住的文字。",
             style = MaterialTheme.typography.bodySmall)
         Text("较高采样速度会增加耗电。隐藏、锁屏或关闭屏幕时暂停；系统结束共享时停止，下次启动需要重新授权。",
             style = MaterialTheme.typography.bodySmall)
