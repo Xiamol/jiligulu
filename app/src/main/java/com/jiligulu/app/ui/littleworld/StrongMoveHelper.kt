@@ -2,33 +2,89 @@ package com.jiligulu.app.ui.littleworld
 
 import kotlin.math.abs
 
+enum class GomokuSearchSource {
+    CENTER, IMMEDIATE_WIN, FORCED_BLOCK, WINNING_FORK, VCF_PROOF, VCT_PROOF,
+    COMPLETED_SEARCH, STATIC_FALLBACK, HEURISTIC_FALLBACK, CANCELLED,
+    NO_LEGAL_MOVE, ALL_KNOWN_LOSING,
+}
+
+enum class GomokuSearchPhase { INITIALIZATION, OWN_VCF, OPPONENT_VCF, OWN_VCT, MAIN_SEARCH }
+
+data class GomokuPhaseTiming(
+    val phase: GomokuSearchPhase,
+    val elapsedMillis: Long,
+    val visits: Int,
+    val completed: Boolean,
+)
+
+/** Optional QA data; no logging, persistence, or UI feedback is produced by the engine. */
+data class GomokuSearchDiagnostics(
+    val source: GomokuSearchSource,
+    val completedDepth: Int,
+    val rootScore: Int?,
+    val elapsedMillis: Long,
+    val phases: List<GomokuPhaseTiming>,
+    val knownLosses: Set<GridCell>,
+    val nodeCount: Int,
+    val move: GridCell?,
+)
+
 /** Freestyle rules, shared by both colours. Call from a cancellable background dispatcher. */
 object GomokuStrongMoveHelper {
+    /** Retain positional three-argument callers as well as trailing cancellation lambdas. */
+    fun chooseMove(state: GomokuState, timeBudgetMillis: Long, shouldCancel: () -> Boolean): GridCell? =
+        chooseMove(state, timeBudgetMillis, onDiagnostics = null, shouldCancel = shouldCancel)
+
     fun chooseMove(
         state: GomokuState,
         timeBudgetMillis: Long = 1_500,
+        onDiagnostics: ((GomokuSearchDiagnostics) -> Unit)? = null,
         shouldCancel: () -> Boolean = { false },
     ): GridCell? {
-        if (state.outcome != GomokuOutcome.PLAYING || shouldCancel()) return null
-        return try {
-            GomokuSearch(state, shouldCancel, timeBudgetMillis.coerceIn(100, 5_000)).choose()
-        } catch (_: SearchStopped) {
+        val budget = GomokuSearchBudget(shouldCancel, timeBudgetMillis.coerceIn(100, 5_000))
+        var search: GomokuSearch? = null
+        var move: GridCell? = null
+        var source = GomokuSearchSource.NO_LEGAL_MOVE
+        try {
+            if (state.outcome == GomokuOutcome.PLAYING && !budget.finishCancelled()) {
+                val prepared = budget.inPhase(GomokuSearchPhase.INITIALIZATION) { GomokuSearch(state, budget) }
+                search = prepared
+                move = prepared.choose()
+                source = prepared.resultSource
+            }
+        } catch (stopped: SearchStopped) {
             // Initial pattern construction can exhaust a small budget on a slow device.
             // Cancellation discards the answer; a deadline alone still has a legal fallback.
-            if (shouldCancel() || Thread.currentThread().isInterrupted) null
-            else GomokuEngine.chooseHeuristicMove(state).takeUnless { shouldCancel() || Thread.currentThread().isInterrupted }
+            if (stopped.cancelled || budget.finishCancelled()) source = GomokuSearchSource.CANCELLED
+            else {
+                move = GomokuEngine.chooseHeuristicMove(state)
+                source = GomokuSearchSource.HEURISTIC_FALLBACK
+            }
         }
+        if (budget.finishCancelled()) { move = null; source = GomokuSearchSource.CANCELLED }
+        onDiagnostics?.let { listener ->
+            val diagnostics = GomokuSearchDiagnostics(source, search?.completedDepth ?: 0, search?.rootScore,
+                budget.elapsedMillis, budget.phases.toList(), search?.knownLosses.orEmpty(), search?.nodeCount ?: 0, move)
+            // A QA consumer must not turn a valid engine move into an application error.
+            runCatching { listener(diagnostics) }
+        }
+        return move
     }
 }
 
-private class SearchStopped : RuntimeException(null, null, false, false)
-private class ThreatSearchStopped : RuntimeException(null, null, false, false)
+internal class SearchStopped(val cancelled: Boolean = false) : RuntimeException(null, null, false, false)
+internal class ThreatSearchStopped : RuntimeException(null, null, false, false)
 
-private class SearchBudget(private val shouldCancel: () -> Boolean, val millis: Long) {
-    private val started = System.nanoTime()
+internal class GomokuSearchBudget(
+    private val shouldCancel: () -> Boolean,
+    val millis: Long,
+    private val nanoTime: () -> Long = System::nanoTime,
+) {
+    private val started = nanoTime()
     private val deadline = started + millis * 1_000_000L
     private var checks = 0
-    val elapsedMillis: Long get() = (System.nanoTime() - started) / 1_000_000L
+    val elapsedMillis: Long get() = (nanoTime() - started) / 1_000_000L
+    val phases = ArrayList<GomokuPhaseTiming>()
     private var threatDeadline = deadline
     private var cancelled = false
 
@@ -37,11 +93,16 @@ private class SearchBudget(private val shouldCancel: () -> Boolean, val millis: 
         if (checks == 1 || checks and 15 == 0) {
             if (shouldCancel() || Thread.currentThread().isInterrupted) {
                 cancelled = true
-                throw SearchStopped()
+                throw SearchStopped(cancelled = true)
             }
-            val now = System.nanoTime()
+            val now = nanoTime()
             if (now >= deadline) throw SearchStopped()
-            if (threatSearch && now >= threatDeadline) throw ThreatSearchStopped()
+        }
+        // make()/reply visits must not mask a phase cutoff by landing on every 16th check.
+        if (threatSearch) {
+            val now = nanoTime()
+            if (now >= deadline) throw SearchStopped()
+            if (now >= threatDeadline) throw ThreatSearchStopped()
         }
     }
 
@@ -49,7 +110,50 @@ private class SearchBudget(private val shouldCancel: () -> Boolean, val millis: 
         threatDeadline = minOf(deadline, started + untilMillis * 1_000_000L)
     }
 
-    fun finishCancelled(): Boolean = cancelled || shouldCancel() || Thread.currentThread().isInterrupted
+    fun finishCancelled(): Boolean {
+        if (shouldCancel() || Thread.currentThread().isInterrupted) cancelled = true
+        return cancelled
+    }
+
+    fun <T> inPhase(phase: GomokuSearchPhase, action: () -> T): T {
+        val phaseStarted = nanoTime()
+        val firstVisit = checks
+        var completed = false
+        try {
+            val result = action()
+            completed = true
+            return result
+        } finally {
+            phases.add(GomokuPhaseTiming(phase, (nanoTime() - phaseStarted) / 1_000_000L,
+                checks - firstVisit, completed))
+        }
+    }
+}
+
+/** Positive loss proofs survive an interrupted screen; untested moves remain unknown. */
+internal class GomokuRootMoveSafety(legalMoves: IntArray) {
+    private val legal = legalMoves.copyOf()
+    private val legalSet = legal.toHashSet()
+    private val losing = LinkedHashSet<Int>()
+    val knownLosses: Set<Int> get() = losing.toSet()
+    val allKnownLosing: Boolean get() = legal.isNotEmpty() && losing.size == legal.size
+
+    fun screen(ordered: IntArray, provesLoss: (Int) -> Boolean) {
+        for (move in ordered) {
+            require(move in legalSet)
+            if (provesLoss(move)) losing.add(move)
+        }
+    }
+
+    fun available(ordered: IntArray): IntArray = ordered.filter { it in legalSet && it !in losing }.toIntArray()
+
+    fun fallback(preferred: Int, ordered: IntArray): Int {
+        if (preferred in legalSet && preferred !in losing) return preferred
+        return ordered.firstOrNull { it in legalSet && it !in losing }
+            ?: legal.firstOrNull { it !in losing }
+            // If all legal moves have a loss proof, the game must still make a legal move.
+            ?: ordered.firstOrNull { it in legalSet } ?: legal.firstOrNull() ?: -1
+    }
 }
 
 private enum class Bound { EXACT, LOWER, UPPER }
@@ -62,101 +166,144 @@ private data class Candidate(val index: Int, val priority: Int, val tactical: Bo
  * checks the defender's counter-win and every legal response to an unforced three;
  * a large pattern score alone is never reported as a forced win.
  */
-private class GomokuSearch(state: GomokuState, shouldCancel: () -> Boolean, millis: Long) {
-    private val budget = SearchBudget(shouldCancel, millis)
+internal class GomokuSearch(state: GomokuState, private val budget: GomokuSearchBudget) {
     private val position = GomokuThreatPosition(state) { budget.visit() }
     private val player = state.currentPlayer
     private val table = HashMap<Long, SearchEntry>()
     private val threats = HashMap<ThreatKey, Int>()
     private val history = Array(3) { IntArray(state.board.size) }
     private val mate = 5_000_000
+    // Retain a ranked reserve of every legal square if the capped list is exhausted.
+    private val rootSafety = GomokuRootMoveSafety(candidates(player, position.cells.size, includeDistantQuiet = true)
+        .map { it.index }.toIntArray())
+    var resultSource = GomokuSearchSource.STATIC_FALLBACK
+        private set
+    var completedDepth = 0
+        private set
+    var rootScore: Int? = null
+        private set
+    var nodeCount = 0
+        private set
+    val knownLosses: Set<GridCell> get() = rootSafety.knownLosses.map(position::cell).toSet()
+
+    /** Pure search entry used by the independent exact-endgame regression oracle. */
+    internal fun scoreAtDepth(depth: Int, alpha: Int = -10_000_000, beta: Int = 10_000_000, extension: Int = 14): Int =
+        search(player, depth, alpha, beta, 0, extension)
+
+    internal fun candidateIndices(side: Int, quietLimit: Int, preferred: Int = -1): IntArray =
+        candidates(side, quietLimit, preferred).map { it.index }.toIntArray()
 
     fun choose(): GridCell? {
         var completed = -1
+        var rootOrder = IntArray(0)
         try {
             budget.visit()
             if (position.emptyCount == position.cells.size) {
-                return position.cell(position.size / 2 * position.size + position.size / 2)
-                    .takeUnless { budget.finishCancelled() }
+                return selected(position.size / 2 * position.size + position.size / 2, GomokuSearchSource.CENTER)
             }
             var root = candidates(player, 48)
-            if (root.isEmpty()) return null
+            if (root.isEmpty()) { resultSource = GomokuSearchSource.NO_LEGAL_MOVE; return null }
+            rootOrder = root.map { it.index }.toIntArray()
             completed = root.first().index
             val wins = position.winningMoves(player)
-            if (wins.isNotEmpty()) return position.cell(wins.first()).takeUnless { budget.finishCancelled() }
+            if (wins.isNotEmpty()) return selected(wins.first(), GomokuSearchSource.IMMEDIATE_WIN)
             val mustBlock = position.winningMoves(3 - player)
-            if (mustBlock.size == 1) return position.cell(mustBlock.first()).takeUnless { budget.finishCancelled() }
+            if (mustBlock.size == 1) return selected(mustBlock.first(), GomokuSearchSource.FORCED_BLOCK)
             val fork = root.firstOrNull { GomokuThreatPosition.wins(position.info(player, it.index)) >= 2 }
             if (fork != null && mustBlock.isEmpty()) {
-                return position.cell(fork.index).takeUnless { budget.finishCancelled() }
+                return selected(fork.index, GomokuSearchSource.WINNING_FORK)
             }
 
-            // Keep most of the turn for the main search even when the proof tree is hard.
+            // Reserve time for the main search even when the proof tree is hard.
             // VCF can look beyond the ordinary minimax horizon without guessing replies.
             try {
-                budget.threatSlice(budget.millis * 24 / 100)
-                val winning = prove(player, 12, false)
-                if (winning >= 0) return position.cell(winning).takeUnless { budget.finishCancelled() }
+                val winning = budget.inPhase(GomokuSearchPhase.OWN_VCF) {
+                    budget.threatSlice(budget.millis * 24 / 100)
+                    prove(player, 12, false)
+                }
+                if (winning >= 0) return selected(winning, GomokuSearchSource.VCF_PROOF)
             } catch (_: ThreatSearchStopped) { /* No proof, rather than a fictitious win. */ }
 
             // Reject quiet moves that demonstrably walk into the opponent's forcing line.
             // The defence is checked on the resulting board, not only at its first point.
             try {
-                budget.threatSlice(budget.millis * 42 / 100)
-                val opponentAttack = prove(3 - player, 10, false)
-                if (opponentAttack >= 0) {
-                    val safe = ArrayList<Candidate>()
-                    for (option in root) {
-                        budget.visit(true)
-                        position.make(option.index, player)
-                        val losing = try { prove(3 - player, 10, false) >= 0 } finally { position.unmake() }
-                        if (!losing) safe.add(option)
-                    }
-                    if (safe.isNotEmpty()) {
-                        root = safe
-                        completed = root.first().index
+                budget.inPhase(GomokuSearchPhase.OPPONENT_VCF) {
+                    budget.threatSlice(budget.millis * 42 / 100)
+                    val opponentAttack = prove(3 - player, 10, false)
+                    if (opponentAttack >= 0) {
+                        rootSafety.screen(rootOrder) { index ->
+                            budget.visit(true)
+                            position.make(index, player)
+                            try { prove(3 - player, 10, false) >= 0 } finally { position.unmake() }
+                        }
                     }
                 }
-            } catch (_: ThreatSearchStopped) { /* A partial screening is not committed. */ }
+            } catch (_: ThreatSearchStopped) { /* Completed loss proofs remain in rootSafety. */ }
+
+            val available = rootSafety.available(rootOrder).toHashSet()
+            if (available.isNotEmpty()) root = root.filter { it.index in available }
+            else if (!rootSafety.allKnownLosing) {
+                // A candidate cap must not force a known losing move while untested legal
+                // moves remain. Widen only in this exceptional defensive position.
+                val losing = rootSafety.knownLosses
+                root = candidates(player, position.cells.size, includeDistantQuiet = true).filter { it.index !in losing }
+            }
+            rootOrder = root.map { it.index }.toIntArray()
+            completed = rootSafety.fallback(completed, rootOrder)
 
             try {
-                budget.threatSlice(budget.millis * 55 / 100)
-                val winning = prove(player, 4, true)
-                if (winning >= 0) return position.cell(winning).takeUnless { budget.finishCancelled() }
+                val winning = budget.inPhase(GomokuSearchPhase.OWN_VCT) {
+                    budget.threatSlice(budget.millis * 55 / 100)
+                    prove(player, 4, true)
+                }
+                if (winning >= 0) return selected(winning, GomokuSearchSource.VCT_PROOF)
             } catch (_: ThreatSearchStopped) { /* Continue with the completed root result. */ }
 
-            for (depth in 1..10) {
-                budget.visit()
-                val ordered = root.sortedByDescending { if (it.index == completed) Int.MAX_VALUE else it.priority }
-                var best = completed
-                var bestScore = -mate * 2
-                var alpha = -mate * 2
-                for ((order, option) in ordered.withIndex()) {
+            budget.inPhase(GomokuSearchPhase.MAIN_SEARCH) {
+                for (depth in 1..10) {
                     budget.visit()
-                    position.make(option.index, player)
-                    val score = try {
-                        if (order == 0) -search(3 - player, depth - 1, -mate * 2, -alpha, 1, 14)
-                        else {
-                            var probe = -search(3 - player, depth - 1, -alpha - 1, -alpha, 1, 14)
-                            if (probe > alpha) probe = -search(3 - player, depth - 1, -mate * 2, -alpha, 1, 14)
-                            probe
-                        }
-                    } finally { position.unmake() }
-                    if (score > bestScore) { bestScore = score; best = option.index }
-                    alpha = maxOf(alpha, score)
+                    val ordered = root.sortedByDescending { if (it.index == completed) Int.MAX_VALUE else it.priority }
+                    var best = completed
+                    var bestScore = -mate * 2
+                    var alpha = -mate * 2
+                    for ((order, option) in ordered.withIndex()) {
+                        budget.visit()
+                        position.make(option.index, player)
+                        val score = try {
+                            if (order == 0) -search(3 - player, depth - 1, -mate * 2, -alpha, 1, 14)
+                            else {
+                                var probe = -search(3 - player, depth - 1, -alpha - 1, -alpha, 1, 14)
+                                if (probe > alpha) probe = -search(3 - player, depth - 1, -mate * 2, -alpha, 1, 14)
+                                probe
+                            }
+                        } finally { position.unmake() }
+                        if (score > bestScore) { bestScore = score; best = option.index }
+                        alpha = maxOf(alpha, score)
+                    }
+                    completed = best
+                    completedDepth = depth
+                    rootScore = bestScore
+                    resultSource = GomokuSearchSource.COMPLETED_SEARCH
+                    if (abs(bestScore) >= mate - 100) break
                 }
-                completed = best
-                if (abs(bestScore) >= mate - 100) break
             }
         } catch (_: SearchStopped) {
             // Never publish a half-searched root iteration. The immutable input is untouched.
         }
+        completed = rootSafety.fallback(completed, rootOrder)
+        if (rootSafety.allKnownLosing) resultSource = GomokuSearchSource.ALL_KNOWN_LOSING
         return if (completed < 0 || budget.finishCancelled()) null else position.cell(completed)
+    }
+
+    private fun selected(index: Int, source: GomokuSearchSource): GridCell? {
+        resultSource = source
+        return position.cell(index).takeUnless { budget.finishCancelled() }
     }
 
     /** Return a proven winning first move, or -1 when no proof exists inside this horizon. */
     private fun prove(attacker: Int, depth: Int, includeThrees: Boolean): Int {
         budget.visit(true)
+        nodeCount++
         val wins = position.winningMoves(attacker)
         if (wins.isNotEmpty()) return wins.first()
         if (depth <= 0 || position.emptyCount == 0) return -1
@@ -209,7 +356,11 @@ private class GomokuSearch(state: GomokuState, shouldCancel: () -> Boolean, mill
     }
 
     private fun search(side: Int, depth: Int, alphaIn: Int, betaIn: Int, ply: Int, extension: Int): Int {
+        // Passing is not legal in Gomoku. A static stand-pat is not a bound when the
+        // last few forced placements can turn every continuation into a draw.
+        if (position.emptyCount <= 4) return solveToEnd(side, alphaIn, betaIn, ply)
         budget.visit()
+        nodeCount++
         if (position.emptyCount == 0) return 0
         val winning = position.winningMoves(side)
         if (winning.isNotEmpty()) return mate - ply - 1
@@ -233,7 +384,7 @@ private class GomokuSearch(state: GomokuState, shouldCancel: () -> Boolean, mill
         }
 
         var options = if (blocks.size == 1) listOf(Candidate(blocks.first(), Int.MAX_VALUE, true))
-            else candidates(side, if (depth >= 4) 16 else 22)
+            else candidates(side, if (depth >= 4) 16 else 22, cached?.move ?: -1)
         if (options.isEmpty()) return 0
         val forcedDefence = blocks.isNotEmpty() || position.hasFork(opponent)
         var standPat = -mate * 2
@@ -288,13 +439,35 @@ private class GomokuSearch(state: GomokuState, shouldCancel: () -> Boolean, mill
         return best
     }
 
+    /** Exhaustive for at most four free squares, independent of quiescence extensions. */
+    private fun solveToEnd(side: Int, alphaIn: Int, beta: Int, ply: Int): Int {
+        budget.visit()
+        nodeCount++
+        if (position.emptyCount == 0) return 0
+        if (position.winningMoves(side).isNotEmpty()) return mate - ply - 1
+        if (position.winningMoves(3 - side).size >= 2) return -mate + ply + 2
+        var alpha = alphaIn
+        var best = -mate * 2
+        val moves = position.cells.indices.filter { position.cells[it] == 0 }.sortedByDescending {
+            GomokuThreatPosition.score(position.info(side, it)) + GomokuThreatPosition.score(position.info(3 - side, it))
+        }
+        for (move in moves) {
+            position.make(move, side)
+            val value = try { -solveToEnd(3 - side, -beta, -alpha, ply + 1) } finally { position.unmake() }
+            best = maxOf(best, value)
+            alpha = maxOf(alpha, value)
+            if (alpha >= beta) break
+        }
+        return best
+    }
+
     /** Global tactical scan; quiet branching alone is capped, never forced attacks/blocks. */
-    private fun candidates(side: Int, quietLimit: Int): List<Candidate> {
+    private fun candidates(side: Int, quietLimit: Int, preferred: Int = -1, includeDistantQuiet: Boolean = false): List<Candidate> {
         val opponent = 3 - side
         val wins = position.winningMoves(side)
-        if (wins.isNotEmpty()) return wins.map { Candidate(it, Int.MAX_VALUE, true) }
+        if (wins.isNotEmpty() && !includeDistantQuiet) return wins.map { Candidate(it, Int.MAX_VALUE, true) }
         val blocks = position.winningMoves(opponent)
-        if (blocks.isNotEmpty()) return blocks.map { Candidate(it, Int.MAX_VALUE, true) }
+        if (blocks.isNotEmpty() && !includeDistantQuiet) return blocks.map { Candidate(it, Int.MAX_VALUE, true) }
         val options = ArrayList<Candidate>()
         for (index in position.cells.indices) {
             if (position.cells[index] != 0) continue
@@ -302,16 +475,16 @@ private class GomokuSearch(state: GomokuState, shouldCancel: () -> Boolean, mill
             val other = position.info(opponent, index)
             val tactical = GomokuThreatPosition.wins(own) > 0 || GomokuThreatPosition.wins(other) > 0 ||
                 GomokuThreatPosition.threes(own) > 0 || GomokuThreatPosition.threes(other) > 0
-            if (!tactical && position.neighbours[index] == 0) continue
+            if (!tactical && !includeDistantQuiet && index != preferred && position.neighbours[index] == 0) continue
             val attack = GomokuThreatPosition.score(own)
             val defence = GomokuThreatPosition.score(other)
             val centrality = position.size - abs(index % position.size - position.size / 2) - abs(index / position.size - position.size / 2)
             options.add(Candidate(index, attack * 11 / 10 + defence + centrality, tactical))
         }
-        options.sortWith(compareByDescending<Candidate> { it.priority }.thenBy { it.index })
+        options.sortWith(compareByDescending<Candidate> { if (it.index == preferred) Int.MAX_VALUE else it.priority }.thenBy { it.index })
         if (quietLimit == 0) return options.filter { it.tactical }
         var quiet = 0
-        return options.filter { it.tactical || quiet++ < quietLimit }
+        return options.filter { it.tactical || it.index == preferred || quiet++ < quietLimit }
     }
 
     private fun evaluate(side: Int): Int {
