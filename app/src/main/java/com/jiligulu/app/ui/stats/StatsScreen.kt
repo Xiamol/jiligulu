@@ -145,7 +145,7 @@ fun StatsScreen(
     var showActual by rememberSaveable { mutableStateOf(true) }
     var showAverage by rememberSaveable { mutableStateOf(true) }
     val flowType by vm.flowType.collectAsStateWithLifecycle()
-    val bars = if (showTrend || barMode == StatsBarMode.MONTH_COMPRESSED)
+    val bars = if (showTrend)
         vm.cashFlowBars.collectAsStateWithLifecycle().value else emptyList()
     val selectedDay by vm.selectedDay.collectAsStateWithLifecycle()
     val dayDonut by vm.dayDonut.collectAsStateWithLifecycle()
@@ -155,10 +155,16 @@ fun StatsScreen(
     val averages = if (showTrend && flowType == BillType.EXPENSE)
         vm.monthlyExpenseAverages.collectAsStateWithLifecycle().value else emptyList()
     val today by vm.today.collectAsStateWithLifecycle()
+    val chartAnchor by vm.chartAnchor.collectAsStateWithLifecycle()
+    val chartFollowsToday by vm.chartFollowsToday.collectAsStateWithLifecycle()
+    val compactVisibleWindow by vm.compactVisibleWindow.collectAsStateWithLifecycle()
+    val chartMonth by vm.chartMonth.collectAsStateWithLifecycle()
 
     val compactBars = if (!showTrend && barMode == StatsBarMode.COMPACT_TEN_DAYS)
-        vm.compactCashFlowBars.collectAsStateWithLifecycle().value else emptyList()
-    val visibleBars = if (showTrend || barMode == StatsBarMode.MONTH_COMPRESSED) bars else compactBars
+        vm.prefetchedCashFlowBars.collectAsStateWithLifecycle().value else emptyList()
+    val monthBars = if (!showTrend && barMode == StatsBarMode.MONTH_COMPRESSED)
+        vm.pagedMonthCashFlowBars.collectAsStateWithLifecycle().value else emptyList()
+    val visibleBars = if (showTrend) bars else if (barMode == StatsBarMode.MONTH_COMPRESSED) monthBars else compactBars
     val averageMap = remember(averages) { averages.associateBy { it.date } }
     val linePoints = remember(bars, averageMap, today, flowType) {
         val zone = ZoneId.systemDefault()
@@ -212,12 +218,13 @@ fun StatsScreen(
                 Surface(Modifier.weight(1f).height(44.dp).clickable { UiSound.navigate(context); showDateFilter = true },
                     shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surface) {
                     val date = Instant.ofEpochMilli(selectedDay).atZone(ZoneId.systemDefault()).toLocalDate()
-                    val range = visibleBars.takeIf { it.isNotEmpty() }?.let { it.first().dayStartMillis to it.last().dayStartMillis }
-                    fun shortDate(value: Long) = Instant.ofEpochMilli(value).atZone(ZoneId.systemDefault()).toLocalDate().let { "${it.monthValue}月${it.dayOfMonth}日" }
+                    val range = compactVisibleWindow.first to compactVisibleWindow.last
+                    fun shortDate(value: java.time.LocalDate) = (if (range.first.year != range.second.year) "${value.year}年" else "") + "${value.monthValue}月${value.dayOfMonth}日"
                     Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.Center) {
-                        Text(if (showTrend || barMode == StatsBarMode.MONTH_COMPRESSED) "${date.year}年${date.monthValue}月"
-                            else if (range == null) "${date.monthValue}月${date.dayOfMonth}日" else "${shortDate(range.first)} – ${shortDate(range.second)}",
+                        Text(if (showTrend) "${date.year}年${date.monthValue}月"
+                            else if (barMode == StatsBarMode.MONTH_COMPRESSED) "${chartMonth.year}年${chartMonth.monthValue}月"
+                            else "${shortDate(range.first)} – ${shortDate(range.second)}",
                             color = MaterialTheme.colorScheme.primary, fontSize = 14.sp, fontWeight = FontWeight.Medium,
                             maxLines = 1, modifier = Modifier.weight(1f, fill = false))
                         Spacer(Modifier.width(7.dp))
@@ -273,10 +280,11 @@ fun StatsScreen(
                 } else CashFlowBarChart(
                     bars = visibleBars,
                     compressedMonth = barMode == StatsBarMode.MONTH_COMPRESSED,
-                    onShiftWindow = { direction ->
-                        if (barMode == StatsBarMode.MONTH_COMPRESSED) vm.shiftMonth(direction)
-                        else vm.shiftCompactWindow(direction * 10)
-                    },
+                    anchor = chartAnchor,
+                    followToday = chartFollowsToday,
+                    todayMillis = today.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli(),
+                    onCompactViewport = vm::reportCompactViewport,
+                    onMonthViewport = vm::reportMonthViewport,
                     selectedDayMillis = selectedDay,
                     onSelectDay = { UiSound.select(context); vm.selectDay(it) },
                     color = if (flowType == BillType.EXPENSE) ExpenseCoral else IncomeGreen,

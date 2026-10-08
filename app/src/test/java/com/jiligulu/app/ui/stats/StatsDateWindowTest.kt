@@ -9,6 +9,27 @@ import java.time.LocalDate
 import java.time.ZoneId
 
 class StatsDateWindowTest {
+    @Test fun dailyPrefetchReusesItsLoadedWindowUntilTheViewportApproachesAnEdge() {
+        val visible = StatsDateWindow(LocalDate.of(2026, 12, 27), LocalDate.of(2027, 1, 5))
+        val loaded = retainedStatsDayWindow(null, visible)
+        assertEquals(StatsDateWindow(LocalDate.of(2026, 12, 17), LocalDate.of(2027, 1, 15)), loaded)
+        assertEquals(loaded, retainedStatsDayWindow(loaded, visible.shifted(6)))
+        val next = retainedStatsDayWindow(loaded, visible.shifted(8))
+        assertEquals(visible.first.plusDays(8).minusDays(10), next.first)
+        assertEquals(30, next.dates.size)
+        val far = retainedStatsDayWindow(next, visible.shifted(10_000))
+        assertEquals(30, far.dates.size)
+        assertEquals(visible.first.plusDays(10_000).minusDays(10), far.first)
+    }
+
+    @Test fun monthPrefetchIncludesRealNeighbourMonthsAcrossTheNewYear() {
+        val window = prefetchedStatsMonths(java.time.YearMonth.of(2027, 1))
+        assertEquals(LocalDate.of(2026, 12, 1), window.first)
+        assertEquals(LocalDate.of(2027, 2, 28), window.last)
+        assertEquals(90, window.dates.size)
+        assertEquals(LocalDate.of(1, 1, 1), prefetchedStatsMonths(java.time.YearMonth.of(1, 1)).first)
+        assertEquals(LocalDate.of(9999, 12, 31), prefetchedStatsMonths(java.time.YearMonth.of(9999, 12)).last)
+    }
     @Test fun tenDaysCrossDecemberAndJanuaryInsteadOfClampingToAMonth() {
         val window = compactStatsWindow(LocalDate.of(2026, 12, 31), LocalDate.of(2026, 10, 7))
         assertEquals(LocalDate.of(2026, 12, 27), window.first)

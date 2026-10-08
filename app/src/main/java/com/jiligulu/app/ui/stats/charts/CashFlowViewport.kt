@@ -1,29 +1,72 @@
 package com.jiligulu.app.ui.stats.charts
 
-import androidx.compose.foundation.ScrollState
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.pager.PagerState
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import kotlin.math.roundToInt
+import androidx.compose.runtime.setValue
+import java.time.LocalDate
+import java.time.YearMonth
 
-/** Both chart styles retain the same horizontal position when the user changes their view. */
-class CashFlowViewport(val scroll: ScrollState) {
-    private var anchoredDay: Long? = null
-    private var anchoredMonth: Long? = null
+data class CashFlowChartAnchor(val firstDay: LocalDate, val month: YearMonth,
+    val revision: Long = 0, val monthRevision: Long = revision, val followsToday: Boolean = false)
 
-    suspend fun anchorSelection(bars: List<DayBar>, selected: Long?, slotPx: Float) {
-        if (bars.isEmpty() || slotPx <= 0f) return
-        val month = bars.first().dayStartMillis
-        if (selected == anchoredDay && month == anchoredMonth) return
-        val index = bars.indexOfFirst { it.dayStartMillis == selected }
-        anchoredDay = selected
-        anchoredMonth = month
-        if (index >= 0) scroll.animateScrollTo(((index - 2).coerceAtLeast(0) * slotPx).roundToInt())
+private val firstDay = LocalDate.of(1, 1, 1).toEpochDay()
+private val lastDay = LocalDate.of(9999, 12, 31).toEpochDay()
+internal val cashFlowDayCount = (lastDay - firstDay + 1).toInt()
+internal const val cashFlowMonthCount = 9999 * 12
+internal fun cashFlowDayIndex(date: LocalDate) = (date.toEpochDay() - firstDay).coerceIn(0, cashFlowDayCount - 1L).toInt()
+internal fun cashFlowIndexDate(index: Int): LocalDate = LocalDate.ofEpochDay(firstDay + index.coerceIn(0, cashFlowDayCount - 1))
+internal fun cashFlowMonthIndex(month: YearMonth) = ((month.year - 1) * 12 + month.monthValue - 1).coerceIn(0, cashFlowMonthCount - 1)
+internal fun cashFlowIndexMonth(index: Int): YearMonth = index.coerceIn(0, cashFlowMonthCount - 1).let { YearMonth.of(it / 12 + 1, it % 12 + 1) }
+
+/** Every ten consecutive slots fill the pixel viewport exactly, including fractional densities. */
+internal fun cashFlowDaySlotWidthPx(index: Int, plotWidthPx: Int): Int {
+    val slot = Math.floorMod(index, 10)
+    return cashFlowDateSlotWidthPx(slot, 10, plotWidthPx)
+}
+internal fun cashFlowDateSlotWidthPx(index: Int, count: Int, plotWidthPx: Int): Int =
+    ((index + 1) * plotWidthPx / count - index * plotWidthPx / count).coerceAtLeast(1)
+
+/** Scroll identity is independent of incoming data and of taps on a day. */
+@OptIn(ExperimentalFoundationApi::class)
+class CashFlowViewport(val days: LazyListState, val months: PagerState) {
+    private var navigationTicket = 0L
+    internal var navigating by mutableStateOf(false)
+        private set
+    internal var ready by mutableStateOf(false)
+        private set
+
+    internal suspend fun navigate(anchor: CashFlowChartAnchor, compressedMonth: Boolean, force: Boolean = true) {
+        val ticket = ++navigationTicket
+        navigating = true
+        ready = false
+        try {
+            if (compressedMonth) {
+                val target = cashFlowMonthIndex(anchor.month)
+                if (force || target != months.currentPage) months.scrollToPage(target)
+            } else {
+                val target = cashFlowDayIndex(anchor.firstDay)
+                if (force || target != days.firstVisibleItemIndex) days.scrollToItem(target)
+            }
+        } finally {
+            if (ticket == navigationTicket) {
+                navigating = false
+                ready = true
+            }
+        }
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun rememberCashFlowViewport(): CashFlowViewport {
-    val scroll = rememberScrollState()
-    return remember(scroll) { CashFlowViewport(scroll) }
+fun rememberCashFlowViewport(anchor: CashFlowChartAnchor): CashFlowViewport {
+    val days = rememberLazyListState(initialFirstVisibleItemIndex = cashFlowDayIndex(anchor.firstDay))
+    val months = rememberPagerState(initialPage = cashFlowMonthIndex(anchor.month)) { cashFlowMonthCount }
+    return remember(days, months) { CashFlowViewport(days, months) }
 }

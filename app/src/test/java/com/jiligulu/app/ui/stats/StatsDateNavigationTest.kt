@@ -25,11 +25,14 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertFalse
 import org.junit.After
 import org.junit.Test
 import java.time.LocalDate
+import java.time.Instant
 import java.time.YearMonth
 import java.time.ZoneId
+import java.time.temporal.ChronoUnit
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class StatsDateNavigationTest {
@@ -282,16 +285,112 @@ class StatsDateNavigationTest {
         } finally { store.clear() }
     }
 
+    @Test fun dragReportsCrossYearVisibleDatesWithoutReanchoringAndBarTapsKeepTheViewport() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        val store = ViewModelStore()
+        try {
+            val today = LocalDate.of(2026, 12, 31)
+            val january = LocalDate.of(2027, 1, 1)
+            val vm = model(listOf(BillEntity(id = 61, amountFen = 1550, type = BillType.EXPENSE,
+                categoryId = 1, detail = "新年午饭", timestamp = january.millis() + 1000))) { today.millis() + 1000 }
+            store.put("stats", vm)
+            backgroundScope.launch { vm.prefetchedCashFlowBars.collect {} }
+            backgroundScope.launch { vm.compactVisibleWindow.collect {} }
+            backgroundScope.launch { vm.selectedDay.collect {} }
+            backgroundScope.launch { vm.dayDetails.collect {} }
+            backgroundScope.launch { vm.chartFollowsToday.collect {} }
+            runCurrent()
+            val revision = vm.chartAnchor.value.revision
+            vm.reportCompactViewport(LocalDate.of(2026, 12, 27).millis(), LocalDate.of(2027, 1, 6).millis(), true)
+            runCurrent()
+            val dragged = StatsDateWindow(LocalDate.of(2026, 12, 27), LocalDate.of(2027, 1, 6))
+            assertEquals(dragged, vm.compactVisibleWindow.value)
+            assertEquals(revision, vm.chartAnchor.value.revision)
+            assertEquals(today.millis(), vm.selectedDay.value)
+            assertFalse(vm.chartFollowsToday.value)
+            vm.selectDay(january.millis()); runCurrent()
+            assertEquals(dragged, vm.compactVisibleWindow.value)
+            assertEquals(revision, vm.chartAnchor.value.revision)
+            assertEquals(listOf(61L), vm.dayDetails.value.map { it.id })
+            vm.showToday(); runCurrent()
+            assertEquals(today.millis(), vm.selectedDay.value)
+            assertEquals(compactStatsWindow(today, today), vm.compactVisibleWindow.value)
+            assertTrue(vm.chartFollowsToday.value)
+            assertTrue(vm.chartAnchor.value.revision > revision)
+        } finally { store.clear() }
+    }
+
+    @Test fun fastDailyViewportChangesReuseSmallPrefetchQueriesInsteadOfReloadingTheLedger() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        val store = ViewModelStore()
+        try {
+            val today = LocalDate.of(2027, 1, 1)
+            val queries = ArrayList<Pair<Long, Long>>()
+            val vm = model(emptyList(), queries = queries) { today.millis() + 1000 }
+            store.put("stats", vm)
+            backgroundScope.launch { vm.prefetchedCashFlowBars.collect {} }
+            backgroundScope.launch { vm.compactVisibleWindow.collect {} }
+            runCurrent()
+            val first = compactStatsWindow(today, today).first
+            for (offset in 0 until 200) {
+                vm.reportCompactViewport(first.plusDays(offset.toLong()).millis(), first.plusDays(offset + 10L).millis(), true)
+                runCurrent()
+            }
+            assertTrue("200 date changes should reuse the buffer, queries=${queries.size}", queries.size in 2..39)
+            assertTrue(queries.all { queryDays(it) in 1L..31L })
+            assertEquals(first.plusDays(199), vm.compactVisibleWindow.value.first)
+            assertEquals(first.plusDays(209), vm.compactVisibleWindow.value.last)
+        } finally { store.clear() }
+    }
+
+    @Test fun monthViewportPrefetchesNeighboursAndPreservesThePreferredDayAcrossShortMonths() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        val store = ViewModelStore()
+        try {
+            val today = LocalDate.of(2026, 12, 31)
+            val queries = ArrayList<Pair<Long, Long>>()
+            val vm = model(emptyList(), queries = queries) { today.millis() + 1000 }
+            store.put("stats", vm)
+            backgroundScope.launch { vm.pagedMonthCashFlowBars.collect {} }
+            backgroundScope.launch { vm.selectedDay.collect {} }
+            backgroundScope.launch { vm.chartMonth.collect {} }
+            runCurrent()
+            val revision = vm.chartAnchor.value.revision
+            vm.reportMonthViewport(LocalDate.of(2027, 1, 1).millis(), true); runCurrent()
+            assertEquals(LocalDate.of(2027, 1, 31).millis(), vm.selectedDay.value)
+            vm.reportMonthViewport(LocalDate.of(2027, 2, 1).millis(), true); runCurrent()
+            assertEquals(LocalDate.of(2027, 2, 28).millis(), vm.selectedDay.value)
+            vm.reportMonthViewport(LocalDate.of(2027, 3, 1).millis(), true); runCurrent()
+            assertEquals(LocalDate.of(2027, 3, 31).millis(), vm.selectedDay.value)
+            assertEquals(YearMonth.of(2027, 3), vm.chartMonth.value)
+            assertEquals(revision, vm.chartAnchor.value.revision)
+            assertTrue(queries.all { queryDays(it) in 28L..92L })
+            assertEquals(LocalDate.of(2027, 2, 1).millis(), vm.pagedMonthCashFlowBars.value.first().dayStartMillis)
+            assertEquals(LocalDate.of(2027, 4, 30).millis(), vm.pagedMonthCashFlowBars.value.last().dayStartMillis)
+            vm.showToday(); runCurrent()
+            assertEquals(today.millis(), vm.selectedDay.value)
+            assertEquals(YearMonth.of(2026, 12), vm.chartMonth.value)
+        } finally { store.clear() }
+    }
+
     private fun LocalDate.millis(): Long = atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
 
-    private fun model(bills: List<BillEntity>, categories: List<CategoryEntity> = emptyList(), now: () -> Long): StatsViewModel {
-        val sources = repositories(bills, categories, now)
+    private fun queryDays(range: Pair<Long, Long>): Long = ChronoUnit.DAYS.between(
+        Instant.ofEpochMilli(range.first).atZone(ZoneId.systemDefault()).toLocalDate(),
+        Instant.ofEpochMilli(range.second).atZone(ZoneId.systemDefault()).toLocalDate())
+
+    private fun model(bills: List<BillEntity>, categories: List<CategoryEntity> = emptyList(),
+        queries: MutableList<Pair<Long, Long>>? = null, now: () -> Long): StatsViewModel {
+        val sources = repositories(bills, categories, queries, now)
         return StatsViewModel(sources.first, sources.second, sources.third, nowMillis = now)
     }
-    private fun repositories(bills: List<BillEntity>, categories: List<CategoryEntity> = emptyList(), now: () -> Long): Triple<BillRepository, CategoryRepository, BudgetRepository> {
+    private fun repositories(bills: List<BillEntity>, categories: List<CategoryEntity> = emptyList(),
+        queries: MutableList<Pair<Long, Long>>? = null, now: () -> Long): Triple<BillRepository, CategoryRepository, BudgetRepository> {
         val billDao = object : BillDao {
-            override fun observeBetween(startMillis: Long, endMillis: Long) = flowOf(
-                bills.filter { it.timestamp >= startMillis && it.timestamp < endMillis })
+            override fun observeBetween(startMillis: Long, endMillis: Long): Flow<List<BillEntity>> {
+                queries?.add(startMillis to endMillis)
+                return flowOf(bills.filter { it.timestamp >= startMillis && it.timestamp < endMillis })
+            }
             override fun observeAll() = flowOf(bills)
             override fun observePhotoMemories() = flowOf(bills.filter { it.photoUri != null })
             override fun observeById(id: Long) = flowOf(bills.find { it.id == id })

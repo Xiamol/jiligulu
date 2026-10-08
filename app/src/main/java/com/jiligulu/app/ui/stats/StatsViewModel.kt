@@ -21,6 +21,7 @@ import com.jiligulu.app.domain.forecast.DailySpending
 import com.jiligulu.app.domain.forecast.MonthlySpendingAverage
 import com.jiligulu.app.domain.forecast.MonthlyAverageDay
 import com.jiligulu.app.ui.stats.charts.DayBar
+import com.jiligulu.app.ui.stats.charts.CashFlowChartAnchor
 import com.jiligulu.app.ui.stats.charts.DonutSlice
 import com.jiligulu.app.ui.theme.BudgetRemainGreen
 import com.jiligulu.app.ui.theme.DangerRed
@@ -94,6 +95,8 @@ private data class Quad(
     val sort: DetailSort
 )
 
+private data class StatsBillWindow(val window: StatsDateWindow, val bills: List<BillEntity>)
+
 /** The aggregate is not a real category, even if a user has named one 「其余」. */
 internal fun mergedCategoryLabel(categoryNames: Set<String>): String {
     if ("其余" !in categoryNames) return "其余"
@@ -122,6 +125,16 @@ class StatsViewModel(
     /** Null follows today's calendar; an explicit selection remains stable across range queries. */
     private val _selectedDay = MutableStateFlow<Long?>(null)
     private val _compactWindowStart = MutableStateFlow<LocalDate?>(null)
+    private val _compactVisibleWindow = MutableStateFlow<StatsDateWindow?>(null)
+    private val _chartMonth = MutableStateFlow<YearMonth?>(null)
+    private var monthSelectionDay = currentLocalDate().dayOfMonth
+    private val _chartAnchor = MutableStateFlow(currentLocalDate().let {
+        CashFlowChartAnchor(compactStatsWindow(it, it).first, YearMonth.from(it), followsToday = true)
+    })
+    val chartAnchor: StateFlow<CashFlowChartAnchor> = _chartAnchor
+    val chartFollowsToday: StateFlow<Boolean> = combine(_selectedDay, _compactWindowStart) { selected, first ->
+        selected == null && first == null
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
 
     // Anchor a category filter to its day so an automatic month rollover cannot hide the new day's bills.
     private val _selectedCategory = MutableStateFlow<Pair<Long, Long>?>(null)
@@ -160,6 +173,10 @@ class StatsViewModel(
         else compactStatsWindow(requested?.let { Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDate() } ?: now, now)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), currentLocalDate().let { compactStatsWindow(it, it) })
 
+    internal val compactVisibleWindow: StateFlow<StatsDateWindow> = combine(_compactVisibleWindow, compactWindow) { visible, initial ->
+        visible ?: initial
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), compactWindow.value)
+
     val selectedCategoryId: StateFlow<Long?> = combine(_selectedCategory, selectedDay) { selection, day ->
         selection?.takeIf { it.first == day }?.second
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
@@ -181,15 +198,40 @@ class StatsViewModel(
             statsDayBars(bills, type, monthStatsWindow(first), now, zone)
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    /** A bounded ten-day query, including both months when the visible window crosses a boundary. */
-    @OptIn(ExperimentalCoroutinesApi::class)
-    private val compactBills = compactWindow.flatMapLatest { window ->
-        val (start, end) = window.millis(ZoneId.systemDefault())
-        billRepository.observeBetween(start, end)
-    }
+    /** Query changes only near a prefetch edge, rather than once per drag frame or per day. */
+    private var retainedCompactQuery = retainedStatsDayWindow(null, compactWindow.value)
+    internal val compactQueryWindow: StateFlow<StatsDateWindow> = compactVisibleWindow
+        .map { visible -> retainedStatsDayWindow(retainedCompactQuery, visible).also { retainedCompactQuery = it } }
+        .distinctUntilChanged().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), retainedCompactQuery)
 
-    val compactCashFlowBars: StateFlow<List<DayBar>> = combine(compactBills, compactWindow, _flowType, today) { bills, window, type, now ->
-        statsDayBars(bills, type, window, now, ZoneId.systemDefault())
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private val compactBills: StateFlow<StatsBillWindow?> = compactQueryWindow.flatMapLatest { window ->
+        val (start, end) = window.millis(ZoneId.systemDefault())
+        billRepository.observeBetween(start, end).map { StatsBillWindow(window, it) }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    val compactCashFlowBars: StateFlow<List<DayBar>> = combine(compactBills, compactWindow, _flowType, today) { loaded, window, type, now ->
+        statsDayBars(loaded?.bills.orEmpty(), type, window, now, ZoneId.systemDefault())
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    /** Only these loaded dates have amounts; missing dates are placeholders, not invented zeroes. */
+    val prefetchedCashFlowBars: StateFlow<List<DayBar>> = combine(compactBills, _flowType, today) { loaded, type, now ->
+        loaded?.let { statsDayBars(it.bills, type, it.window, now, ZoneId.systemDefault()) }.orEmpty()
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    internal val chartMonth: StateFlow<YearMonth> = combine(_chartMonth, displayedMonth) { requested, range ->
+        requested ?: YearMonth.from(Instant.ofEpochMilli(range.first).atZone(ZoneId.systemDefault()))
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), YearMonth.from(currentLocalDate()))
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private val pagedMonthBills: StateFlow<StatsBillWindow?> = chartMonth.map(::prefetchedStatsMonths).distinctUntilChanged()
+        .flatMapLatest { window ->
+            val (start, end) = window.millis(ZoneId.systemDefault())
+            billRepository.observeBetween(start, end).map { StatsBillWindow(window, it) }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    val pagedMonthCashFlowBars: StateFlow<List<DayBar>> = combine(pagedMonthBills, _flowType, today) { loaded, type, now ->
+        loaded?.let { statsDayBars(it.bills, type, it.window, now, ZoneId.systemDefault()) }.orEmpty()
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -331,6 +373,7 @@ class StatsViewModel(
         val target = oldSelected.plusDays(days.toLong()).coerceIn(next.first, next.last)
         _compactWindowStart.value = next.first
         selectDay(target.atStartOfDay(zone).toInstant().toEpochMilli())
+        requestChartAnchor(next.first, YearMonth.from(target))
     }
 
     fun showToday() {
@@ -338,6 +381,9 @@ class StatsViewModel(
         _monthOffset.value = 0
         _selectedDay.value = null
         _selectedCategory.value = null
+        _chartMonth.value = null
+        monthSelectionDay = today.value.dayOfMonth
+        requestChartAnchor(compactStatsWindow(today.value, today.value).first, YearMonth.from(today.value), followsToday = true)
     }
 
     fun setFlowType(type: BillType) {
@@ -346,11 +392,16 @@ class StatsViewModel(
     }
 
     fun shiftDay(delta: Int) {
+        val oldMonth = YearMonth.from(Instant.ofEpochMilli(selectedDay.value).atZone(ZoneId.systemDefault()))
         val next = com.jiligulu.app.ui.components.shiftLocalDay(selectedDay.value, delta.toLong())
         val date = Instant.ofEpochMilli(next).atZone(ZoneId.systemDefault()).toLocalDate()
-        if (date < currentCompactWindow().first || date > currentCompactWindow().last)
+        val outside = date < currentCompactWindow().first || date > currentCompactWindow().last
+        if (outside)
             _compactWindowStart.value = compactStatsWindow(date, today.value).first
         selectDay(next)
+        if (outside) requestChartAnchor(currentCompactWindow().first, YearMonth.from(date))
+        else if (oldMonth != YearMonth.from(date)) _chartAnchor.value = _chartAnchor.value.copy(
+            monthRevision = _chartAnchor.value.monthRevision + 1)
     }
 
     /** Point selection preserves its window; only the small daily detail query changes within a month. */
@@ -362,6 +413,9 @@ class StatsViewModel(
         _monthOffset.value = ChronoUnit.MONTHS.between(YearMonth.from(currentLocalDate()), requestedMonth).toInt()
         _selectedDay.value = Formatters.dayStart(dayStartMillis)
         _selectedCategory.value = null
+        _chartMonth.value = requestedMonth
+        monthSelectionDay = Instant.ofEpochMilli(dayStartMillis).atZone(zone).dayOfMonth
+        _chartAnchor.value = _chartAnchor.value.copy(month = requestedMonth, followsToday = false)
     }
 
     private fun currentCompactWindow(): StatsDateWindow = _compactWindowStart.value?.let {
@@ -375,6 +429,54 @@ class StatsViewModel(
         val zone = ZoneId.systemDefault()
         _compactWindowStart.value = compactStatsWindow(Instant.ofEpochMilli(dayStartMillis).atZone(zone).toLocalDate(), today.value).first
         selectDay(Formatters.dayStart(dayStartMillis))
+        requestChartAnchor(currentCompactWindow().first, YearMonth.from(Instant.ofEpochMilli(dayStartMillis).atZone(zone)))
+    }
+
+    /** A viewport report never requests scrollToItem: it follows the finger, not vice versa. */
+    fun reportCompactViewport(first: Long, last: Long, userScrolling: Boolean) {
+        val zone = ZoneId.systemDefault()
+        val firstDate = Instant.ofEpochMilli(first).atZone(zone).toLocalDate()
+        val lastDate = Instant.ofEpochMilli(last).atZone(zone).toLocalDate()
+        if (lastDate < firstDate) return
+        _compactVisibleWindow.value = StatsDateWindow(firstDate, lastDate)
+        if (userScrolling) {
+            if (_selectedDay.value == null) {
+                monthSelectionDay = today.value.dayOfMonth
+                _selectedDay.value = today.value.atStartOfDay(zone).toInstant().toEpochMilli()
+            }
+            _compactWindowStart.value = firstDate
+            _chartAnchor.value = _chartAnchor.value.copy(firstDay = firstDate, month = YearMonth.from(firstDate), followsToday = false)
+        } else if (_selectedDay.value == null && _compactWindowStart.value == null) {
+            _chartAnchor.value = _chartAnchor.value.copy(firstDay = firstDate, month = YearMonth.from(today.value))
+        } else {
+            _chartAnchor.value = _chartAnchor.value.copy(firstDay = firstDate)
+        }
+    }
+
+    fun reportMonthViewport(monthStart: Long, userScrolling: Boolean) {
+        val zone = ZoneId.systemDefault()
+        val month = YearMonth.from(Instant.ofEpochMilli(monthStart).atZone(zone))
+        val selected = _selectedDay.value?.let { Instant.ofEpochMilli(it).atZone(zone).toLocalDate() } ?: today.value
+        if (_selectedDay.value == null) monthSelectionDay = today.value.dayOfMonth
+        if (!userScrolling && YearMonth.from(selected) == month) {
+            if (_selectedDay.value == null && _compactWindowStart.value == null) _chartAnchor.value = _chartAnchor.value.copy(
+                firstDay = compactStatsWindow(today.value, today.value).first, month = month)
+            return
+        }
+        val target = month.atDay(monthSelectionDay.coerceAtMost(month.lengthOfMonth()))
+        _chartMonth.value = month
+        _selectedDay.value = target.atStartOfDay(zone).toInstant().toEpochMilli()
+        _monthOffset.value = ChronoUnit.MONTHS.between(YearMonth.from(currentLocalDate()), month).toInt()
+        if (target != selected) _selectedCategory.value = null
+        _compactWindowStart.value = compactStatsWindow(target, today.value).first
+        _compactVisibleWindow.value = null
+        _chartAnchor.value = _chartAnchor.value.copy(firstDay = currentCompactWindow().first, month = month, followsToday = false)
+    }
+
+    private fun requestChartAnchor(first: LocalDate, month: YearMonth, followsToday: Boolean = false) {
+        _compactVisibleWindow.value = null
+        _chartAnchor.value = CashFlowChartAnchor(first, month, _chartAnchor.value.revision + 1,
+            _chartAnchor.value.monthRevision + 1, followsToday)
     }
 
     fun toggleCategory(categoryId: Long?) {

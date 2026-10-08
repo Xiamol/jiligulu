@@ -1,7 +1,28 @@
 package com.jiligulu.app.ui.stats.charts
 import org.junit.Assert.*
 import org.junit.Test
+import java.time.LocalDate
+import java.time.YearMonth
 class CashFlowAxisTest {
+    @Test fun nativeSlotsFillTenDaysExactlyAtFractionalDensities() {
+        for (width in listOf(219, 280, 670, 707, 853, 1007)) for (first in 0..29) {
+            val slots = (first until first + 10).map { cashFlowDaySlotWidthPx(it, width) }
+            assertEquals(width, slots.sum())
+            assertTrue(slots.maxOrNull()!! - slots.minOrNull()!! <= 1)
+        }
+        for (width in listOf(219, 707, 1007)) for (count in 28..31)
+            assertEquals(width, (0 until count).sumOf { cashFlowDateSlotWidthPx(it, count, width) })
+    }
+
+    @Test fun nativeCalendarIndicesCrossYearsAndIncludeBothCalendarEdges() {
+        val december = LocalDate.of(2026, 12, 31)
+        assertEquals(LocalDate.of(2027, 1, 1), cashFlowIndexDate(cashFlowDayIndex(december) + 1))
+        assertEquals(YearMonth.of(2027, 1), cashFlowIndexMonth(cashFlowMonthIndex(YearMonth.of(2026, 12)) + 1))
+        assertEquals(LocalDate.of(1, 1, 1), cashFlowIndexDate(0))
+        assertEquals(LocalDate.of(9999, 12, 31), cashFlowIndexDate(cashFlowDayCount - 1))
+        assertEquals(YearMonth.of(1, 1), cashFlowIndexMonth(0))
+        assertEquals(YearMonth.of(9999, 12), cashFlowIndexMonth(cashFlowMonthCount - 1))
+    }
     @Test fun readableTicksLeaveReasonableHeadroom() {
         for (max in listOf(.01, .57, 9.0, 17.85, 2000.0, 50000.0)) {
             val axis = cashFlowAxis(max)
