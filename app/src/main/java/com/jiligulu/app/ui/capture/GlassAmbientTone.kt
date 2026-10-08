@@ -10,9 +10,9 @@ internal object GlassAmbientTone {
         for(index in pixels.indices step stride) {
             val color=pixels[index]
             if((color ushr 24)<128)continue // exclusion/transparent pixels contribute nothing
-            hist[(color ushr 20)and15]++
-            hist[16+((color ushr 12)and15)]++
-            hist[32+((color ushr 4)and15)]++
+            hist[(color ushr 20) and 15]++
+            hist[16+((color ushr 12) and 15)]++
+            hist[32+((color ushr 4) and 15)]++
             count++
         }
         if(count==0)return NEUTRAL
@@ -28,6 +28,6 @@ internal object GlassAmbientTone {
             }
             return if(weight==0)240 else (total/weight).toInt().coerceIn(0,255)
         }
-        return (255 shl 24)or(channel(0)shl16)or(channel(16)shl8)or channel(32)
+        return (255 shl 24) or (channel(0) shl 16) or (channel(16) shl 8) or channel(32)
     }
 }

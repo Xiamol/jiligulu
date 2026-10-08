@@ -49,7 +49,7 @@ internal class GlobalEdgeLens {
         shader.setFloatUniform("origin", GlassLensSamplingGeometry.sourceX(region, 0f), GlassLensSamplingGeometry.sourceY(region, 0f))
         shader.setFloatUniform("excluded", GlassLensSamplingGeometry.excludedLeft(region), GlassLensSamplingGeometry.excludedTop(region),
             GlassLensSamplingGeometry.excludedRight(region), GlassLensSamplingGeometry.excludedBottom(region))
-        shader.setFloatUniform("ambient",((ambientColor ushr 16)and255)/255f,((ambientColor ushr 8)and255)/255f,(ambientColor and255)/255f)
+        shader.setFloatUniform("ambient",((ambientColor ushr 16) and 255)/255f,((ambientColor ushr 8) and 255)/255f,(ambientColor and 255)/255f)
         GlassLensOptics.bind(shader, width, height, lightX, lightY)
         return shader
     }

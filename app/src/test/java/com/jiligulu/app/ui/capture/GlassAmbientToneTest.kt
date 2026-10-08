@@ -9,7 +9,7 @@ class GlassAmbientToneTest {
         val text=plain.copyOf().apply {for(i in 0..99)this[i]=0xff000000.toInt()}
         val first=GlassAmbientTone.estimate(plain)
         val second=GlassAmbientTone.estimate(text)
-        for(shift in listOf(0,8,16))assertTrue(kotlin.math.abs(((first ushr shift)and255)-((second ushr shift)and255))<=16)
+        for(shift in listOf(0,8,16))assertTrue(kotlin.math.abs(((first ushr shift) and 255)-((second ushr shift) and 255))<=16)
     }
     @Test fun excludedPixelsContributeNeitherOwnIconColorNorBlackMask() {
         val safe=0xff88bbdd.toInt()
