@@ -32,6 +32,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
 import com.jiligulu.app.core.util.Formatters
+import com.jiligulu.app.ui.stats.compactStatsWindow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import java.time.Instant
 import java.time.LocalDate
@@ -86,6 +87,7 @@ fun CashFlowBarChart(bars: List<DayBar>, selectedDayMillis: Long?, onSelectDay: 
     viewport: CashFlowViewport? = null,
     dayCount: Int = 10,
     onCompactViewport: (Long, Long, Boolean) -> Unit = { _, _, _ -> },
+    onCompactMonthCross: ((YearMonth, Int) -> Unit)? = null,
     onMonthViewport: (Long, Boolean) -> Unit = { _, _ -> }) {
     val zone = remember { ZoneId.systemDefault() }
     fun date(millis: Long) = Instant.ofEpochMilli(millis).atZone(zone).toLocalDate()
@@ -98,9 +100,10 @@ fun CashFlowBarChart(bars: List<DayBar>, selectedDayMillis: Long?, onSelectDay: 
         .takeIf { it >= 0 } ?: bars.indexOfFirst { it.isToday }
     val defaultFirst = if (selectedIndex >= 0) bars[(selectedIndex - (days - 1) / 2).coerceIn(0, (bars.size - days).coerceAtLeast(0))].dayStartMillis.let(::date)
         else bars.firstOrNull()?.dayStartMillis?.let(::date) ?: selectedDayMillis?.let(::date)?.minusDays((days - 1L) / 2) ?: today.minusDays(days - 1L)
-    val requested = if (autoFollow) CashFlowChartAnchor(today.minusDays(days - 1L), YearMonth.from(today),
+    val defaultMonth = YearMonth.from(selectedDayMillis?.let(::date) ?: today)
+    val requested = if (autoFollow) CashFlowChartAnchor(compactStatsWindow(today, today, days).first, YearMonth.from(today),
         anchor?.revision ?: 0, anchor?.monthRevision ?: 0, followsToday = true, dayCount = days)
-    else anchor ?: CashFlowChartAnchor(defaultFirst, YearMonth.from(selectedDayMillis?.let(::date) ?: today), dayCount = days)
+    else anchor ?: CashFlowChartAnchor(defaultFirst.coerceIn(defaultMonth.atDay(1), defaultMonth.atEndOfMonth().minusDays(days - 1L)), defaultMonth, dayCount = days)
     val chartViewport = viewport ?: rememberCashFlowViewport(requested)
     val visibleCallback by rememberUpdatedState(onVisibleRange)
     val compactCallback by rememberUpdatedState(onCompactViewport)
@@ -181,7 +184,7 @@ fun CashFlowBarChart(bars: List<DayBar>, selectedDayMillis: Long?, onSelectDay: 
                 }
             }
             if (!compressedMonth) LazyRow(state = chartViewport.days, modifier = Modifier.fillMaxSize()
-                .cashFlowMonthBoundary(chartViewport, false, days).clipToBounds().testTag("cash-flow-day-strip")) {
+                .cashFlowMonthBoundary(chartViewport, false, days, onCompactMonthCross).clipToBounds().testTag("cash-flow-day-strip")) {
                 items(count = cashFlowDayCount, key = { cashFlowIndexDate(it).toEpochDay() }) { index ->
                     val day = cashFlowIndexDate(index)
                     val width = with(density) { cashFlowDaySlotWidthPx(index, plotPixelWidth, days).toDp() }

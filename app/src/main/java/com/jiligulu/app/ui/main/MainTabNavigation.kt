@@ -116,21 +116,21 @@ internal fun MainTabNavigation(
                 .graphicsLayer { translationX = TabScrubPosition.center(progress, widthPx) - thumbPx / 2f }
                 .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = .76f), RoundedCornerShape(50)))
             Row(Modifier.fillMaxWidth().height(58.dp)) {
-                listOf("账本", "小窝", "统计").forEachIndexed { index, label ->
+                MainDestination.entries.forEachIndexed { index, destination ->
                     val proximity = (1f - abs(progress - index)).coerceIn(0f, 1f)
                     val tint = androidx.compose.ui.graphics.lerp(MaterialTheme.colorScheme.onSurfaceVariant,
                         MaterialTheme.colorScheme.primary, proximity)
                     Column(Modifier.weight(1f).height(58.dp)
                         .selectable(selected = selectedTab == index, onClick = com.jiligulu.app.ui.components.uiTap { onSelect(index) }, role = Role.Tab)
-                        .testTag(when (index) { 0 -> "main-tab-home"; 1 -> "main-tab-world"; else -> "main-tab-stats" })
+                        .testTag(destination.tag)
                         .padding(top = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         Icon(when (index) {
                             0 -> Icons.AutoMirrored.Outlined.ReceiptLong
-                            1 -> if (proximity > .5f) Icons.Filled.Cottage else Icons.Outlined.Cottage
-                            else -> if (proximity > .5f) Icons.Filled.BarChart else Icons.Outlined.BarChart
+                            1 -> if (proximity > .5f) Icons.Filled.BarChart else Icons.Outlined.BarChart
+                            else -> if (proximity > .5f) Icons.Filled.Cottage else Icons.Outlined.Cottage
                         },
                             contentDescription = null, modifier = Modifier.size(22.dp), tint = tint)
-                        Text(label, Modifier.padding(top = 2.dp), color = tint,
+                        Text(destination.label, Modifier.padding(top = 2.dp), color = tint,
                             style = MaterialTheme.typography.labelSmall)
                     }
                 }

@@ -38,11 +38,24 @@ internal fun prefetchedStatsMonths(month: YearMonth): StatsDateWindow {
         month.plusMonths(1).coerceAtMost(lastMonth).atEndOfMonth())
 }
 
-/** Today uses the last ten days; other dates stay centered. This is an initial placement, never a navigation limit. */
+/** A compact series belongs to exactly one month, including today near either month edge. */
 internal fun compactStatsWindow(anchor: LocalDate, today: LocalDate, days: Int = 10): StatsDateWindow {
     require(days in setOf(5, 7, 10))
+    val month = YearMonth.from(anchor)
     return (if (anchor == today) today.minusDays(days - 1L) else anchor.minusDays((days - 1L) / 2))
-        .coerceIn(firstStatsDate, lastStatsDate.minusDays(days - 1L)).let { StatsDateWindow(it, it.plusDays(days - 1L)) }
+        .coerceIn(month.atDay(1), month.atEndOfMonth().minusDays(days - 1L)).let { StatsDateWindow(it, it.plusDays(days - 1L)) }
+}
+
+internal fun steppedStatsWindow(window: StatsDateWindow, direction: Int, days: Int): StatsDateWindow {
+    val month = YearMonth.from(window.first)
+    val tail = month.atEndOfMonth().minusDays(days - 1L)
+    val first = when {
+        direction > 0 && window.first < tail -> window.first.plusDays(days.toLong()).coerceAtMost(tail)
+        direction < 0 && window.first > month.atDay(1) -> window.first.minusDays(days.toLong()).coerceAtLeast(month.atDay(1))
+        direction > 0 -> month.plusMonths(1).coerceAtMost(YearMonth.of(9999, 12)).let { if (it == month) window.first else it.atDay(1) }
+        else -> month.minusMonths(1).coerceAtLeast(YearMonth.of(1, 1)).let { if (it == month) window.first else it.atEndOfMonth().minusDays(days - 1L) }
+    }
+    return StatsDateWindow(first, first.plusDays(days - 1L))
 }
 internal fun monthStatsWindow(anchor: LocalDate): StatsDateWindow = YearMonth.from(anchor).let {
     StatsDateWindow(it.atDay(1), it.atEndOfMonth())

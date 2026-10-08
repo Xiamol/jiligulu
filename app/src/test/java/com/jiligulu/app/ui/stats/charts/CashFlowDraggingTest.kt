@@ -69,8 +69,8 @@ class CashFlowDraggingTest {
     }
 
     @Test fun externallyRetainedViewportKeepsItsFractionalOffsetAfterTheChartIsUnmounted() {
-        val first = LocalDate.of(2026, 12, 27)
-        val today = LocalDate.of(2026, 12, 31)
+        val first = LocalDate.of(2026, 12, 10)
+        val today = LocalDate.of(2026, 12, 15)
         var anchor by mutableStateOf(CashFlowChartAnchor(first, YearMonth.from(today)))
         var showBars by mutableStateOf(true)
         var retained: CashFlowViewport? = null
@@ -113,7 +113,7 @@ class CashFlowDraggingTest {
     }
 
     @Test fun compactDatesMoveBeforeReleaseAndDataOrSelectionUpdatesNeverReanchor() {
-        val first = LocalDate.of(2026, 12, 27)
+        val first = LocalDate.of(2026, 12, 10)
         val today = LocalDate.of(2026, 12, 31)
         var anchor by mutableStateOf(CashFlowChartAnchor(first, YearMonth.from(today)))
         var selected by mutableStateOf(today.millis())
@@ -152,7 +152,8 @@ class CashFlowDraggingTest {
         compose.runOnIdle {
             beforeData = requireNotNull(visible)
             assertTrue(requireNotNull(visible).first.date().isAfter(first))
-            assertTrue(requireNotNull(visible).first.date().year == 2027)
+            assertEquals(YearMonth.of(2026, 12), YearMonth.from(requireNotNull(visible).first.date()))
+            assertEquals(YearMonth.of(2026, 12), YearMonth.from(requireNotNull(visible).second.date()))
             assertEquals(0f, parentDrag)
             // A repository emission and a viewport metadata update must preserve the drag.
             loadedBars = loadedBars.mapIndexed { index, bar -> if (index == 0) bar.copy(amountFen = 200) else bar }
@@ -201,7 +202,7 @@ class CashFlowDraggingTest {
                         reportedMonth = month
                         if (moving) {
                             anchor = anchor.copy(month = month)
-                            selected = month.atDay(31.coerceAtMost(month.lengthOfMonth())).millis()
+                            selected = month.atDay(1).millis()
                         }
                     })
             }
@@ -228,7 +229,7 @@ class CashFlowDraggingTest {
         compose.waitForIdle()
         compose.runOnIdle {
             assertEquals(YearMonth.of(2027, 1), reportedMonth)
-            assertEquals(LocalDate.of(2027, 1, 31).millis(), selected)
+            assertEquals(LocalDate.of(2027, 1, 1).millis(), selected)
         }
     }
 
@@ -236,12 +237,26 @@ class CashFlowDraggingTest {
         val first = LocalDate.of(2027, 1, 27)
         val today = LocalDate.of(2027, 1, 29)
         var anchor by mutableStateOf(CashFlowChartAnchor(first, YearMonth.from(first), dayCount = 5))
+        var selected by mutableStateOf(today.millis())
         var visible: Pair<Long, Long>? = null
+        var parentDrag = 0f
+        var bounds: Rect? = null
         compose.setContent {
             MaterialTheme {
-                CashFlowBarChart(bars(), today.millis(), {}, Color.Red, Color.LightGray,
-                    Modifier.fillMaxWidth().height(202.dp), anchor = anchor, todayMillis = today.millis(),
-                    onCompactViewport = { start, end, _ -> visible = start to end; anchor = anchor.copy(firstDay = start.date()) })
+                Box(Modifier.fillMaxSize().forwardMainPageSwipe(enabled = { true },
+                    onDrag = { parentDrag += it }, onDragEnd = {}, allowRight = true,
+                    startAllowed = { bounds?.contains(it) != true })) {
+                CashFlowBarChart(bars(), selected, { selected = it }, Color.Red, Color.LightGray,
+                    Modifier.fillMaxWidth().height(202.dp).onGloballyPositioned { bounds = it.boundsInRoot() },
+                    anchor = anchor, todayMillis = today.millis(),
+                    onCompactViewport = { start, end, _ -> visible = start to end; anchor = anchor.copy(firstDay = start.date()) },
+                    onCompactMonthCross = { month, direction ->
+                        val next = if (direction > 0) month.atDay(1) else month.atEndOfMonth().minusDays(4)
+                        selected = (if (direction > 0) month.atDay(1) else month.atEndOfMonth()).millis()
+                        anchor = anchor.copy(firstDay = next, month = month, revision = anchor.revision + 1,
+                            monthRevision = anchor.monthRevision + 1)
+                    })
+                }
             }
         }
         compose.waitForIdle()
@@ -260,12 +275,35 @@ class CashFlowDraggingTest {
             moveTo(Offset(width * .1f, height * .5f), delayMillis = 30)
         }
         compose.runOnIdle {
-            assertEquals(YearMonth.of(2027, 2), YearMonth.from(requireNotNull(visible).second.date()))
-            assertTrue(requireNotNull(visible).second.date() <= LocalDate.of(2027, 2, 28))
+            assertEquals(LocalDate.of(2027, 2, 1), requireNotNull(visible).first.date())
+            assertEquals(LocalDate.of(2027, 2, 5), requireNotNull(visible).second.date())
+            assertEquals(LocalDate.of(2027, 2, 1).millis(), selected)
+            assertEquals(0f, parentDrag)
         }
         strip.performTouchInput { up() }
         compose.waitForIdle()
-        compose.runOnIdle { assertTrue(requireNotNull(visible).second.date() <= LocalDate.of(2027, 2, 28)) }
+        compose.runOnIdle {
+            assertEquals(LocalDate.of(2027, 2, 1), requireNotNull(visible).first.date())
+            assertEquals(LocalDate.of(2027, 2, 5), requireNotNull(visible).second.date())
+        }
+        strip.performTouchInput {
+            down(Offset(width * .1f, height * .5f))
+            moveTo(Offset(width * .9f, height * .5f), delayMillis = 250)
+        }
+        compose.runOnIdle { assertEquals(LocalDate.of(2027, 2, 1), requireNotNull(visible).first.date()) }
+        strip.performTouchInput { up() }
+        compose.waitForIdle()
+        strip.performTouchInput {
+            down(Offset(width * .1f, height * .5f))
+            moveTo(Offset(width * .9f, height * .5f), delayMillis = 250)
+        }
+        compose.runOnIdle {
+            assertEquals(LocalDate.of(2027, 1, 27), requireNotNull(visible).first.date())
+            assertEquals(LocalDate.of(2027, 1, 31), requireNotNull(visible).second.date())
+            assertEquals(LocalDate.of(2027, 1, 31).millis(), selected)
+            assertEquals(0f, parentDrag)
+        }
+        strip.performTouchInput { up() }
     }
 
     private fun bars(): List<DayBar> = (0 until 151).map { offset ->

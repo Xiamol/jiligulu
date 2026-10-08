@@ -29,13 +29,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.luminance
@@ -92,14 +92,17 @@ fun MainScreen(
     active: Boolean = true
 ) {
     val app = LocalContext.current.applicationContext as JiliguluApp
-    var selectedTab by rememberSaveable { mutableIntStateOf(0) }
+    var selectedDestination by rememberSaveable(key = "main-destination-id") { mutableStateOf(MainDestination.LEDGER.id) }
+    val selectedTab = MainDestination.fromId(selectedDestination).index
     var secretEntrance by remember { mutableStateOf<SecretEntrance?>(null) }
-    RoomStatusBarAppearance(selectedTab == 1)
+    RoomStatusBarAppearance(selectedTab == MainDestination.WORLD.index)
     val message by personaVm.bubble.collectAsStateWithLifecycle()
     val drinkingId by personaVm.drinkingId.collectAsStateWithLifecycle()
     val showDrinking = drinkingId != null
     // All main pages keep stable viewports and their own scroll anchors even off screen.
-    val pager = rememberPagerState(initialPage = selectedTab.coerceIn(0, MainPageCount - 1)) { MainPageCount }
+    val pager = key(MainDestination.entries.joinToString { it.id }) {
+        rememberPagerState(initialPage = selectedTab.coerceIn(0, MainPageCount - 1)) { MainPageCount }
+    }
     val motion = remember { TabMotionSession() }
     val requests = remember { Channel<TabMotion>(Channel.CONFLATED) }
     var manipulating by remember { mutableStateOf(false) }
@@ -175,7 +178,7 @@ fun MainScreen(
     LaunchedEffect(pager) {
         snapshotFlow { Triple(pager.settledPage, pager.isScrollInProgress, manipulating) }
             .distinctUntilChanged().collect { (page, moving, controlled) ->
-                if (!moving && !controlled) selectedTab = page
+                if (!moving && !controlled) selectedDestination = MainDestination.fromIndex(page).id
             }
     }
     LaunchedEffect(selectedTab) { if (selectedTab == 0) homeVm.showToday() }
@@ -218,7 +221,7 @@ fun MainScreen(
             Box(Modifier.fillMaxSize().padding(padding).onSizeChanged { pageWidth = it.width.toFloat() }) {
                 HorizontalPager(state = pager, modifier = Modifier.fillMaxSize().testTag("main-pages"),
                     userScrollEnabled = false, beyondViewportPageCount = MainPageCount - 1,
-                    verticalAlignment = Alignment.Top, key = { it }) { page ->
+                    verticalAlignment = Alignment.Top, key = { MainDestination.fromIndex(it).id }) { page ->
                     when (page) {
                         0 -> Column(Modifier.fillMaxSize()) {
                             MainPageHeader(app, selectedTab == 0, onOpenSettings) {secretEntrance=SecretEntrance.LOGO}
@@ -231,22 +234,22 @@ fun MainScreen(
                                     enabled = { selectedTab == 0 }, onDrag = pageDrag, onDragEnd = pageDragEnd))
                             Spacer(Modifier.height(12.dp))
                             HomeScreen(onOpenChat = onOpenChat, onAddBill = onAddBill, vm = homeVm,
-                                active = active && selectedTab == 0, onOpenStats = { navigate(2) }, onPickSticker = onPickSticker,
+                                active = active && selectedTab == 0, onOpenStats = { navigate(MainDestination.STATISTICS.index) }, onPickSticker = onPickSticker,
                                 onPageDrag = pageDrag, onPageDragEnd = pageDragEnd)
                         }
-                        1 -> LittleWorldScreen(onBack = { navigate(0) }, onOpenWishBook = onOpenWishBook,
+                        2 -> LittleWorldScreen(onBack = { navigate(MainDestination.STATISTICS.index) }, onOpenWishBook = onOpenWishBook,
                             onOpenFutureNotes = onOpenFutureNotes, onOpenMemories = onOpenMemories,
                             onOpenTimeMachine=onOpenTimeMachine,onOpenSecretBase=onOpenSecretBase,
                             onSecretEntrance={ secretEntrance=it },
                             onOpenSettings=onOpenSettings,
-                            onRecordAmount = onRecordAmount, embedded = true, active = active && selectedTab == 1,
+                            onRecordAmount = onRecordAmount, embedded = true, active = active && selectedTab == MainDestination.WORLD.index,
                             onModalChanged = { worldModalOpen = it },
                             modifier = Modifier.fillMaxSize().forwardMainPageSwipe(
-                                enabled = { selectedTab == 1 && !worldModalOpen }, onDrag = pageDrag,
+                                enabled = { selectedTab == MainDestination.WORLD.index && !worldModalOpen }, onDrag = pageDrag,
                                 onDragEnd = pageDragEnd, allowRight = true))
-                        2 -> Column(Modifier.fillMaxSize()) {
-                            MainPageHeader(app, selectedTab == 2, onOpenSettings) {secretEntrance=SecretEntrance.LOGO}
-                            Box(Modifier.weight(1f)) { StatsScreen(active = active && selectedTab == 2,
+                        1 -> Column(Modifier.fillMaxSize()) {
+                            MainPageHeader(app, selectedTab == MainDestination.STATISTICS.index, onOpenSettings) {secretEntrance=SecretEntrance.LOGO}
+                            Box(Modifier.weight(1f)) { StatsScreen(active = active && selectedTab == MainDestination.STATISTICS.index,
                                 onPageDrag = pageDrag, onPageDragEnd = pageDragEnd) }
                         }
                     }

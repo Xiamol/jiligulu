@@ -15,6 +15,10 @@ import androidx.compose.material.icons.outlined.CheckBox
 import androidx.compose.material.icons.outlined.CheckBoxOutlineBlank
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -116,6 +120,12 @@ import com.jiligulu.app.data.local.entity.BillType
 import com.jiligulu.app.data.local.entity.BudgetPeriod
 import com.jiligulu.app.data.prefs.StatsBarMode
 import com.jiligulu.app.data.prefs.StatsDisplayPrefs
+import com.jiligulu.app.data.prefs.CalendarProgressMode
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import com.jiligulu.app.ui.components.LedgerCard
 import com.jiligulu.app.ui.components.LedgerBillRow
 import com.jiligulu.app.ui.billdetail.BillDetailSheet
@@ -144,7 +154,17 @@ fun StatsScreen(
 ) {
     val context = LocalContext.current
     val displayPrefs = remember(context.applicationContext) { StatsDisplayPrefs(context) }
-    val barMode by displayPrefs.barMode.collectAsStateWithLifecycle(initialValue = StatsBarMode.COMPACT_TEN_DAYS)
+    val savedBarMode by displayPrefs.barMode.collectAsStateWithLifecycle(initialValue = null)
+    var pendingBarMode by remember { mutableStateOf<StatsBarMode?>(null) }
+    var savingMode by remember { mutableStateOf(false) }
+    var modeError by remember { mutableStateOf(false) }
+    val barMode = pendingBarMode ?: savedBarMode ?: StatsBarMode.MONTH_COMPRESSED
+    val savedProgressMode by displayPrefs.calendarProgressMode.collectAsStateWithLifecycle(initialValue = CalendarProgressMode.MONTH)
+    var pendingProgressMode by remember { mutableStateOf<CalendarProgressMode?>(null) }
+    val progressMode = pendingProgressMode ?: savedProgressMode
+    val preferenceScope = rememberCoroutineScope()
+    LaunchedEffect(savedBarMode) { if (pendingBarMode == savedBarMode) pendingBarMode = null }
+    LaunchedEffect(savedProgressMode) { if (pendingProgressMode == savedProgressMode) pendingProgressMode = null }
     LaunchedEffect(barMode) { barMode.compactDays?.let(vm::setCompactDays) }
     var showTrend by rememberSaveable { mutableStateOf(false) }
     var showActual by rememberSaveable { mutableStateOf(true) }
@@ -187,6 +207,7 @@ fun StatsScreen(
 
     var showCategoryDetails by remember { mutableStateOf(false) }
     LaunchedEffect(active) {
+        chartViewport.clearMonthBoundary()
         if (active) vm.showToday()
         vm.toggleCategory(null)
         showCategoryDetails = false
@@ -253,7 +274,7 @@ fun StatsScreen(
                 }
                 Row(Modifier.height(44.dp).background(MaterialTheme.colorScheme.surface, RoundedCornerShape(24.dp)).padding(3.dp), verticalAlignment = Alignment.CenterVertically) {
                     listOf(BillType.EXPENSE to "支出", BillType.INCOME to "收入").forEach { (type, label) ->
-                        Surface(onClick = uiTap(com.jiligulu.app.core.audio.UiCue.SELECT) { vm.setFlowType(type) }, shape = RoundedCornerShape(24.dp),
+                        Surface(onClick = uiTap(com.jiligulu.app.core.audio.UiCue.SELECT) { chartViewport.clearMonthBoundary(); vm.setFlowType(type) }, shape = RoundedCornerShape(24.dp),
                             color = if (flowType == type) MaterialTheme.colorScheme.primary.copy(alpha = .78f) else Color.Transparent) {
                             Text(label, Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
                                 style = MaterialTheme.typography.labelLarge,
@@ -267,8 +288,28 @@ fun StatsScreen(
         // ---------- 收支长河 ----------
         item(key = "cash_flow") {
             DisposableEffect(Unit) { onDispose { cashFlowBounds = null } }
-            ChartCard(title = "每日收支", modifier = Modifier.onGloballyPositioned { cashFlowBounds = it.boundsInWindow() }, action = {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ChartCard(title = "每日收支", stackedAction = true, modifier = Modifier.onGloballyPositioned { cashFlowBounds = it.boundsInWindow() }, action = {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                        StatsBarMode.entries.forEach { mode ->
+                            Surface(Modifier.clickable(enabled = savedBarMode != null && !savingMode) {
+                                chartViewport.clearMonthBoundary(); showTrend = false
+                                if (mode != barMode) {
+                                    UiSound.select(context); pendingBarMode = mode
+                                    preferenceScope.launch(start = CoroutineStart.UNDISPATCHED) {
+                                        savingMode = true; modeError = false
+                                        try { withContext(NonCancellable) { displayPrefs.setBarMode(mode) } }
+                                        catch (cancelled: CancellationException) { throw cancelled }
+                                        catch (_: Exception) { pendingBarMode = null; modeError = true }
+                                        finally { savingMode = false }
+                                    }
+                                }
+                            }.semantics { role = Role.RadioButton; selected = barMode == mode }.testTag("stats-period-${mode.key}"),
+                                shape = RoundedCornerShape(20.dp), color = if (barMode == mode) MaterialTheme.colorScheme.primaryContainer else Color.Transparent) {
+                                Text(mode.label, Modifier.padding(horizontal = 6.dp, vertical = 7.dp), style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
+                    }
                     Row(Modifier.background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = .35f), RoundedCornerShape(20.dp)).padding(2.dp)) {
                         listOf(false to "柱图", true to "折线").forEach { (trend, label) ->
                             Surface(onClick = uiTap(com.jiligulu.app.core.audio.UiCue.SELECT) { showTrend = trend }, shape = RoundedCornerShape(20.dp),
@@ -301,6 +342,7 @@ fun StatsScreen(
                     followToday = chartFollowsToday,
                     todayMillis = today.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli(),
                     onCompactViewport = vm::reportCompactViewport,
+                    onCompactMonthCross = vm::crossCompactMonth,
                     onMonthViewport = vm::reportMonthViewport,
                     selectedDayMillis = selectedDay,
                     onSelectDay = { UiSound.select(context); vm.selectDay(it) },
@@ -310,6 +352,7 @@ fun StatsScreen(
                         .fillMaxWidth()
                         .height(202.dp)
                 )
+                if (modeError) Text("没能保存，再点一次试试。", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
             }
         }
 
@@ -418,6 +461,29 @@ fun StatsScreen(
             }
         }
 
+        item(key = "calendar_progress") {
+            val progress = remember(today, progressMode) { calendarProgress(today, progressMode) }
+            LedgerCard(Modifier.testTag("stats-calendar-progress").clickable {
+                chartViewport.clearMonthBoundary(); UiSound.toggle(context)
+                val next = if (progressMode == CalendarProgressMode.MONTH) CalendarProgressMode.YEAR else CalendarProgressMode.MONTH
+                pendingProgressMode = next
+                preferenceScope.launch(start = CoroutineStart.UNDISPATCHED) {
+                    try { withContext(NonCancellable) { displayPrefs.setCalendarProgressMode(next) } }
+                    catch (cancelled: CancellationException) { throw cancelled }
+                    catch (_: Exception) { pendingProgressMode = null }
+                }
+            }) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(if (progressMode == CalendarProgressMode.MONTH) "当月已过" else "当年已过", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+                    Text(progress.percentage, style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.primary)
+                }
+                LinearProgressIndicator(progress = { progress.fraction }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp).height(8.dp),
+                    color = MaterialTheme.colorScheme.primary, trackColor = MaterialTheme.colorScheme.primaryContainer)
+                Text(if (progressMode == CalendarProgressMode.MONTH) "点一下看当年" else "点一下看当月", Modifier.padding(top = 5.dp),
+                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+
     }
 
     LedgerScrollBar(scroll, Modifier.align(Alignment.CenterEnd))
@@ -492,10 +558,15 @@ private fun ChartCard(
     subtitle: String? = null,
     action: (@Composable () -> Unit)? = null,
     modifier: Modifier = Modifier,
+    stackedAction: Boolean = false,
     content: @Composable ColumnScope.() -> Unit
 ) {
     LedgerCard(modifier) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        if (stackedAction) {
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(6.dp))
+            action?.invoke()
+        } else Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
             action?.invoke()
         }

@@ -15,27 +15,38 @@ import kotlinx.coroutines.flow.map
 private val Context.statsDisplayStore by preferencesDataStore(name = "stats_display")
 
 enum class StatsBarMode(val key: String, val label: String, val compactDays: Int?) {
-    COMPACT_FIVE_DAYS("five_days", "5 天紧凑", 5),
-    COMPACT_SEVEN_DAYS("seven_days", "7 天紧凑", 7),
-    COMPACT_TEN_DAYS("ten_days", "10 天紧凑", 10),
-    MONTH_COMPRESSED("whole_month", "整月压缩", null);
+    COMPACT_FIVE_DAYS("five_days", "5天", 5),
+    COMPACT_SEVEN_DAYS("seven_days", "7天", 7),
+    COMPACT_TEN_DAYS("ten_days", "10天", 10),
+    MONTH_COMPRESSED("whole_month", "整月", null);
 
     companion object {
-        fun fromKey(key: String?) = entries.firstOrNull { it.key == key } ?: COMPACT_TEN_DAYS
+        fun fromKey(key: String?) = entries.firstOrNull { it.key == key } ?: MONTH_COMPRESSED
     }
+}
+
+enum class CalendarProgressMode(val key: String) { MONTH("month"), YEAR("year");
+    companion object { fun fromKey(key: String?) = entries.firstOrNull { it.key == key } ?: MONTH }
 }
 
 /** A display preference only; changing it never changes or truncates the ledger. */
 class StatsDisplayPrefs internal constructor(private val store: DataStore<Preferences>) {
     constructor(context: Context) : this(context.applicationContext.statsDisplayStore)
 
-    val barMode = store.data.catch { error ->
+    private val preferences = store.data.catch { error ->
         if (error is IOException) emit(emptyPreferences()) else throw error
-    }.map { StatsBarMode.fromKey(it[KEY_BAR_MODE]) }.distinctUntilChanged()
+    }
+    val barMode = preferences.map { StatsBarMode.fromKey(it[KEY_BAR_MODE]) }.distinctUntilChanged()
 
     suspend fun setBarMode(mode: StatsBarMode) {
         store.edit { it[KEY_BAR_MODE] = mode.key }
     }
 
-    private companion object { val KEY_BAR_MODE = stringPreferencesKey("bar_mode") }
+    val calendarProgressMode = preferences.map { CalendarProgressMode.fromKey(it[KEY_PROGRESS_MODE]) }.distinctUntilChanged()
+    suspend fun setCalendarProgressMode(mode: CalendarProgressMode) { store.edit { it[KEY_PROGRESS_MODE] = mode.key } }
+
+    private companion object {
+        val KEY_BAR_MODE = stringPreferencesKey("bar_mode")
+        val KEY_PROGRESS_MODE = stringPreferencesKey("calendar_progress_mode")
+    }
 }

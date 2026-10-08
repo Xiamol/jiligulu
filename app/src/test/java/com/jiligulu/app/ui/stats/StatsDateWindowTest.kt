@@ -14,10 +14,12 @@ class StatsDateWindowTest {
         for (days in listOf(5, 7, 10)) {
             val initial = compactStatsWindow(today, today, days)
             assertEquals(days, initial.dates.size)
-            assertEquals(today, initial.last)
+            assertEquals(today, initial.first)
+            assertEquals(today.plusDays(days - 1L), initial.last)
             val historical = compactStatsWindow(LocalDate.of(2026, 12, 31), today, days)
             assertEquals(days, historical.dates.size)
             assertTrue(LocalDate.of(2026, 12, 31) in historical.dates)
+            assertTrue(historical.dates.all { it.monthValue == 12 && it.year == 2026 })
         }
     }
     @Test fun dailyPrefetchReusesItsLoadedWindowUntilTheViewportApproachesAnEdge() {
@@ -41,13 +43,21 @@ class StatsDateWindowTest {
         assertEquals(LocalDate.of(1, 1, 1), prefetchedStatsMonths(java.time.YearMonth.of(1, 1)).first)
         assertEquals(LocalDate.of(9999, 12, 31), prefetchedStatsMonths(java.time.YearMonth.of(9999, 12)).last)
     }
-    @Test fun tenDaysCrossDecemberAndJanuaryInsteadOfClampingToAMonth() {
+    @Test fun compactArrowsReachTheTailBeforeEnteringAnIndependentNextMonth() {
         val window = compactStatsWindow(LocalDate.of(2026, 12, 31), LocalDate.of(2026, 10, 7))
-        assertEquals(LocalDate.of(2026, 12, 27), window.first)
-        assertEquals(LocalDate.of(2027, 1, 5), window.last)
+        assertEquals(LocalDate.of(2026, 12, 22), window.first)
+        assertEquals(LocalDate.of(2026, 12, 31), window.last)
         assertEquals(10, window.dates.size)
-        assertEquals(LocalDate.of(2027, 1, 6), window.shifted(10).first)
-        assertEquals(window, window.shifted(10).shifted(-10))
+        val january = steppedStatsWindow(window, 1, 10)
+        assertEquals(LocalDate.of(2027, 1, 1), january.first)
+        assertEquals(LocalDate.of(2027, 1, 10), january.last)
+        assertEquals(window, steppedStatsWindow(january, -1, 10))
+        val beforeTail = StatsDateWindow(LocalDate.of(2026, 12, 19), LocalDate.of(2026, 12, 28))
+        assertEquals(window, steppedStatsWindow(beforeTail, 1, 10))
+        assertEquals(StatsDateWindow(LocalDate.of(1, 1, 1), LocalDate.of(1, 1, 10)),
+            steppedStatsWindow(StatsDateWindow(LocalDate.of(1, 1, 1), LocalDate.of(1, 1, 10)), -1, 10))
+        val final = StatsDateWindow(LocalDate.of(9999, 12, 22), LocalDate.of(9999, 12, 31))
+        assertEquals(final, steppedStatsWindow(final, 1, 10))
     }
 
     @Test fun wholeMonthIncludesAllLeapDaysAndTransitionsBothWays() {
@@ -59,9 +69,9 @@ class StatsDateWindowTest {
         assertEquals(LocalDate.of(2026, 12, 31), adjacentStatsMonth(LocalDate.of(2027, 1, 31), -1))
     }
 
-    @Test fun crossMonthBarsUseActualBillDatesAmountsAndTypeWithZeroDaysIncluded() {
+    @Test fun prefetchedCrossMonthBarsUseActualBillDatesAmountsAndTypeWithZeroDaysIncluded() {
         val zone = ZoneId.of("Asia/Tokyo")
-        val window = compactStatsWindow(LocalDate.of(2026, 12, 31), LocalDate.of(2026, 10, 7))
+        val window = StatsDateWindow(LocalDate.of(2026, 12, 27), LocalDate.of(2027, 1, 5))
         fun date(day: String) = LocalDate.parse(day).atStartOfDay(zone).toInstant().toEpochMilli()
         val bills = listOf(
             BillEntity(id = 1, amountFen = 1299, type = BillType.EXPENSE, categoryId = 1, detail = "午饭", timestamp = date("2026-12-31") + 1000),
@@ -87,22 +97,21 @@ class StatsDateWindowTest {
         assertEquals(LocalDate.of(2026, 3, 9).atStartOfDay(zone).toInstant().toEpochMilli(), range.second)
     }
 
-    @Test fun todaysInitialWindowShowsTenRecentDaysAcrossTheNewYear() {
+    @Test fun todaysInitialWindowStartsAtTheNewMonthsFirstDay() {
         val today = LocalDate.of(2027, 1, 1)
         val window = compactStatsWindow(today, today)
-        assertEquals(LocalDate.of(2026, 12, 23), window.first)
-        assertEquals(today, window.last)
+        assertEquals(today, window.first)
+        assertEquals(LocalDate.of(2027, 1, 10), window.last)
         assertEquals(10, window.dates.size)
-        // Initial placement does not forbid moving beyond today or crossing another month.
-        assertEquals(LocalDate.of(2027, 1, 2), window.shifted(10).first)
-        assertEquals(LocalDate.of(2027, 1, 11), window.shifted(10).last)
+        assertEquals(LocalDate.of(2027, 1, 11), steppedStatsWindow(window, 1, 10).first)
+        assertEquals(LocalDate.of(2027, 1, 20), steppedStatsWindow(window, 1, 10).last)
     }
 
     @Test fun historicalSelectionStaysCenteredAndDoesNotRepositionAtMidnight() {
         val selected = LocalDate.of(2026, 12, 28)
         val beforeMidnight = compactStatsWindow(selected, LocalDate.of(2027, 1, 1))
-        assertEquals(LocalDate.of(2026, 12, 24), beforeMidnight.first)
-        assertEquals(LocalDate.of(2027, 1, 2), beforeMidnight.last)
+        assertEquals(LocalDate.of(2026, 12, 22), beforeMidnight.first)
+        assertEquals(LocalDate.of(2026, 12, 31), beforeMidnight.last)
         assertEquals(beforeMidnight, compactStatsWindow(selected, LocalDate.of(2027, 1, 2)))
     }
 }

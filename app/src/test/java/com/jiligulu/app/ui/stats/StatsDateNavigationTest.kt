@@ -107,9 +107,9 @@ class StatsDateNavigationTest {
             assertEquals(Formatters.monthLabel(newYear), vm.monthLabel.value)
             assertEquals(newYear, vm.cashFlowBars.value.first().dayStartMillis)
             assertEquals(31, vm.cashFlowBars.value.size)
-            assertEquals(LocalDate.of(2026, 12, 23).millis(), vm.compactCashFlowBars.value.first().dayStartMillis)
-            assertEquals(newYear, vm.compactCashFlowBars.value.last().dayStartMillis)
-            assertEquals(2700L, vm.compactCashFlowBars.value.sumOf { it.amountFen })
+            assertEquals(newYear, vm.compactCashFlowBars.value.first().dayStartMillis)
+            assertEquals(LocalDate.of(2027, 1, 10).millis(), vm.compactCashFlowBars.value.last().dayStartMillis)
+            assertEquals(1800L, vm.compactCashFlowBars.value.sumOf { it.amountFen })
             assertEquals(listOf(72L), vm.dayDetails.value.map { it.id })
             assertTrue(selectedDates.all { it == lastDay || it == newYear })
             assertTrue(compactRanges.all { it == compactStatsWindow(LocalDate.of(2026, 12, 31), LocalDate.of(2026, 12, 31)) ||
@@ -200,7 +200,7 @@ class StatsDateNavigationTest {
         } finally { store.clear() }
     }
 
-    @Test fun compactWindowQueriesBothMonthsAndBarSelectionKeepsItsVisibleDates() = runTest {
+    @Test fun compactMonthCrossChangesSelectionAndDetailsButSameMonthTapsKeepTheViewport() = runTest {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
         val store = ViewModelStore()
         try {
@@ -209,34 +209,41 @@ class StatsDateNavigationTest {
             val vm = model(listOf(
                 BillEntity(id = 41, amountFen = 1000, type = BillType.EXPENSE, categoryId = 1, detail = "年末午饭", timestamp = december + 1000),
                 BillEntity(id = 42, amountFen = 500, type = BillType.EXPENSE, categoryId = 1, detail = "新年水果", timestamp = january + 1000)
-            )) { System.currentTimeMillis() }
+            )) { LocalDate.of(2026, 10, 8).millis() }
             store.put("stats", vm)
             backgroundScope.launch { vm.compactCashFlowBars.collect {} }
             backgroundScope.launch { vm.dayDetails.collect {} }
             backgroundScope.launch { vm.cashFlowBars.collect {} }
             runCurrent()
             vm.selectCalendarDate(december); runCurrent()
-            val first = LocalDate.of(2026, 12, 27).millis()
+            val first = LocalDate.of(2026, 12, 22).millis()
             assertEquals(first, vm.compactCashFlowBars.value.first().dayStartMillis)
-            assertEquals(LocalDate.of(2027, 1, 5).millis(), vm.compactCashFlowBars.value.last().dayStartMillis)
-            assertEquals(1500L, vm.compactCashFlowBars.value.sumOf { it.amountFen })
-            vm.selectDay(january); runCurrent()
+            assertEquals(december, vm.compactCashFlowBars.value.last().dayStartMillis)
+            assertEquals(1000L, vm.compactCashFlowBars.value.sumOf { it.amountFen })
+            vm.selectDay(LocalDate.of(2026, 12, 30).millis()); runCurrent()
             assertEquals(first, vm.compactCashFlowBars.value.first().dayStartMillis)
+            vm.toggleCategory(1)
+            vm.crossCompactMonth(YearMonth.of(2027, 1), 1); runCurrent()
+            assertEquals(january, vm.selectedDay.value)
+            assertEquals(january, vm.compactCashFlowBars.value.first().dayStartMillis)
+            assertEquals(LocalDate.of(2027, 1, 10).millis(), vm.compactCashFlowBars.value.last().dayStartMillis)
+            assertEquals(null, vm.selectedCategoryId.value)
+            assertEquals(500L, vm.compactCashFlowBars.value.sumOf { it.amountFen })
             assertEquals(listOf(42L), vm.dayDetails.value.map { it.id })
             vm.shiftCompactWindow(10); runCurrent()
-            assertEquals(LocalDate.of(2027, 1, 6).millis(), vm.compactCashFlowBars.value.first().dayStartMillis)
+            assertEquals(LocalDate.of(2027, 1, 11).millis(), vm.compactCashFlowBars.value.first().dayStartMillis)
             assertEquals(LocalDate.of(2027, 1, 11).millis(), vm.selectedDay.value)
             vm.shiftMonth(1); runCurrent()
-            assertEquals(LocalDate.of(2027, 2, 11).millis(), vm.selectedDay.value)
+            assertEquals(LocalDate.of(2027, 2, 1).millis(), vm.selectedDay.value)
             assertEquals(28, vm.cashFlowBars.value.size)
             vm.showToday(); runCurrent()
-            assertEquals(LocalDate.now().millis(), vm.selectedDay.value)
-            assertEquals(compactStatsWindow(LocalDate.now(), LocalDate.now()).first.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli(),
+            assertEquals(LocalDate.of(2026, 10, 8).millis(), vm.selectedDay.value)
+            assertEquals(LocalDate.of(2026, 10, 1).millis(),
                 vm.compactCashFlowBars.value.first().dayStartMillis)
             vm.shiftCompactWindow(10); runCurrent()
-            assertEquals(LocalDate.now().plusDays(1).millis(), vm.compactCashFlowBars.value.first().dayStartMillis)
-            assertEquals(LocalDate.now().plusDays(10).millis(), vm.compactCashFlowBars.value.last().dayStartMillis)
-            assertEquals(LocalDate.now().plusDays(10).millis(), vm.selectedDay.value)
+            assertEquals(LocalDate.of(2026, 10, 11).millis(), vm.compactCashFlowBars.value.first().dayStartMillis)
+            assertEquals(LocalDate.of(2026, 10, 20).millis(), vm.compactCashFlowBars.value.last().dayStartMillis)
+            assertEquals(LocalDate.of(2026, 10, 18).millis(), vm.selectedDay.value)
         } finally { store.clear() }
     }
 
@@ -255,6 +262,46 @@ class StatsDateNavigationTest {
             advanceTimeBy(60_000L); runCurrent()
             assertEquals(historical, vm.selectedDay.value)
             assertEquals(first, vm.cashFlowBars.value.first().dayStartMillis)
+        } finally { store.clear() }
+    }
+
+    @Test fun aDirectSelectionInAnotherMonthReanchorsButATapInsideThatMonthDoesNot() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        val store = ViewModelStore()
+        try {
+            val today = LocalDate.of(2026, 12, 31)
+            val vm = model(emptyList()) { today.millis() + 1000 }
+            store.put("stats", vm)
+            backgroundScope.launch { vm.selectedDay.collect {} }
+            backgroundScope.launch { vm.compactWindow.collect {} }
+            runCurrent()
+            val revision = vm.chartAnchor.value.revision
+            vm.selectDay(LocalDate.of(2027, 1, 1).millis()); runCurrent()
+            assertEquals(StatsDateWindow(LocalDate.of(2027, 1, 1), LocalDate.of(2027, 1, 10)), vm.compactWindow.value)
+            assertEquals(revision + 1, vm.chartAnchor.value.revision)
+            vm.selectDay(LocalDate.of(2027, 1, 5).millis()); runCurrent()
+            assertEquals(revision + 1, vm.chartAnchor.value.revision)
+            assertEquals(LocalDate.of(2027, 1, 1), vm.compactWindow.value.first)
+        } finally { store.clear() }
+    }
+
+    @Test fun returningToStatisticsRefreshesTodayWithoutWaitingForThePreviousMidnightTimer() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        val store = ViewModelStore()
+        try {
+            var now = LocalDate.of(2028, 2, 28).millis() + 1000
+            val vm = model(emptyList()) { now }
+            store.put("stats", vm)
+            backgroundScope.launch { vm.today.collect {} }
+            backgroundScope.launch { vm.selectedDay.collect {} }
+            runCurrent()
+            vm.selectCalendarDate(LocalDate.of(2027, 12, 31).millis()); runCurrent()
+            now = LocalDate.of(2028, 3, 1).millis() + 1000
+            vm.showToday(); runCurrent()
+            assertEquals(LocalDate.of(2028, 3, 1), vm.today.value)
+            assertEquals(LocalDate.of(2028, 3, 1).millis(), vm.selectedDay.value)
+            assertEquals(LocalDate.of(2028, 3, 1), vm.chartAnchor.value.firstDay)
+            assertEquals(YearMonth.of(2028, 3), vm.chartAnchor.value.month)
         } finally { store.clear() }
     }
 
@@ -285,14 +332,14 @@ class StatsDateNavigationTest {
         } finally { store.clear() }
     }
 
-    @Test fun dragReportsCrossYearVisibleDatesWithoutReanchoringAndBarTapsKeepTheViewport() = runTest {
+    @Test fun sameMonthDragReportsAndBarTapsKeepTheViewportWhileCrossingReanchorsOnce() = runTest {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
         val store = ViewModelStore()
         try {
             val today = LocalDate.of(2026, 12, 31)
-            val january = LocalDate.of(2027, 1, 1)
+            val target = LocalDate.of(2026, 12, 24)
             val vm = model(listOf(BillEntity(id = 61, amountFen = 1550, type = BillType.EXPENSE,
-                categoryId = 1, detail = "新年午饭", timestamp = january.millis() + 1000))) { today.millis() + 1000 }
+                categoryId = 1, detail = "午饭", timestamp = target.millis() + 1000))) { today.millis() + 1000 }
             store.put("stats", vm)
             backgroundScope.launch { vm.prefetchedCashFlowBars.collect {} }
             backgroundScope.launch { vm.compactVisibleWindow.collect {} }
@@ -301,17 +348,26 @@ class StatsDateNavigationTest {
             backgroundScope.launch { vm.chartFollowsToday.collect {} }
             runCurrent()
             val revision = vm.chartAnchor.value.revision
-            vm.reportCompactViewport(LocalDate.of(2026, 12, 27).millis(), LocalDate.of(2027, 1, 6).millis(), true)
+            vm.reportCompactViewport(LocalDate.of(2026, 12, 20).millis(), LocalDate.of(2026, 12, 30).millis(), true)
             runCurrent()
-            val dragged = StatsDateWindow(LocalDate.of(2026, 12, 27), LocalDate.of(2027, 1, 6))
+            val dragged = StatsDateWindow(LocalDate.of(2026, 12, 20), LocalDate.of(2026, 12, 30))
             assertEquals(dragged, vm.compactVisibleWindow.value)
             assertEquals(revision, vm.chartAnchor.value.revision)
             assertEquals(today.millis(), vm.selectedDay.value)
             assertFalse(vm.chartFollowsToday.value)
-            vm.selectDay(january.millis()); runCurrent()
+            vm.selectDay(target.millis()); runCurrent()
             assertEquals(dragged, vm.compactVisibleWindow.value)
             assertEquals(revision, vm.chartAnchor.value.revision)
             assertEquals(listOf(61L), vm.dayDetails.value.map { it.id })
+            vm.toggleCategory(1)
+            vm.crossCompactMonth(YearMonth.of(2027, 1), 1); runCurrent()
+            assertEquals(LocalDate.of(2027, 1, 1).millis(), vm.selectedDay.value)
+            assertEquals(StatsDateWindow(LocalDate.of(2027, 1, 1), LocalDate.of(2027, 1, 10)), vm.compactVisibleWindow.value)
+            assertEquals(null, vm.selectedCategoryId.value)
+            assertEquals(revision + 1, vm.chartAnchor.value.revision)
+            vm.crossCompactMonth(YearMonth.of(2026, 12), -1); runCurrent()
+            assertEquals(today.millis(), vm.selectedDay.value)
+            assertEquals(StatsDateWindow(LocalDate.of(2026, 12, 22), today), vm.compactVisibleWindow.value)
             vm.showToday(); runCurrent()
             assertEquals(today.millis(), vm.selectedDay.value)
             assertEquals(compactStatsWindow(today, today), vm.compactVisibleWindow.value)
@@ -331,19 +387,25 @@ class StatsDateNavigationTest {
             backgroundScope.launch { vm.prefetchedCashFlowBars.collect {} }
             backgroundScope.launch { vm.compactVisibleWindow.collect {} }
             runCurrent()
-            val first = compactStatsWindow(today, today).first
-            for (offset in 0 until 200) {
-                vm.reportCompactViewport(first.plusDays(offset.toLong()).millis(), first.plusDays(offset + 10L).millis(), true)
-                runCurrent()
+            var reports = 0
+            for (monthOffset in 0L..9L) {
+                val month = YearMonth.from(today).plusMonths(monthOffset)
+                vm.crossCompactMonth(month, 1); runCurrent()
+                for (offset in 0..month.lengthOfMonth() - 11) {
+                    val first = month.atDay(1).plusDays(offset.toLong())
+                    vm.reportCompactViewport(first.millis(), first.plusDays(10).millis(), true)
+                    runCurrent(); reports++
+                }
             }
-            assertTrue("200 date changes should reuse the buffer, queries=${queries.size}", queries.size in 2..39)
+            assertTrue(reports >= 190)
+            assertTrue("Daily reports should reuse a buffer rather than query each slot, queries=${queries.size}", queries.size in 2..49)
             assertTrue(queries.all { queryDays(it) in 1L..31L })
-            assertEquals(first.plusDays(199), vm.compactVisibleWindow.value.first)
-            assertEquals(first.plusDays(209), vm.compactVisibleWindow.value.last)
+            assertEquals(LocalDate.of(2027, 10, 21), vm.compactVisibleWindow.value.first)
+            assertEquals(LocalDate.of(2027, 10, 31), vm.compactVisibleWindow.value.last)
         } finally { store.clear() }
     }
 
-    @Test fun monthViewportPrefetchesNeighboursAndPreservesThePreferredDayAcrossShortMonths() = runTest {
+    @Test fun monthViewportPrefetchesNeighboursAndSelectsTheEnteredMonthsDirectionalEdge() = runTest {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
         val store = ViewModelStore()
         try {
@@ -357,16 +419,18 @@ class StatsDateNavigationTest {
             runCurrent()
             val revision = vm.chartAnchor.value.revision
             vm.reportMonthViewport(LocalDate.of(2027, 1, 1).millis(), true); runCurrent()
-            assertEquals(LocalDate.of(2027, 1, 31).millis(), vm.selectedDay.value)
+            assertEquals(LocalDate.of(2027, 1, 1).millis(), vm.selectedDay.value)
             vm.reportMonthViewport(LocalDate.of(2027, 2, 1).millis(), true); runCurrent()
-            assertEquals(LocalDate.of(2027, 2, 28).millis(), vm.selectedDay.value)
+            assertEquals(LocalDate.of(2027, 2, 1).millis(), vm.selectedDay.value)
             vm.reportMonthViewport(LocalDate.of(2027, 3, 1).millis(), true); runCurrent()
-            assertEquals(LocalDate.of(2027, 3, 31).millis(), vm.selectedDay.value)
+            assertEquals(LocalDate.of(2027, 3, 1).millis(), vm.selectedDay.value)
             assertEquals(YearMonth.of(2027, 3), vm.chartMonth.value)
             assertEquals(revision, vm.chartAnchor.value.revision)
             assertTrue(queries.all { queryDays(it) in 28L..92L })
             assertEquals(LocalDate.of(2027, 2, 1).millis(), vm.pagedMonthCashFlowBars.value.first().dayStartMillis)
             assertEquals(LocalDate.of(2027, 4, 30).millis(), vm.pagedMonthCashFlowBars.value.last().dayStartMillis)
+            vm.reportMonthViewport(LocalDate.of(2027, 2, 1).millis(), true); runCurrent()
+            assertEquals(LocalDate.of(2027, 2, 28).millis(), vm.selectedDay.value)
             vm.showToday(); runCurrent()
             assertEquals(today.millis(), vm.selectedDay.value)
             assertEquals(YearMonth.of(2026, 12), vm.chartMonth.value)
@@ -389,7 +453,7 @@ class StatsDateNavigationTest {
                 assertEquals(today.millis(), vm.compactCashFlowBars.value.last().dayStartMillis)
                 vm.shiftCompactWindow(days); runCurrent()
                 assertEquals(LocalDate.of(2027, 1, 1).millis(), vm.compactCashFlowBars.value.first().dayStartMillis)
-                assertEquals(LocalDate.of(2027, 1, days).millis(), vm.selectedDay.value)
+                assertEquals(LocalDate.of(2027, 1, 1).millis(), vm.selectedDay.value)
                 vm.shiftCompactWindow(-days); runCurrent()
                 assertEquals(today.millis(), vm.selectedDay.value)
                 vm.selectCalendarDate(LocalDate.of(2027, 2, 1).millis(), startAtSelected = true); runCurrent()
@@ -401,9 +465,9 @@ class StatsDateNavigationTest {
                 assertEquals(today.millis(), vm.selectedDay.value)
                 assertEquals(days, vm.compactCashFlowBars.value.size)
             }
-            vm.shiftMonth(1); runCurrent(); assertEquals(LocalDate.of(2027, 1, 31).millis(), vm.selectedDay.value)
-            vm.shiftMonth(1); runCurrent(); assertEquals(LocalDate.of(2027, 2, 28).millis(), vm.selectedDay.value)
-            vm.shiftMonth(1); runCurrent(); assertEquals(LocalDate.of(2027, 3, 31).millis(), vm.selectedDay.value)
+            vm.shiftMonth(1); runCurrent(); assertEquals(LocalDate.of(2027, 1, 1).millis(), vm.selectedDay.value)
+            vm.shiftMonth(1); runCurrent(); assertEquals(LocalDate.of(2027, 2, 1).millis(), vm.selectedDay.value)
+            vm.shiftMonth(1); runCurrent(); assertEquals(LocalDate.of(2027, 3, 1).millis(), vm.selectedDay.value)
         } finally { store.clear() }
     }
 

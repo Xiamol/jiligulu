@@ -38,6 +38,11 @@ internal fun cashFlowDateSlotWidthPx(index: Int, count: Int, plotWidthPx: Int): 
 class CashFlowViewport(val days: LazyListState, val months: PagerState) {
     internal val monthBoundary = CashFlowMonthBoundary()
     internal fun clearMonthBoundary() = monthBoundary.clear()
+    internal fun prepareCompactMonth(first: LocalDate) {
+        navigating = true
+        ready = false
+        days.requestScrollToItem(cashFlowDayIndex(first))
+    }
     private var navigationTicket = 0L
     internal var appliedDayRevision = Long.MIN_VALUE
     internal var appliedMonthRevision = Long.MIN_VALUE

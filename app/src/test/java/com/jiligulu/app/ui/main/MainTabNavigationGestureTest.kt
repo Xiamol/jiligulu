@@ -8,7 +8,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -20,9 +24,30 @@ import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [28], application = Application::class, qualifiers = "w360dp-h640dp-port-mdpi")
-@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class, ExperimentalTestApi::class)
 class MainTabNavigationGestureTest {
     @get:Rule val compose = createComposeRule()
+
+    @Test fun visibleTabsAndAccessibilityClicksUseLedgerStatisticsWorldOrder() {
+        val selected = mutableListOf<Int>()
+        compose.setContent {
+            MaterialTheme {
+                val pager = rememberPagerState { MainPageCount }
+                MainTabNavigation(pager, 0, selected::add, {}, {}, {})
+            }
+        }
+        val ledger = compose.onNodeWithText("账本").getUnclippedBoundsInRoot()
+        val statistics = compose.onNodeWithText("统计").getUnclippedBoundsInRoot()
+        val world = compose.onNodeWithText("小窝").getUnclippedBoundsInRoot()
+        assertTrue(ledger.left < statistics.left && statistics.left < world.left)
+        compose.onNodeWithTag("main-tab-stats").performClick()
+        compose.onNodeWithTag("main-tab-world").performClick()
+        compose.onNodeWithTag("main-tab-home").performClick()
+        compose.runOnIdle { assertEquals(listOf(1, 2, 0), selected) }
+        assertEquals(MainDestination.STATISTICS, MainDestination.fromId("statistics"))
+        assertEquals(MainDestination.WORLD, MainDestination.fromId("world"))
+        assertEquals(MainDestination.LEDGER, MainDestination.fromId("unrecognized"))
+    }
 
     @Test fun dragStartsOnFirstMoveAndReversesBeforeReleaseWithoutWaitingForLongPress() {
         val values = mutableListOf<Float>()
