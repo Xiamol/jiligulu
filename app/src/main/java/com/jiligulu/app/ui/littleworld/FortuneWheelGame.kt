@@ -26,7 +26,6 @@ import com.jiligulu.app.ui.components.SpringScrollColumn
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.LocalDate
-import java.time.LocalTime
 import java.time.Instant
 import java.time.ZoneId
 import java.time.Duration
@@ -37,11 +36,13 @@ internal fun ColumnScope.FortuneWheelGame(boardSize: Dp, foreground: Boolean,
     onOpenFuture: () -> Unit, onOpenMemories: () -> Unit, onOpenPaper: () -> Unit) {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("gulu_daily_luck", Context.MODE_PRIVATE) }
+    val rewriteUsage = remember(prefs) { FortuneRewriteUsage(prefs) }
     var date by remember { mutableStateOf(LocalDate.now()) }
     var fortunePage by rememberSaveable { mutableStateOf("wheel") }
     val liuRenStore = remember(context) { XiaoLiuRenStore(context.getSharedPreferences("gulu_xiao_liuren", Context.MODE_PRIVATE)) }
     var sign by rememberSaveable { mutableStateOf(prefs.getString("sign", DailyLuckEngine.signs.first()).orEmpty()) }
     var rewrittenDay by remember { mutableStateOf(prefs.getString("rewritten_day", "").orEmpty()) }
+    var liuRenRewrittenDay by remember { mutableStateOf(prefs.getString("liuren_rewritten_day", "").orEmpty()) }
     var signPicker by remember { mutableStateOf(false) }
     var stamp by remember { mutableStateOf(false) }
     var resultText by rememberSaveable { mutableStateOf(prefs.getString("last_task", "").orEmpty()) }
@@ -130,16 +131,12 @@ internal fun ColumnScope.FortuneWheelGame(boardSize: Dp, foreground: Boolean,
                     }
                 }
             } else if (fortunePage == "liuren") {
-                var selection by remember(date) { mutableStateOf(liuRenStore.loadForDay(date) {
-                    XiaoLiuRenCalendar.forDate(date, XiaoLiuRen.shichen(LocalTime.now().hour))
-                }) }
                 SpringScrollColumn(Modifier.fillMaxWidth().heightIn(max = (availableHeight - 72.dp).coerceAtLeast(1.dp)),
                     horizontalAlignment = Alignment.CenterHorizontally, handOffOnRepeat = true) {
-                    XiaoLiuRenPane(selection, rewrittenDay == date.toString(), onSelect = {
-                        liuRenStore.save(date, it); selection = it
-                    }, onRewrite = {
-                        UiSound.pet(context); rewrittenDay = date.toString()
-                        prefs.edit().putString("rewritten_day", rewrittenDay).apply(); stamp = true
+                    XiaoLiuRenPane(liuRenStore, liuRenRewrittenDay == date.toString(), onRewrite = {
+                        if (rewriteUsage.mark(FortuneRewriteKind.LIU_REN, date)) {
+                            UiSound.pet(context); liuRenRewrittenDay = date.toString(); stamp = true
+                        }
                     })
                 }
             } else {
@@ -162,8 +159,9 @@ internal fun ColumnScope.FortuneWheelGame(boardSize: Dp, foreground: Boolean,
                         color = Color(0xFF9A929A), textAlign = TextAlign.Center)
                 }
                 TextButton(onClick = {
-                    UiSound.pet(context); rewrittenDay = date.toString()
-                    prefs.edit().putString("rewritten_day", rewrittenDay).apply(); stamp = true
+                    if (rewriteUsage.mark(FortuneRewriteKind.HOROSCOPE, date)) {
+                        UiSound.pet(context); rewrittenDay = date.toString(); stamp = true
+                    }
                 }, enabled = rewrittenDay != date.toString()) {
                     Text(if (rewrittenDay == date.toString()) "阿噜盖过章啦 ♡" else "让阿噜逆天改命")
                 }

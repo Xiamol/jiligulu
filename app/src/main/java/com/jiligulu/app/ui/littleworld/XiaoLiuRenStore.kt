@@ -2,9 +2,34 @@ package com.jiligulu.app.ui.littleworld
 
 import android.content.SharedPreferences
 import java.time.LocalDate
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 
-/** One bounded daily selection. A new local day resets it; reopening today never rerolls. */
+/** The question/cast and bounded analyses survive reopening, including crossing midnight. */
 internal class XiaoLiuRenStore(private val prefs: SharedPreferences) {
+    private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
+    @Serializable private data class AnalysisCache(val entries: Map<String, String> = emptyMap())
+    fun session(): LiuRenSession = runCatching {
+        json.decodeFromString(LiuRenSession.serializer(), prefs.getString("session_v2", "").orEmpty()).also {
+            // Keep an overlong, not-yet-valid draft so validation cannot silently erase it on reopen.
+            require(it.question.length <= 4096 && it.digits.length <= 4096)
+            it.cast?.checked()
+            if (it.step == LiuRenStep.RESULT) require(it.cast != null)
+        }
+    }.getOrDefault(LiuRenSession())
+    fun saveSession(value: LiuRenSession) {
+        prefs.edit().putString("session_v2", json.encodeToString(LiuRenSession.serializer(), value)).apply()
+    }
+    fun analysis(key: String): String? = analysisCache()[key]?.takeIf { it.isNotBlank() && it.length <= 800 }
+    @Synchronized fun saveAnalysis(key: String, reply: String) {
+        val values = LinkedHashMap(analysisCache())
+        values.remove(key); values[key] = reply.take(800)
+        while (values.size > 16) values.remove(values.keys.first())
+        prefs.edit().putString("analysis_v2", json.encodeToString(AnalysisCache.serializer(), AnalysisCache(values))).apply()
+    }
+    private fun analysisCache(): Map<String, String> = runCatching {
+        json.decodeFromString(AnalysisCache.serializer(), prefs.getString("analysis_v2", "").orEmpty()).entries
+    }.getOrDefault(emptyMap())
     fun loadForDay(today: LocalDate, initial: () -> XiaoLiuRenInput): XiaoLiuRenInput {
         val values = prefs.all
         val stored = if (values["anchor"] == today.toString()) runCatching {

@@ -32,4 +32,16 @@ class XiaoLiuRenTest {
         assertTrue(runCatching { XiaoLiuRenInput(date, 0, 1, 1) }.isFailure)
         assertTrue(runCatching { XiaoLiuRenInput(date, 1, 31, 1) }.isFailure)
     }
+    @Test fun threeReportedDigitsUseInclusiveStartsAndAnExplicitTenForZero() {
+        assertEquals(listOf(1, 3, 7), XiaoLiuRen.digitCounts("137"))
+        assertEquals(XiaoLiuRenResult(LiuRenPalace.DA_AN, LiuRenPalace.SU_XI, LiuRenPalace.SU_XI),
+            XiaoLiuRen.forCounts(requireNotNull(XiaoLiuRen.digitCounts("137"))))
+        assertEquals(listOf(10, 1, 2), XiaoLiuRen.digitCounts("012"))
+        assertEquals(XiaoLiuRenResult(LiuRenPalace.CHI_KOU, LiuRenPalace.CHI_KOU, LiuRenPalace.XIAO_JI),
+            XiaoLiuRen.forCounts(requireNotNull(XiaoLiuRen.digitCounts("012"))))
+        assertEquals(LiuRenPalace.CHI_KOU, XiaoLiuRen.forCounts(listOf(10, 10, 10)).hour)
+        listOf("", "12", "1234", "1 3", "１２３", "一二三", "-12", "137\n").forEach { assertNull(it, XiaoLiuRen.digitCounts(it)) }
+        assertTrue(runCatching { XiaoLiuRen.forCounts(listOf(1, 0, 3)) }.isFailure)
+        assertTrue(runCatching { XiaoLiuRen.forCounts(listOf(1, 3)) }.isFailure)
+    }
 }
