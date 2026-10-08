@@ -31,6 +31,12 @@ import com.jiligulu.app.domain.persona.CompanionFact
 import com.jiligulu.app.domain.persona.CompanionMemoryPolicy
 import com.jiligulu.app.domain.persona.CompanionMemoryState
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Rule
@@ -42,6 +48,7 @@ import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import java.time.Duration
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [28], application = Application::class, qualifiers = "w360dp-h640dp-port-mdpi")
@@ -113,9 +120,46 @@ class CompanionHistoryPreviewTest {
         useUnmergedTree = true)
 
     private fun awaitSaved(prefs: UserPrefs, expected: (CompanionMemoryState) -> Boolean) {
-        compose.waitUntil(8_000L) {
-            dialogFrame()
-            expected(memory(prefs)) && compose.onAllNodesWithText("记下所选").fetchSemanticsNodes().isEmpty()
+        // Never block the paused UI thread on DataStore.first() while its edit is in flight:
+        // the transform/continuation may itself need that thread. Observe continuously off it.
+        val observed = AtomicReference<CompanionMemoryState?>(null)
+        val observerFailure = AtomicReference<String?>(null)
+        val observation = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        observation.launch {
+            try { prefs.companionMemory.collect { observed.set(it) } }
+            catch (failure: Exception) { observerFailure.set(failure.javaClass.simpleName) }
+        }
+        val dialog = SemanticsMatcher("is a dialog") { it.config.contains(SemanticsProperties.IsDialog) }
+        val changedError = hasText("资料或开关已经变化，请重新预览再确认") and hasAnyAncestor(dialog)
+        var factsSaved = false
+        var dialogCount = -1
+        var confirmCount = -1
+        var disabledConfirms = -1
+        var busyCount = -1
+        var dialogErrorCount = -1
+        try {
+            compose.waitUntil(8_000L) {
+                dialogFrame()
+                factsSaved = observed.get()?.let(expected) == true
+                dialogCount = compose.onAllNodes(dialog).fetchSemanticsNodes().size
+                val confirms = compose.onAllNodesWithText("记下所选").fetchSemanticsNodes()
+                confirmCount = confirms.size
+                disabledConfirms = confirms.count { it.config.contains(SemanticsProperties.Disabled) }
+                busyCount = compose.onAllNodesWithText("正在处理…").fetchSemanticsNodes().size
+                dialogErrorCount = compose.onAllNodes(changedError).fetchSemanticsNodes().size
+                factsSaved && dialogCount == 0 && confirmCount == 0 && busyCount == 0
+            }
+        } catch (failure: Throwable) {
+            val state = observed.get()
+            val metadata = state?.let { snapshot ->
+                "enabled=${snapshot.enabled}, revision=${snapshot.revision}, historyVersion=${snapshot.historyLearningVersion}, " +
+                    "facts=${snapshot.facts.map { "${it.id}:${it.kind}@${it.updatedAt}" }}"
+            } ?: "no preference emission"
+            throw AssertionError("Preview confirmation timed out: preferences={$metadata}, expectedFacts=$factsSaved, " +
+                "dialogs=$dialogCount, confirms=$confirmCount, disabledConfirms=$disabledConfirms, " +
+                "busyLabels=$busyCount, dialogErrors=$dialogErrorCount, observerFailure=${observerFailure.get()}", failure)
+        } finally {
+            observation.cancel()
         }
     }
 
