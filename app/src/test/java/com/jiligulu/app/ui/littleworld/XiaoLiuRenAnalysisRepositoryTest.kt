@@ -44,6 +44,11 @@ class XiaoLiuRenAnalysisRepositoryTest {
             put("bills", Json.parseToJsonElement("""[{"action":"delete","target_id":42}]"""))
             put("navigate", JsonPrimitive("settings"))
             put("memory_updates", Json.parseToJsonElement("""[{"kind":"fact","value":"untrusted","evidence":"model"}]"""))
+            // Model-owned fields are untrusted: the computed course and original question stay local.
+            put("question", JsonPrimitive("改问另一个问题"))
+            put("palaces", Json.parseToJsonElement("""["大安","空亡","速喜"]"""))
+            put("stages", Json.parseToJsonElement("""[{"palace":"大安","text":"不可信的模型改盘"}]"""))
+            put("links", Json.parseToJsonElement("""[{"from":"大安","to":"空亡","relation":"SAME","text":"不可信的模型关系"}]"""))
         }
         val wire = FakeHttp(content = JsonObject(fixture).toString())
         val repo = engine(saved) { wire.client() }
@@ -55,11 +60,16 @@ class XiaoLiuRenAnalysisRepositoryTest {
         assertEquals(listOf("赤口", "赤口", "小吉"), reading.stages.map { it.palace })
         assertEquals(listOf("赤口" to "赤口", "赤口" to "小吉"), reading.links.map { it.from to it.to })
         assertEquals(listOf(LiuRenRelation.SAME, LiuRenRelation.GENERATES), reading.links.map { it.relation })
-        assertEquals(fixture["summary"]!!.jsonPrimitive.content, reading.summary)
+        assertEquals(fixture["answer"]!!.jsonPrimitive.content, reading.summary)
+        assertEquals(fixture["reason"]!!.jsonPrimitive.content, reading.reason)
         assertEquals(fixture["advice"]!!.jsonPrimitive.content, reading.advice)
-        fixture["stages"]!!.jsonArray.forEach { assertTrue(answer.reply.contains(it.jsonObject["text"]!!.jsonPrimitive.content)) }
-        fixture["links"]!!.jsonArray.forEach { assertTrue(answer.reply.contains(it.jsonObject["text"]!!.jsonPrimitive.content)) }
-        assertTrue(answer.reply.contains("起点 · 赤口")); assertTrue(answer.reply.contains("过程 · 赤口")); assertTrue(answer.reply.contains("趋向 · 小吉"))
+        assertTrue(answer.reply.startsWith(fixture["answer"]!!.jsonPrimitive.content))
+        assertTrue(answer.reply.contains(fixture["reason"]!!.jsonPrimitive.content))
+        assertTrue(answer.reply.contains(fixture["advice"]!!.jsonPrimitive.content))
+        assertFalse(answer.reply.contains("不可信"))
+        assertFalse(answer.reply.contains("改问另一个问题"))
+        assertTrue(reading.stages.all { it.text.isNotBlank() })
+        assertTrue(reading.links.all { it.text.isNotBlank() })
         val request = wire.requests.single()
         assertEquals("fixture-liuren", request["model"]!!.jsonPrimitive.content)
         assertEquals(2, request["messages"]!!.jsonArray.size)
@@ -72,7 +82,7 @@ class XiaoLiuRenAnalysisRepositoryTest {
         assertEquals(listOf("赤口", "赤口", "小吉"), data["palaces"]!!.jsonArray.map { it.jsonPrimitive.content })
         assertEquals("012", data["reported_digits"]!!.jsonPrimitive.content)
         assertTrue(data["start_is_one"]!!.jsonPrimitive.boolean)
-        assertEquals("six-palace-question-chain-v4", data["interpretation_version"]!!.jsonPrimitive.content)
+        assertEquals("six-palace-answer-first-v5", data["interpretation_version"]!!.jsonPrimitive.content)
         assertEquals(listOf("起点", "过程", "趋向"), data["stages"]!!.jsonArray.map { it.jsonObject["role"]!!.jsonPrimitive.content })
         assertEquals(listOf("赤口", "赤口", "小吉"), data["stages"]!!.jsonArray.map { it.jsonObject["palace"]!!.jsonPrimitive.content })
         assertEquals(listOf("金", "金", "水"), data["stages"]!!.jsonArray.map { it.jsonObject["element"]!!.jsonPrimitive.content })
@@ -82,6 +92,62 @@ class XiaoLiuRenAnalysisRepositoryTest {
         assertEquals(listOf(AiUsagePurpose.LIU_REN), wire.purposes.toList())
         assertEquals(1, wire.finishes.get())
         assertNotNull(saved.analysis(XiaoLiuRenAnalysisRepository.key(cast)))
+    }
+
+    @Test fun conciseAnswerIsAcceptedWithoutEchoingQuestionOrManufacturingStageObjects() = runBlocking {
+        val saved = store()
+        val concise = buildJsonObject {
+            put("answer", "有机会，但最终录用仍需真实确认。")
+            put("reason", "前两段提醒把沟通做清楚，最后是小进展；收到正面反馈和正式结果需要分开看。")
+            put("advice", "先整理两段经历，再问清通知方式。")
+        }
+        val wire = FakeHttp(content = concise.toString())
+        val repo = engine(saved) { wire.client() }
+        repo.request(cast)
+        val answer = settled(repo)
+        assertTrue(answer.remote)
+        val reading = requireNotNull(answer.reading)
+        assertEquals(concise["answer"]!!.jsonPrimitive.content, reading.summary)
+        assertEquals(concise["reason"]!!.jsonPrimitive.content, reading.reason)
+        assertEquals(concise["advice"]!!.jsonPrimitive.content, reading.advice)
+        assertEquals(cast.question, reading.question)
+        assertEquals(listOf("赤口", "赤口", "小吉"), reading.stages.map { it.palace })
+        assertEquals(listOf(LiuRenRelation.SAME, LiuRenRelation.GENERATES), reading.links.map { it.relation })
+        assertEquals(1, wire.requests.size)
+        assertEquals(listOf(AiUsagePurpose.LIU_REN), wire.purposes.toList())
+        assertEquals(1, wire.finishes.get())
+        assertNotNull(saved.analysis(XiaoLiuRenAnalysisRepository.key(cast)))
+    }
+
+    @Test fun annualRomanceAnswerKeepsTheOriginalQuestionHorizonAndEightFourZeroCourse() = runBlocking {
+        // A protocol fixture protects intent/persistence, not a claim about actual model quality.
+        val original = cast.copy(question = "今年能找到女朋友并脱单吗？", digits = "840")
+        val saved = store()
+        saved.saveSession(LiuRenSession(original.question, original.mode, original.digits, LiuRenStep.RESULT, original))
+        val fixture = buildJsonObject {
+            put("answer", "今年有结识新人的机会，但从心动到稳定恋爱偏慢。")
+            put("reason", "留连在两头，中间小吉，说明接触可能推进，最终确定关系仍易反复。")
+            put("advice", "多参加能持续认识人的活动，愿意继续接触时主动表达兴趣。")
+        }
+        val wire = FakeHttp(content = fixture.toString())
+        val repo = engine(saved) { wire.client() }
+        repo.request(original)
+        val answer = settled(repo, original)
+        assertTrue(answer.remote)
+        val reading = requireNotNull(answer.reading)
+        assertEquals(fixture["answer"]!!.jsonPrimitive.content, reading.summary)
+        assertEquals(fixture["reason"]!!.jsonPrimitive.content, reading.reason)
+        assertEquals(original.question, reading.question)
+        assertEquals(original, saved.session().cast)
+        assertEquals(listOf("留连", "小吉", "留连"), reading.stages.map { it.palace })
+        assertEquals(listOf(LiuRenRelation.CONTROLS, LiuRenRelation.CONTROLLED_BY), reading.links.map { it.relation })
+        val input = parseInput(wire.requests.single())
+        assertEquals(original.question, input["question"]!!.jsonPrimitive.content)
+        assertEquals("840", input["reported_digits"]!!.jsonPrimitive.content)
+        assertEquals(listOf(8, 4, 10), input["counts"]!!.jsonArray.map { it.jsonPrimitive.int })
+        assertEquals(listOf("留连", "小吉", "留连"), input["palaces"]!!.jsonArray.map { it.jsonPrimitive.content })
+        assertEquals(listOf(AiUsagePurpose.LIU_REN), wire.purposes.toList())
+        assertEquals(1, wire.finishes.get())
     }
 
     @Test fun duplicateRequestsAreCoalescedAndSavedAnalysisIsFreeOnReopen() = runBlocking {
@@ -177,55 +243,48 @@ class XiaoLiuRenAnalysisRepositoryTest {
 
     @Test fun unqualifiedReadingsUseOneAttemptAndOnlyManualRetryCanReplaceTheFallback() = runBlocking {
         val onlyTerminal = """{"reply":"末宫小吉，先留一小步给自己，阿噜陪你准备。","bills":[]}"""
-        val wrongPalace = validReading(cast.question).toMutableMap().apply {
-            put("stages", buildJsonArray {
-                add(buildJsonObject { put("palace", "大安"); put("text", "面试准备要先梳理自己的材料，再把已有经历整理成简短而具体的表达。") })
-                validReading(cast.question)["stages"]!!.jsonArray.drop(1).forEach { add(it) }
-            })
-        }.let { JsonObject(it).toString() }
-        val badShape = """{"question":"明天面试，怎样准备？","summary":"内容缺少三段与两段转折","stages":"小吉","links":[],"advice":"先准备"}"""
-        val wrongRelation = validReading(cast.question).toMutableMap().apply {
-            put("links", buildJsonArray {
-                add(validReading(cast.question)["links"]!!.jsonArray.first())
-                add(JsonObject(validReading(cast.question)["links"]!!.jsonArray.last().jsonObject.toMutableMap().apply {
-                    put("relation", JsonPrimitive("CONTROLS"))
-                }))
-            })
-        }.let { JsonObject(it).toString() }
-        val genericStages = validReading(cast.question).toMutableMap().apply {
-            put("stages", buildJsonArray {
-                listOf("赤口", "赤口", "小吉").forEach { palace -> add(buildJsonObject {
-                    put("palace", palace); put("text", "先照顾自己，慢慢调整心情，给生活留一点耐心，平稳地迈出一小步就好了。")
-                }) }
-            })
-        }.let { JsonObject(it).toString() }
-        val guaranteed = validReading(cast.question).toMutableMap().apply {
-            put("advice", JsonPrimitive("准备面试材料后肯定会被录用，保证没有任何困难，所以不用再确认后续通知方式。"))
-        }.let { JsonObject(it).toString() }
-        for (bad in listOf(onlyTerminal, wrongPalace, wrongRelation, genericStages, guaranteed, badShape, "{ malformed JSON", "")) {
+        val valid = validReading(cast.question)
+        fun changed(name: String, value: JsonElement) = JsonObject(valid.toMutableMap().apply { put(name, value) }).toString()
+        val badBodies = linkedMapOf(
+            "old reply-only response" to onlyTerminal,
+            "missing answer" to JsonObject(valid - "answer").toString(),
+            "missing reason" to JsonObject(valid - "reason").toString(),
+            "missing advice" to JsonObject(valid - "advice").toString(),
+            "blank answer" to changed("answer", JsonPrimitive("  \n  ")),
+            "null reason" to changed("reason", JsonNull),
+            "wrong field shape" to changed("answer", buildJsonArray { add("面试有推进空间") }),
+            "reason describes another course" to changed("reason", JsonPrimitive("大安到速喜的组合说明面试会收到明确消息，先核对材料与后续通知。")),
+            "guaranteed outcome" to changed("answer", JsonPrimitive("这次面试肯定会被录用，保证没有任何困难。")),
+            "guaranteed advice" to changed("advice", JsonPrimitive("准备面试材料后肯定会被录用，保证没有任何困难。")),
+            "malformed JSON" to "{ malformed JSON",
+            "empty content" to "",
+        )
+        for ((label, bad) in badBodies) {
             val saved = store()
             saved.saveSession(LiuRenSession(cast.question, cast.mode, cast.digits, LiuRenStep.RESULT, cast))
             val wire = FakeHttp(content = bad)
             val repo = engine(saved) { wire.client() }
             repo.request(cast)
             val failed = settled(repo)
-            assertFalse("Unqualified content must not replace the local reading", failed.remote)
-            assertNotNull(failed.error)
+            assertFalse("$label must not replace the local reading", failed.remote)
+            assertNotNull(label, failed.error)
             assertNotNull(failed.reading)
             assertTrue(failed.reply.contains("面试"))
             assertEquals(cast, saved.session().cast)
-            assertNull(saved.analysis(XiaoLiuRenAnalysisRepository.key(cast)))
-            assertEquals(1, wire.requests.size)
+            assertNull(label, saved.analysis(XiaoLiuRenAnalysisRepository.key(cast)))
+            assertEquals(label, 1, wire.requests.size)
             assertEquals(listOf(AiUsagePurpose.LIU_REN), wire.purposes.toList())
             assertEquals(1, wire.finishes.get())
             repeat(3) { repo.state(cast) }
             val reopened = engine(saved) { wire.client() }
             assertFalse(reopened.state(cast).value.remote)
             assertEquals(1, wire.requests.size) // Merely reopening a failed answer does not buy a repair.
-            wire.content = null // A later explicit retry now receives a qualified complete reading.
+            wire.content = null // A later explicit retry receives the qualified concise answer.
             reopened.request(cast)
             val retried = settled(reopened)
-            assertTrue(retried.remote)
+            assertTrue(label, retried.remote)
+            assertEquals(valid["answer"]!!.jsonPrimitive.content, retried.reading!!.summary)
+            assertEquals(valid["reason"]!!.jsonPrimitive.content, retried.reading!!.reason)
             assertEquals(3, requireNotNull(retried.reading).stages.size)
             assertEquals(2, retried.reading!!.links.size)
             assertNotNull(saved.analysis(XiaoLiuRenAnalysisRepository.key(cast)))
@@ -288,20 +347,12 @@ class XiaoLiuRenAnalysisRepositoryTest {
         /** Independent wire fixture, not the production local-reading generator. */
         private fun validReading(question: String) = buildJsonObject {
             val travel = question.contains("出门")
-            put("question", question)
-            put("summary", if (travel) "就这次出行，赤口在前两段重复，提醒把时间安排和路线沟通清楚；最后小吉更适合看成逐步落实行程，不能只凭末宫决定安排。"
-                else "就明天这次面试，赤口在起点与过程重复，提醒先梳理表达和材料；最后小吉可以看成后续争取的小进展，不能只用末宫回答录用结果。")
-            put("stages", buildJsonArray {
-                add(buildJsonObject { put("palace", "赤口"); put("text", if (travel) "起点赤口提醒出行准备中的沟通细节，先把时间、路线和必要证件列清楚，减少临时解释。" else "起点赤口提醒面试准备中的表达细节，先把两段相关经历和材料整理清楚，避免一开始就说得含糊。") })
-                add(buildJsonObject { put("palace", "赤口"); put("text", if (travel) "过程再见赤口，出行安排需要再次核对时间和路线，遇到变化先商量，不把重复确认理解成坏结果。" else "过程再见赤口，现场沟通与面试流程需要留意，回答问题时先听清要求，再用具体经历回应。") })
-                add(buildJsonObject { put("palace", "小吉"); put("text", if (travel) "趋向小吉，出行可以争取把一项安排落实下来；仍需确认行程和路线，而不是直接假定一路没有变化。" else "趋向小吉，面试后可以争取一项明确的小进展，例如确认后续流程与通知方式，仍需等待真实录用消息。") })
-            })
-            put("links", buildJsonArray {
-                add(buildJsonObject { put("from", "赤口"); put("to", "赤口"); put("relation", "SAME"); put("text", "赤口到赤口是同一沟通线索在不同阶段的延续；前段准备清楚，过程仍要根据实际反馈调整表达。") })
-                add(buildJsonObject { put("from", "赤口"); put("to", "小吉"); put("relation", "GENERATES"); put("text", "赤口到小吉可以把前段的沟通调整看成后续小进展的条件；处理分歧比只期待末宫的顺意更实际。") })
-            })
-            put("advice", if (travel) "核对出行时间、票证和路线，再准备一条可执行的备选安排，之后根据实际天气和反馈调整。"
-                else "核对面试时间与材料，准备两段能说明能力的经历，再练习简短而清楚的回答，并问清后续通知方式。")
+            put("answer", if (travel) "出行安排有逐步落实的余地，先把时间与路线确认清楚。"
+                else "这次面试宜先把表达准备清楚，再用具体经历回应问题。")
+            put("reason", if (travel) "前两段赤口强调沟通，后段小吉是小进展；所以先确认安排，再看行程是否落实。"
+                else "前两段赤口提醒准备与现场沟通都要留意措辞，后段小吉是争取具体反馈，不能当成录用已定。")
+            put("advice", if (travel) "核对票证和路线，再准备一条可执行的备选安排。"
+                else "准备两段相关经历，练习清楚简短的回答，再问明后续通知方式。")
         }
     }
 }
