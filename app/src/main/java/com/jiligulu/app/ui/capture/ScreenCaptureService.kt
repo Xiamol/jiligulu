@@ -211,7 +211,7 @@ class ScreenCaptureService : Service() {
             // worker's cadence decides whether that frame needs processing.
             val surface = reader!!.surface
             if (display!!.surface !== surface) display!!.surface = surface
-            updateNotification("阿噜全局光学运行中", "目标${sampleRate.fps}帧/秒 · 中心近似重建 · 仅内存、不保存上传")
+            updateNotification("阿噜全局光学运行中", "目标${sampleRate.fps}帧/秒 · 可信边缘采样 · 仅内存、不保存上传")
         }.onFailure { pauseGlass("采样暂不可用，请停止共享后重新授权", release = true) }
     }
 

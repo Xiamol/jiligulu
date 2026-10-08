@@ -461,7 +461,15 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
             try {
                 val move = withContext(Dispatchers.Default) {
                     val computeContext = currentCoroutineContext()
-                    GomokuStrongMoveHelper.chooseMove(position, timeBudgetMillis = 5_000) { !computeContext.isActive }
+                    val searchStartedAt = SystemClock.elapsedRealtime()
+                    val native = RapfiEngine.chooseMove(context.applicationContext, position, timeBudgetMillis = 5_000) {
+                        !computeContext.isActive
+                    }
+                    if (native != null || !computeContext.isActive) native
+                    else GomokuStrongMoveHelper.chooseMove(position,
+                        timeBudgetMillis = (5_000 - (SystemClock.elapsedRealtime() - searchStartedAt)).coerceIn(75, 5_000)) {
+                        !computeContext.isActive
+                    }
                 } ?: return@launch
                 delay(500)
                 if (helpGeneration == generation && eligibleGomokuTurn() && currentGomokuPosition() == position) {
@@ -794,7 +802,15 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
             delay(420)
             val move = withContext(Dispatchers.Default) {
                 val computeContext = currentCoroutineContext()
-                GomokuStrongMoveHelper.chooseMove(position,timeBudgetMillis=1_200) { !computeContext.isActive }
+                val searchStartedAt = SystemClock.elapsedRealtime()
+                val native = RapfiEngine.chooseMove(context.applicationContext, position, timeBudgetMillis = 1_200) {
+                    !computeContext.isActive
+                }
+                if (native != null || !computeContext.isActive) native
+                else GomokuStrongMoveHelper.chooseMove(position,
+                    timeBudgetMillis = (1_200 - (SystemClock.elapsedRealtime() - searchStartedAt)).coerceIn(75, 1_200)) {
+                    !computeContext.isActive
+                }
             }
             if (archiveReady && !gameLoading && !choosingOpponent && activity == SecretActivity.GOMOKU && foreground && !sleeping && !gomokuPaused && gomokuMode == GomokuPlayMode.CPU && position.currentPlayer!=gomokuHumanPlayer && gomoku == position) {
                 move?.let { commitGomoku(GomokuEngine.play(position, it.x, it.y)) }

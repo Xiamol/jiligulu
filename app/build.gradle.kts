@@ -35,8 +35,8 @@ android {
         applicationId = "com.jiligulu.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 17
-        versionName = "1.0.4"
+        versionCode = 18
+        versionName = "1.0.5"
 
         // 注入到 BuildConfig.DEEPSEEK_API_KEY，由 AiConfig.DEFAULT_API_KEY 读取
         buildConfigField("String", "DEEPSEEK_API_KEY", "\"$deepSeekApiKey\"")
@@ -100,6 +100,7 @@ android {
             useLegacyPackaging = true
             // Preserve the verified upstream executable, which is a standalone ELF, not JNI code.
             keepDebugSymbols += "**/libpikafish.so"
+            keepDebugSymbols += "**/librapfi.so"
         }
     }
 

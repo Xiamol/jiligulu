@@ -797,6 +797,8 @@ class UiSmokeScreenshotTest {
 
     @Test(timeout = 60_000)
     fun refreshedStatisticsAndCompactSettings() {
+        val fixtureMonth = java.time.YearMonth.of(2026, 9)
+        fun fixtureDay(day: Int) = fixtureMonth.atDay(day).atStartOfDay(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
         val app = RuntimeEnvironment.getApplication() as JiliguluApp
         runBlocking {
             app.container.userPrefs.setNickname("路陌")
@@ -811,14 +813,14 @@ class UiSmokeScreenshotTest {
                 it.setContent { GuluTheme {
                     androidx.compose.foundation.layout.Column(androidx.compose.ui.Modifier.fillMaxSize()) {
                         com.jiligulu.app.ui.stats.charts.CashFlowBarChart(
-                            (1..30).map { day -> com.jiligulu.app.ui.stats.charts.DayBar(day, day.toLong(), if (day % 3 == 0) day * 120L else day * 60L, day == 24) },
-                            24L, {}, com.jiligulu.app.ui.theme.ExpenseCoral, com.jiligulu.app.ui.theme.OutlineLight,
+                            (1..30).map { day -> com.jiligulu.app.ui.stats.charts.DayBar(day, fixtureDay(day), if (day % 3 == 0) day * 120L else day * 60L, day == 24) },
+                            fixtureDay(24), {}, com.jiligulu.app.ui.theme.ExpenseCoral, com.jiligulu.app.ui.theme.OutlineLight,
                             androidx.compose.ui.Modifier.fillMaxSize())
                     }
                 } }
             }
             awaitText("今天")
-            compose.onNodeWithContentDescription("24日，28.8元，已选中").assertIsDisplayed()
+            compose.onNodeWithContentDescription("9月24日，28.8元，已选中").assertIsDisplayed()
             capture("statistics-soft-bars")
             compose.runOnIdle { activity.setContent { GuluTheme { com.jiligulu.app.ui.settings.SettingsScreen(onBack = {}) } } }
             awaitSettingsPage("外观", "主题与皮肤")

@@ -153,7 +153,7 @@ internal object AppGlassBackdrop {
         if(x<0 || y<0 || x+view.width>bitmap.width || y+view.height>bitmap.height) return null
         return AppGlassSample(bitmap,x,y)
     }
-    fun copyBehind(view:View,callback:(Bitmap?,Float,Float)->Unit) {
+    fun copyBehind(view:GlassFloatingBubbleView,callback:(Bitmap?,Float,Float)->Unit) {
         val window=source.get()
         if(window==null||!window.decorView.isShown) {forgetPublishedFrame();callback(null,0f,0f);return}
         if(view.width<=0 || !view.isAttachedToWindow || !view.isShown) return
