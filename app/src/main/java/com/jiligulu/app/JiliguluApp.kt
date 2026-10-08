@@ -148,7 +148,10 @@ class JiliguluApp : Application() {
             }
             override fun onActivityStopped(activity: android.app.Activity) {
                 startedActivities = (startedActivities - 1).coerceAtLeast(0)
-                if (startedActivities == 0) isForeground = false
+                if (startedActivities == 0) {
+                    isForeground = false
+                    if (!activity.isChangingConfigurations) releaseArtworkMemory()
+                }
             }
             override fun onActivityCreated(activity: android.app.Activity, savedInstanceState: android.os.Bundle?) {}
             override fun onActivityResumed(activity: android.app.Activity) {}
@@ -156,5 +159,22 @@ class JiliguluApp : Application() {
             override fun onActivitySaveInstanceState(activity: android.app.Activity, outState: android.os.Bundle) {}
             override fun onActivityDestroyed(activity: android.app.Activity) {}
         })
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        com.jiligulu.app.ui.littleworld.LittleWorldArtwork.trimMemory(level)
+        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW)
+            com.jiligulu.app.ui.memories.MemoryPoster.clearMemoryCache()
+    }
+
+    override fun onLowMemory() {
+        super.onLowMemory()
+        releaseArtworkMemory()
+    }
+
+    private fun releaseArtworkMemory() {
+        com.jiligulu.app.ui.littleworld.LittleWorldArtwork.clearMemoryCache()
+        com.jiligulu.app.ui.memories.MemoryPoster.clearMemoryCache()
     }
 }

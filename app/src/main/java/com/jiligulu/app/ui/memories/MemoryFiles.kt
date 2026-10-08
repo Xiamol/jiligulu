@@ -45,12 +45,7 @@ object MemoryFiles {
 
     /** Only remove copies owned by this importer, never an original gallery or another file. */
     fun deleteImportedPhoto(context: Context, path: String) {
-        if (path.isBlank()) return
-        runCatching {
-            val folder = File(root(context), "photos").canonicalFile
-            val file = File(path).canonicalFile
-            if (file.parentFile == folder && file.extension.equals("jpg", true)) file.delete()
-        }
+        if (path.isNotBlank()) releaseDraftCopies(context, listOf(path))
     }
 
     suspend fun importPhoto(context: Context, uri: Uri): String {
@@ -81,9 +76,11 @@ object MemoryFiles {
                     val live = async { app.container.billRepository.observePhotoMemories().first() }
                     val trash = async { app.container.billRepository.trash() }
                     val world = async { app.container.littleWorld.snapshot() }
+                    val chat = async { app.container.chatHistoryRepository.mediaReferenceRows() }
                     val collection = world.await()
                     ((live.await() + trash.await()).mapNotNull { it.photoUri } +
-                        collection.wishes.map { it.photoPath } + collection.cards.map { it.imagePath })
+                        collection.wishes.map { it.photoPath } + collection.cards.map { it.imagePath } +
+                        chatMediaReferences(chat.await()))
                         .filter { it.isNotBlank() && !it.startsWith("content:") }.mapNotNull { path ->
                             runCatching { if (path.startsWith("file:")) Uri.parse(path).path?.let { File(it).canonicalPath }
                                 else File(path).canonicalPath }.getOrNull()
@@ -101,14 +98,26 @@ object MemoryFiles {
         // Keep the picker's typed URI intact. String slicing loses URI escaping and file-path semantics.
         fun stream() = if (uri.scheme == "file") uri.path?.let(::File)?.takeIf { it.isFile }?.inputStream()
             else context.contentResolver.openInputStream(uri)
-        return runCatching {
+        var owned: Bitmap? = null
+        var returned = false
+        return try {
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             stream()?.use { BitmapFactory.decodeStream(it, null, bounds); true } ?: return null
             if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
             var sample = 1
             while (maxOf(bounds.outWidth, bounds.outHeight) / sample > maxSide * 2) sample *= 2
-            val options = BitmapFactory.Options().apply { inSampleSize = sample }
+            val options = BitmapFactory.Options().apply {
+                inSampleSize = sample
+                // Scale while decoding, keeping the delivered bitmap at the target size.
+                // Sampling alone can leave a temporary image almost four times its pixel count.
+                if (maxOf(bounds.outWidth, bounds.outHeight) > maxSide) {
+                    inScaled = true
+                    inDensity = maxOf(bounds.outWidth, bounds.outHeight)
+                    inTargetDensity = maxSide * sample
+                }
+            }
             val original = stream()?.use { BitmapFactory.decodeStream(it, null, options) } ?: return null
+            owned = original
             val orientation = runCatching { stream()?.use { ExifInterface(it).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL) } }.getOrNull()
             val matrix = Matrix().apply {
                 when (orientation) {
@@ -121,11 +130,15 @@ object MemoryFiles {
                     ExifInterface.ORIENTATION_TRANSVERSE -> { postScale(-1f, 1f); postRotate(270f) }
                 }
             }
-            var result = if (matrix.isIdentity) original else Bitmap.createBitmap(original, 0, 0, original.width, original.height, matrix, true).also { if (it !== original) original.recycle() }
-            val scale = maxSide.toFloat() / maxOf(result.width, result.height)
-            if (scale < 1f) result = Bitmap.createScaledBitmap(result, (result.width * scale).toInt().coerceAtLeast(1), (result.height * scale).toInt().coerceAtLeast(1), true).also { if (it !== result) result.recycle() }
+            val scale = maxSide.toFloat() / maxOf(original.width, original.height)
+            if (scale < 1f) matrix.postScale(scale, scale)
+            val result = if (matrix.isIdentity) original else Bitmap.createBitmap(original, 0, 0, original.width, original.height, matrix, true)
+            if (result !== original) { original.recycle(); owned = result }
+            returned = true
             result
-        }.getOrNull()
+        } catch (_: Exception) { null }
+        catch (_: OutOfMemoryError) { null }
+        finally { if (!returned) owned?.recycle() }
     }
 }
 

@@ -23,13 +23,13 @@ import kotlin.math.*
 @Composable
 fun StarWishJar(progress:Float,modifier:Modifier=Modifier,complete:Boolean=progress>=1f) {
     val fill = animateFloatAsState(progress.coerceIn(0f,1f),tween(420),label="wishStars")
-    val resources=LocalContext.current.resources
-    val art=remember { LittleWorldArtwork.image(resources,R.drawable.wish_star_bottle_anime) }
-    val starArt=remember { LittleWorldArtwork.image(resources,R.drawable.wish_puffy_stars_anime) }
+    val art=rememberWorldArtwork(R.drawable.wish_star_bottle_anime)
+    val starArt=rememberWorldArtwork(R.drawable.wish_puffy_stars_anime)
     Box(modifier.aspectRatio(.75f).semantics {
         contentDescription=if(complete)"已经装满星星的愿望瓶" else "愿望瓶，已装满 ${(progress.coerceIn(0f,1f)*100).toInt()}%"
     }) {
-        Image(art,null,Modifier.fillMaxSize(),contentScale=androidx.compose.ui.layout.ContentScale.FillBounds)
+        art?.let { Image(it,null,Modifier.fillMaxSize(),contentScale=androidx.compose.ui.layout.ContentScale.FillBounds) }
+        starArt?.let { starImage ->
         Box(Modifier.fillMaxSize().drawWithCache {
             val w=size.width;val h=size.height
             val vertices=(0..9).map { n ->
@@ -47,7 +47,7 @@ fun StarWishJar(progress:Float,modifier:Modifier=Modifier,complete:Boolean=progr
             val positions=(0..5).flatMap { row->(0..4).map { col->
                 Offset(w*(.17f+col*.165f+(if(row%2==0).018f else -.018f)),h*(.845f-row*.105f))
             } }.filter{inside(it)}
-            val cell=IntSize(starArt.width/3,starArt.height/2)
+            val cell=IntSize(starImage.width/3,starImage.height/2)
             // Back rows are smaller and dimmer. Front sprites slightly overlap, making a
             // pile of physical paper objects rather than a flat row of painted symbols.
             val stars=positions.mapIndexed { i, center ->
@@ -67,7 +67,7 @@ fun StarWishJar(progress:Float,modifier:Modifier=Modifier,complete:Boolean=progr
                     for(i in count-1 downTo 0) {
                         val star=stars[i]
                         rotate(star.rotation,pivot=star.center) {
-                            drawImage(starArt,srcOffset=star.source,srcSize=cell,
+                            drawImage(starImage,srcOffset=star.source,srcSize=cell,
                                 dstOffset=star.destination,dstSize=star.size,alpha=star.alpha)
                         }
                     }
@@ -78,6 +78,7 @@ fun StarWishJar(progress:Float,modifier:Modifier=Modifier,complete:Boolean=progr
                 drawLine(Color.White.copy(alpha=.25f),Offset(w*.72f,h*.55f),Offset(w*.69f,h*.65f),w*.01f,StrokeCap.Round)
             }
         })
+        }
     }
 }
 

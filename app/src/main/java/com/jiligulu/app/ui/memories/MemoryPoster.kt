@@ -16,6 +16,8 @@ import com.jiligulu.app.R
 import com.jiligulu.app.core.util.Formatters
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.io.File
 import java.time.Instant
 import java.time.ZoneId
@@ -37,45 +39,74 @@ object MemoryPoster {
     private data class ArtworkAssets(val body: Typeface, val emphasis: Typeface, val heading: Typeface, val mascot: Bitmap?)
     @Volatile private var cachedAssets: ArtworkAssets? = null
     private val assetLock = Any()
+    private val assetDecodeLock = Any()
+    private val fontFileLock = Any()
+    private var assetGeneration = 0L
+    private val renderLock = Mutex()
     private val dateFormatter = DateTimeFormatter.ofPattern("yyyy.MM.dd")
+    fun clearMemoryCache() = synchronized(assetLock) { assetGeneration++; cachedAssets = null }
 
-    private fun assets(context: Context): ArtworkAssets = cachedAssets ?: synchronized(assetLock) {
+    private fun assets(context: Context): ArtworkAssets = cachedAssets ?: synchronized(assetDecodeLock) {
         cachedAssets ?: run {
+            val generation = synchronized(assetLock) { assetGeneration }
             val resources = context.applicationContext.resources
             // The packaged variable font's default wght is 100. Typeface.create(weight)
             // can keep that hairline axis on Canvas; select the variation explicitly.
-            val fontFile = File(context.applicationContext.cacheDir, "memory-poster-noto.ttf")
-            resources.openRawResource(R.font.noto_sans_sc).use { input ->
-                fontFile.outputStream().use { output -> input.copyTo(output) }
-            }
-            val body = Typeface.Builder(fontFile).setFontVariationSettings("'wght' 400").setWeight(400).build()
-            val emphasis = Typeface.Builder(fontFile).setFontVariationSettings("'wght' 650").setWeight(650).build()
-            ArtworkAssets(body, emphasis, resources.getFont(R.font.zcool_kuaile),
+            fun font(weight: Int) = posterTypeface(context, weight)
+            ArtworkAssets(font(400), font(650), resources.getFont(R.font.zcool_kuaile),
                 BitmapFactory.decodeResource(resources, R.drawable.gulu_idle,
                     BitmapFactory.Options().apply { inSampleSize = 3; inScaled = false }))
-        }.also { cachedAssets = it }
+                .also { created -> synchronized(assetLock) { if (generation == assetGeneration) cachedAssets = created } }
+        }
+    }
+
+    internal fun posterTypeface(context: Context, weight: Int,
+        modern: (android.content.res.Resources, Int) -> Typeface = ::resourceTypeface): Typeface {
+        val app = context.applicationContext
+        val resources = app.resources
+        fun legacyFont(): Typeface {
+            val fontFile = synchronized(fontFileLock) {
+                val length = resources.openRawResource(R.font.noto_sans_sc).use { it.available().toLong() }
+                ensurePosterFontFile(app.cacheDir, length) { resources.openRawResource(R.font.noto_sans_sc) }
+            }
+            return Typeface.Builder(fontFile).setFontVariationSettings("'wght' $weight").setWeight(weight).build()
+        }
+        return if (Build.VERSION.SDK_INT >= 29) runCatching { modern(resources, weight) }.getOrElse { legacyFont() }
+            else legacyFont()
+    }
+
+    @androidx.annotation.RequiresApi(29)
+    private fun resourceTypeface(resources: android.content.res.Resources, weight: Int): Typeface {
+        // Same explicit variable-font axis, without copying 17.8 MB out of the APK on modern Android.
+        val font = android.graphics.fonts.Font.Builder(resources, R.font.noto_sans_sc)
+            .setFontVariationSettings("'wght' $weight").setWeight(weight).build()
+        return Typeface.CustomFallbackBuilder(android.graphics.fonts.FontFamily.Builder(font).build())
+            .setStyle(android.graphics.fonts.FontStyle(weight, android.graphics.fonts.FontStyle.FONT_SLANT_UPRIGHT))
+            .setSystemFallback("sans-serif").build()
     }
 
     suspend fun render(context: Context, data: PosterData, showAmount: Boolean, stamp: String): File {
         var created: File? = null
-        try { return withContext(Dispatchers.Default) {
+        try { return renderLock.withLock { withContext(Dispatchers.Default) {
             val artwork = assets(context)
             val title = textLayout(data.title.ifBlank { "把这一刻收起来" }.take(32), artwork.heading, 60f, ink, 936, 2)
             val caption = textLayout(data.caption.ifBlank { "今天的生活，阿噜替你收好啦。" }.take(120), artwork.body, 38f, ink, 912, 6)
             val headerEnd = 148f + title.height + 30f
             val photo = if (data.photoPath.isBlank()) null else MemoryFiles.readBitmap(context, data.photoPath, 1500)
-            val categoriesCount = data.week?.categories?.size?.coerceAtMost(5) ?: 0
-            val weekBody = 310f + (if (showAmount) 142f else 0f) + max(categoriesCount * 98f, 170f)
-            val extraAmount = if (showAmount && data.week == null && data.amountFen != null) 62f else 0f
-            val height = when {
-                photo != null && photo.height > photo.width -> 1760
-                photo != null -> 1440
-                data.week != null -> max(1120, (headerEnd + weekBody + caption.height + 246f).roundToInt())
-                else -> max(1280, (headerEnd + 615f + caption.height + extraAmount + 240f).roundToInt())
-            }
-            val bitmap = Bitmap.createBitmap(1080, height, Bitmap.Config.ARGB_8888)
+            var bitmap: Bitmap? = null
             try {
-                val painter = PosterPainter(Canvas(bitmap), artwork, height)
+                val categoriesCount = data.week?.categories?.size?.coerceAtMost(5) ?: 0
+                val weekBody = 310f + (if (showAmount) 142f else 0f) + max(categoriesCount * 98f, 170f)
+                val extraAmount = if (showAmount && data.week == null && data.amountFen != null) 62f else 0f
+                val height = when {
+                    photo != null && photo.height > photo.width -> 1760
+                    photo != null -> 1440
+                    data.week != null -> max(1120, (headerEnd + weekBody + caption.height + 246f).roundToInt())
+                    else -> max(1280, (headerEnd + 615f + caption.height + extraAmount + 240f).roundToInt())
+                }
+                val rendered = Bitmap.createBitmap(1080, height, Bitmap.Config.ARGB_8888)
+                bitmap = rendered
+                val painter = PosterPainter(Canvas(rendered), artwork, height)
                 painter.background()
                 painter.header(title, if (data.week != null) data.week.rangeLabel else dateText(data.dateMillis))
                 val bodyEnd = when {
@@ -87,10 +118,10 @@ object MemoryPoster {
                 painter.caption(caption, captionTop, if (showAmount && data.week == null) data.amountFen else null)
                 painter.footer()
                 val output = MemoryFiles.posterFile(context).also { created = it }
-                output.outputStream().use { check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)) }
+                output.outputStream().use { check(rendered.compress(Bitmap.CompressFormat.PNG, 100, it)) }
                 output
-            } finally { bitmap.recycle(); photo?.recycle() }
-        } } catch (failure: Throwable) { created?.delete(); throw failure }
+            } finally { bitmap?.recycle(); photo?.recycle() }
+        } } } catch (failure: Throwable) { created?.delete(); throw failure }
     }
 
     private val ink = Color.rgb(58, 47, 73)
