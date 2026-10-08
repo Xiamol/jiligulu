@@ -77,7 +77,6 @@ internal fun StatsCalendarDialog(selected: Long, initialMonth: YearMonth, onDism
                     }
                 }
                 Row(Modifier.align(Alignment.End)) {
-                    TextButton(onClick = uiTap(UiCue.NAVIGATE, onDismiss)) { Text("取消") }
                     TextButton(onClick = uiTap(UiCue.CONFIRM) {
                         onSelect(choice.confirmed.atStartOfDay(zone).toInstant().toEpochMilli(), choice.selected == null)
                     }) { Text("确认") }

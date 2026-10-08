@@ -144,7 +144,6 @@ fun UpdatePromptHost(enabled: Boolean, onDismissed: () -> Unit = {}) {
         dismissButton = {
             Row {
                 TextButton(onClick = { showFullNotes = true }) { Text("完整说明") }
-                TextButton(onClick = { dismissed = key; onDismissed() }) { Text("稍后再说") }
             }
         }
     )
@@ -155,7 +154,7 @@ fun UpdatePromptHost(enabled: Boolean, onDismissed: () -> Unit = {}) {
             text = { Column(Modifier.verticalScroll(rememberScrollState())) {
                 Text(release.notes.ifBlank { "这次没有写更新说明。" })
             } },
-            confirmButton = { TextButton(onClick = { showFullNotes = false }) { Text("知道啦") } }
+            confirmButton = {}
         )
     }
 }

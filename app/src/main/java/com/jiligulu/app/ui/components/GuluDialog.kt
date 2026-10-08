@@ -53,10 +53,14 @@ fun GuluDialog(
             val bodyScroll = rememberScrollState()
             SpringScrollColumn(Modifier.weight(1f, fill = false), state = bodyScroll,
                 verticalArrangement = Arrangement.spacedBy(if(dense) 6.dp else 10.dp), content = content)
-            Row(Modifier.fillMaxWidth().padding(top = if(dense) 8.dp else 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                dismissLabel?.let { TextButton(onClick = uiTap(dismissCue, onDismiss), enabled = !busy,
+            val closingLabels = setOf("知道啦", "知道了", "收起来", "收起", "好啦", "关闭", "取消", "收好啦", "收好信笺", "收好回忆")
+            val showConfirm = confirmLabel !in closingLabels
+            val closingDismissLabels = closingLabels + setOf("先留着", "留着", "留着吧", "先等等", "稍后", "再想想", "收好", "留下", "保留", "稍后再说")
+            val actionDismiss = dismissLabel?.takeUnless { it in closingDismissLabels }
+            if (showConfirm || actionDismiss != null) Row(Modifier.fillMaxWidth().padding(top = if(dense) 8.dp else 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                actionDismiss?.let { TextButton(onClick = uiTap(dismissCue, onDismiss), enabled = !busy,
                     modifier = Modifier.weight(1f)) { Text(it, textAlign = TextAlign.Center) } }
-                TextButton(onClick = uiTap(confirmCue, onConfirm), enabled = !busy && confirmEnabled,
+                if (showConfirm) TextButton(onClick = uiTap(confirmCue, onConfirm), enabled = !busy && confirmEnabled,
                     modifier = Modifier.weight(1f)) {
                     Text(if (busy) "正在处理…" else confirmLabel)
                 }

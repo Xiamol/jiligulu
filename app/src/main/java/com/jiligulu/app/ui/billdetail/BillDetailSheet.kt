@@ -110,7 +110,6 @@ fun BillDetailSheet(billId: Long, onDismiss: () -> Unit) {
                     Text("把生活的小细节，好好收起来。", style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                TextButton(onClick = uiTap(UiCue.NAVIGATE, onDismiss), enabled = !busy) { Text("关闭") }
             }
         SpringScrollColumn(Modifier.fillMaxWidth().weight(1f, fill = false),
             verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -175,7 +174,6 @@ fun BillDetailSheet(billId: Long, onDismiss: () -> Unit) {
             text = { Text("${detail.ifBlank { state.categoryName }}  ¥$amount\n删除后可在「设置 → 数据管理 → 回收站」里找回。") },
             confirmButton = { TextButton(onClick = uiTap { confirmDelete = false; completionCue = UiCue.REMOVE; vm.delete() }) {
                 Text("确认删除", color = MaterialTheme.colorScheme.error)
-            } },
-            dismissButton = { TextButton(onClick = uiTap(UiCue.NAVIGATE) { confirmDelete = false }) { Text("保留") } })
+            } })
     }
 }

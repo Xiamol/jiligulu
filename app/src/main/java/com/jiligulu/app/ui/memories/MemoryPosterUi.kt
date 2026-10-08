@@ -196,7 +196,6 @@ fun MemoryPosterDialog(data: PosterData, onDismiss: () -> Unit) {
             .imePadding(), contentPadding = 12.dp) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text("这一页生活", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
-                TextButton(onClick = uiTap(com.jiligulu.app.core.audio.UiCue.PAPER, onDismiss), enabled = !busy) { Text("关闭") }
             }
             SpringScrollColumn(Modifier.weight(1f, fill = false), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 // The actual shareable artwork leads. Its measured aspect ratio accommodates

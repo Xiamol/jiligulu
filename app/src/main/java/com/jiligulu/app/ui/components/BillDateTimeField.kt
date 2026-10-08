@@ -95,8 +95,7 @@ fun BillDateTimeField(
                     }
                     showDate = false
                 }, enabled = state.selectedDateMillis != null) { Text("确定") }
-            },
-            dismissButton = { TextButton(onClick = { showDate = false }) { Text("取消") } }
+            }
         ) { DatePicker(state = state, showModeToggle = true) }
     }
     if (showTime) {
@@ -111,8 +110,7 @@ fun BillDateTimeField(
                     onTimestampChange(withBillTime(timestamp ?: System.currentTimeMillis(), state.hour, state.minute, zone))
                     showTime = false
                 }) { Text("确定") }
-            },
-            dismissButton = { TextButton(onClick = { showTime = false }) { Text("取消") } }
+            }
         )
     }
 }

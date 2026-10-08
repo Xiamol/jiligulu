@@ -184,8 +184,7 @@ fun TrashScreen(
                     onClick = { confirmPurge = false; vm.purgeSelected() },
                     modifier = Modifier.testTag("trash-confirm-purge")
                 ) { Text("永久删除", color = MaterialTheme.colorScheme.error) }
-            },
-            dismissButton = { TextButton(onClick = { confirmPurge = false }) { Text("再想想") } }
+            }
         )
     }
 
@@ -545,7 +544,7 @@ private fun RetentionDialog(current: Int, onDismiss: () -> Unit, onPick: (Int) -
                 }
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("好") } }
+        confirmButton = {}
     )
 }
 

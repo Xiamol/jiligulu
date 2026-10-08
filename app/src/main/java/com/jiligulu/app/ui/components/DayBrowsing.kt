@@ -47,7 +47,7 @@ fun DayBrowser(day: Long, onSelect: (Long) -> Unit, latest: Long = Formatters.da
             TextButton(onClick = { state.selectedDateMillis?.let { value ->
                 onSelect(Instant.ofEpochMilli(value).atZone(ZoneOffset.UTC).toLocalDate().atStartOfDay(zone).toInstant().toEpochMilli())
             }; showPicker = false }) { Text("查看") }
-        }, dismissButton = { TextButton(onClick = { showPicker = false }) { Text("取消") } }) { DatePicker(state) }
+        }) { DatePicker(state) }
     }
 }
 

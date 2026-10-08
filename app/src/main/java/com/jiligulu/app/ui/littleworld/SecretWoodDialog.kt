@@ -88,14 +88,17 @@ internal fun SecretWoodDialog(title: String, onDismiss: () -> Unit,
                 textAlign = TextAlign.Center, fontWeight = FontWeight.Medium, color = SecretWoodInk)
             SpringScrollColumn(Modifier.weight(1f, fill = false).fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(8.dp), content = content)
-            Row(Modifier.fillMaxWidth().padding(top = 14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp),
+            val closingLabels = setOf("知道啦", "知道了", "收起来", "收起", "好啦", "关闭", "取消")
+            val showConfirm = confirmLabel !in closingLabels && (confirmLabel != "收好" || onConfirm !== onDismiss)
+            val actionDismiss = dismissLabel?.takeUnless { it in closingLabels || it == "稍后" }
+            if (showConfirm || actionDismiss != null) Row(Modifier.fillMaxWidth().padding(top = 14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalAlignment = Alignment.CenterVertically) {
-                dismissLabel?.let { label ->
+                actionDismiss?.let { label ->
                     WoodDialogAction(label, Modifier.weight(1f).testTag("secret-wood-dismiss"), enabled = !busy) {
                         UiSound.play(context, closeCue); onDismiss()
                     }
                 }
-                WoodDialogAction(if (busy) "稍等…" else confirmLabel, Modifier.weight(1f).testTag("secret-wood-confirm"),
+                if (showConfirm) WoodDialogAction(if (busy) "稍等…" else confirmLabel, Modifier.weight(1f).testTag("secret-wood-confirm"),
                     enabled = !busy && confirmEnabled, emphasized = true) {
                     UiSound.play(context, actionCue); onConfirm()
                 }

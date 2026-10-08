@@ -184,7 +184,6 @@ fun DestinationDrawer(
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically) {
                 actions()
-                TextButton(onClick = uiTap(onDismiss), modifier = Modifier.weight(1f)) { Text("收起来") }
             }
         }
     }

@@ -496,7 +496,6 @@ fun StatsScreen(
                 Column(Modifier.padding(16.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("${dayDonut.selectedLabel}的小账单", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
-                        TextButton(onClick = uiTap(com.jiligulu.app.core.audio.UiCue.NAVIGATE) { showCategoryDetails = false }) { Text("关闭") }
                     }
                     Text("${dayDonut.dayLabel} · ${dayDetails.size} 笔 · ¥${dayDonut.selectedAmountText}",
                         style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
