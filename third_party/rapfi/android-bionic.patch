@@ -1,0 +1,12 @@
+--- a/Rapfi/CMakeLists.txt
++++ b/Rapfi/CMakeLists.txt
+@@ -602,6 +602,9 @@
+     elseif(NOT EMSCRIPTEN)
+         if(NO_MULTI_THREADING AND NO_COMMAND_MODULES)
+             target_link_libraries(rapfi PRIVATE -static)
++        elseif(ANDROID)
++            # Bionic provides pthread in libc; Android has no separate libpthread.
++            target_link_libraries(rapfi PRIVATE atomic)
+         elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin" AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|AppleClang")
+             target_link_libraries(rapfi PRIVATE pthread)
+         else()

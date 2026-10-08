@@ -1,0 +1,36 @@
+[requirement]
+min_version = [0, 43, 1]
+
+[general]
+reload_config_each_move = false
+clear_hash_after_config_loaded = false
+default_thread_num = 1
+message_mode = "brief"
+coord_conversion_mode = "none"
+default_candidate_range = "square3_line4"
+memory_reserved_mb = 32
+default_tt_size_kb = 32768
+
+[model]
+binary_file = "model220723.bin"
+
+[model.evaluator]
+type = "mix9svq"
+draw_black_winrate = 0.5
+draw_ratio = 1.0
+
+[[model.evaluator.weights]]
+weight_file = "mix9svqfreestyle_bsmix.bin.lz4"
+
+[search]
+aspiration_window = true
+max_search_depth = 99
+
+[search.timectl]
+advanced_stop_ratio = 0.9
+
+[database]
+enable_by_default = false
+
+[database.search]
+readonly_mode = true

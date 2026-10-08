@@ -1,0 +1,112 @@
+{
+  "sourceCommit": "3c94c2a976f24a0dd1c5517623e9ab6fffe66bd7",
+  "networksCommit": "e32ad77a5364363b3e3a02b3f9e8610ade19ea98",
+  "artifacts": [
+    {
+      "file": "rapfi-source-3c94c2a976f24a0dd1c5517623e9ab6fffe66bd7.zip",
+      "url": "https://codeload.github.com/dhbloo/rapfi/zip/3c94c2a976f24a0dd1c5517623e9ab6fffe66bd7",
+      "bytes": 993368,
+      "sha256": "06c73fd9385c4ef65787c26e02cf20d8347b010622e33c8d0d8b543ca52ab141",
+      "sha1": "1d0c1646ee28ce49bee6aee59a94a862b21f3aaf"
+    },
+    {
+      "file": "ninja-win-1.13.2.zip",
+      "url": "https://github.com/ninja-build/ninja/releases/download/v1.13.2/ninja-win.zip",
+      "bytes": 291570,
+      "sha256": "07fc8261b42b20e71d1720b39068c2e14ffcee6396b76fb7a795fb460b78dc65",
+      "sha1": "c41ff4aca70e5530ab5222917c53800c7ae5b3ff"
+    },
+    {
+      "file": "model220723.bin",
+      "url": "https://raw.githubusercontent.com/dhbloo/rapfi-networks/e32ad77a5364363b3e3a02b3f9e8610ade19ea98/classical/model220723.bin",
+      "bytes": 77518,
+      "sha256": "fc4abeb0455c19fd9657d90f3c34b2f49bb7355e4ef2d33de56e7be0ffa05d5b",
+      "sha1": "57e0b7153a8b5661d194673e648eadf79b1cf310"
+    },
+    {
+      "file": "config-upstream.toml",
+      "url": "https://raw.githubusercontent.com/dhbloo/rapfi-networks/e32ad77a5364363b3e3a02b3f9e8610ade19ea98/config-example/config.toml",
+      "bytes": 6709,
+      "sha256": "32b9180c91247541d399ceef62906d5ffeb48e34eb5f261612987633820d5d3c",
+      "sha1": "47da071b5040083a57101a2b7932af10064edeeb"
+    },
+    {
+      "file": "mix9svqfreestyle_bsmix.bin.lz4",
+      "url": "https://raw.githubusercontent.com/dhbloo/rapfi-networks/e32ad77a5364363b3e3a02b3f9e8610ade19ea98/mix9svq/mix9svqfreestyle_bsmix.bin.lz4",
+      "bytes": 10030398,
+      "sha256": "6bc0d1b0ff8e1d857f7f412923cd458f38f1a435087c91ae71fec3676c23ef62",
+      "sha1": "dcb40fdf40c0d6262b786a04c58c1f4f3b47b742"
+    },
+    {
+      "file": "networks-LICENSE.txt",
+      "url": "https://raw.githubusercontent.com/dhbloo/rapfi-networks/e32ad77a5364363b3e3a02b3f9e8610ade19ea98/LICENSE",
+      "bytes": 6669,
+      "sha256": "084bc2aebf95358b73255bd38213fdb27bfd19c6819ae7c1d0679400cf01cea1",
+      "sha1": "4d850d9ffd2c3713ffb7f0b485d5ba1a1c4eb9ee"
+    },
+    {
+      "file": "cmake-4.4.4-windows-x86_64.zip",
+      "url": "https://github.com/Kitware/CMake/releases/download/v4.4.4/cmake-4.4.4-windows-x86_64.zip",
+      "bytes": 54400562,
+      "sha256": "bace36e94b31c68ab6fa295f26dfa11219e0701cf7c94b0284a7d1cb13dac536",
+      "sha1": "b423650bf157e066a21c5f7bddb9749bf2965580"
+    },
+    {
+      "file": "android-ndk-r30-windows.zip",
+      "url": "https://dl.google.com/android/repository/android-ndk-r30-windows.zip",
+      "bytes": 727980788,
+      "sha256": "b830098aaf18b67a42eb831c404e15e5f2990a474f054ac145b0bc957ac6d729",
+      "sha1": "9bf167a1985fa7d4a036186b78f702eab9179408"
+    }
+  ],
+  "build": {
+    "api": 26,
+    "ndk": "30.0.16248370 / r30",
+    "clang": "21.0.0",
+    "cmake": "4.4.4",
+    "ninja": "1.13.2",
+    "cxxStandard": 17,
+    "stl": "c++_static",
+    "lto": "ThinLTO",
+    "searchThreads": 1,
+    "maxMemoryBytes": 67108864,
+    "reservedMemoryMiB": 32,
+    "pondering": false,
+    "rules": "freestyle",
+    "pageAlignmentBytes": 16384,
+    "commandModules": false
+  },
+  "binaries": [
+    {
+      "abi": "x86_64",
+      "file": "librapfi.so",
+      "bytes": 1422144,
+      "sha256": "df7437eab64399997091f29095c008e717cd07f200739a0b1187db385fdbebdd",
+      "isa": "SSE4.1 without AVX",
+      "elf": "ELF64 little endian ET_DYN/PIE",
+      "interpreter": "/system/bin/linker64",
+      "needed": [
+        "libm.so",
+        "libdl.so",
+        "libc.so"
+      ]
+    },
+    {
+      "abi": "arm64-v8a",
+      "file": "librapfi.so",
+      "bytes": 1318640,
+      "sha256": "c0796031d68d341779d19a3f2dcc63deed1f18ed8a5fbb59eef779c49441f8bd",
+      "isa": "NEON without DotProd",
+      "elf": "ELF64 little endian ET_DYN/PIE",
+      "interpreter": "/system/bin/linker64",
+      "needed": [
+        "libm.so",
+        "libdl.so",
+        "libc.so"
+      ]
+    }
+  ],
+  "patchSha256": "d3cab7614a1ed9d66b7097c944299666df7261200ab541e9057cd230912210d0",
+  "recipeSha256": "ed2f4a4b0a78ce3e4bfa9f2b72117dca374e7bb6df6f86f0d9b2ee78b35c0ce3",
+  "llvmRuntimeNoticeSha256": "f96f763beb66a7ba7a667647fc64c0226ace875e590c831fdd9579ec1c1d91e1"
+}

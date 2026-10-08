@@ -1,0 +1,43 @@
+Rapfi offline Gomoku component
+
+Upstream: https://github.com/dhbloo/rapfi
+Pinned source commit: 3c94c2a976f24a0dd1c5517623e9ab6fffe66bd7
+Source archive SHA256: 06c73fd9385c4ef65787c26e02cf20d8347b010622e33c8d0d8b543ca52ab141
+Network upstream: https://github.com/dhbloo/rapfi-networks
+Pinned network commit: e32ad77a5364363b3e3a02b3f9e8610ade19ea98
+
+The standalone engine is GPL v3; weights are CC0. COPYING.txt, AUTHORS,
+WEIGHTS-CC0.txt, third-party notices, complete source archive, Android
+patch and exact build recipe are bundled in this APK directory.
+LLVM-RUNTIME-NOTICE.txt preserves the notices for the statically linked
+NDK libc++/unwind runtime.
+These notices identify this component and do not replace the application's
+own license notices. Communication uses an independent Piskvork process.
+
+Rebuilding on Windows:
+1. Extract the source archive and keep android-bionic.patch beside it.
+2. Obtain official NDK r30, CMake 4.4.4 and Ninja 1.13.2 using the URLs
+   and SHA256 checksums in release-manifest.json.
+3. In the source checkout use tools/build_rapfi_android.py; it extracts the
+   pinned archive, applies the exact Bionic link patch and builds both ABIs.
+   python tools/build_rapfi_android.py --prepare-tools
+   A separate cache defaults to D:/DevCaches/RapfiToolchain; SDK paths and
+   local.properties are neither read nor modified.
+4. The included build-recipe.py is the same script. For a minimal rebuild
+   create tools/build_rapfi_android.py, third_party/rapfi/the source archive,
+   and the app/src/main/jniLibs target directories under one project root.
+5. It links Android API26 PIE with static C++, ThinLTO and 16KiB load pages;
+   arm64 uses ordinary NEON, x86_64 uses SSE4.1, with AVX/DotProd disabled.
+   Only the CMake Bionic link patch is applied: pthread comes from libc,
+   rather than a nonexistent separate libpthread. Engine algorithms and
+   upstream weight bytes are unchanged.
+
+Installer-extracted librapfi.so is a PIE executable, named as a native
+library only for APK packaging. It is never executed from writable storage.
+Data files are SHA256-verified in noBackupFilesDir before process startup.
+The complete current BOARD snapshot is rebuilt for every request, with
+SELF relative to the requested player. Search uses THREAD_NUM 1,
+MAX_MEMORY 67108864, freestyle rule 0 and PONDERING 0.
+The call deadline includes model preparation, startup and search. STOP/END,
+a bounded close and a watchdog terminate cancelled/expired requests.
+Runtime downloads, accounts and cloud APIs are not required.

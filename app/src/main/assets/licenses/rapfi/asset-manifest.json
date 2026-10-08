@@ -1,0 +1,20 @@
+{
+  "bundleId": "d89ef3141daf54df9a039c421fcc20a227823e7c48451ae0b8b498a903ffcf42",
+  "files": [
+    {
+      "file": "config.toml",
+      "bytes": 701,
+      "sha256": "7ef7a649eed64df326db723c5e433558c759adb4d8c6df11ba8ed20425090c6f"
+    },
+    {
+      "file": "mix9svqfreestyle_bsmix.bin.lz4",
+      "bytes": 10030398,
+      "sha256": "6bc0d1b0ff8e1d857f7f412923cd458f38f1a435087c91ae71fec3676c23ef62"
+    },
+    {
+      "file": "model220723.bin",
+      "bytes": 77518,
+      "sha256": "fc4abeb0455c19fd9657d90f3c34b2f49bb7355e4ef2d33de56e7be0ffa05d5b"
+    }
+  ]
+}
