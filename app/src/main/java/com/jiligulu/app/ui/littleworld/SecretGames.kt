@@ -412,7 +412,8 @@ internal fun ColumnScope.SecretGomokuGame(state: GomokuState, paused: Boolean, b
             enabled = canUndo && !helpBusy && (!network || roomAvailable), cue = com.jiligulu.app.core.audio.UiCue.TOUCH)
         if (network) GameIconTool(Icons.Outlined.Logout, "离开", onDisconnect, Modifier.weight(1f))
     }
-    Spacer(Modifier.height(10.dp).onGloballyPositioned { onControlsBottom(it.boundsInRoot().bottom) })
+    // A zero-width spacer has empty boundsInRoot; the decoration then thinks no controls exist.
+    Spacer(Modifier.fillMaxWidth().height(10.dp).onGloballyPositioned { onControlsBottom(it.boundsInRoot().bottom) })
     }
     }
     }
