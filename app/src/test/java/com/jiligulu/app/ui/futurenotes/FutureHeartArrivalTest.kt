@@ -43,7 +43,7 @@ import java.time.Duration
 @LooperMode(LooperMode.Mode.PAUSED)
 class FutureHeartArrivalTest {
     @get:Rule val compose = createComposeRule()
-    private val app: JiliguluApp get() = RuntimeEnvironment.getApplication()
+    private val app: JiliguluApp get() = RuntimeEnvironment.getApplication() as JiliguluApp
     private val repo get() = app.container.littleWorld
     private val privateBody = "不应自动曝光的回信正文，只有我主动拆信后才展示。"
 
