@@ -116,9 +116,11 @@ class PromptRenderer(
         "- ${CategoryLabels.displayName(category.name)}（关键词：${category.keywords.ifBlank { "无" }}）"
     }
 
-    private fun renderBills(): String =
-        if (context.recentBills.isEmpty()) "（最近三天还没有记过账）"
+    private fun renderBills(): String = listOfNotNull(
+        context.billsNotice.takeIf { it.isNotBlank() },
+        if (context.recentBills.isEmpty()) "（此范围暂无账单）"
         else context.recentBills.joinToString("\n") { it.label }
+    ).joinToString("\n")
 
     /**
      * 挂起中的账。**这是「5 → 面条」能串起来的关键**：

@@ -9,21 +9,20 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 /**
- * 每轮对话要回灌给模型的动态上下文（时间 + 最近三天账本摘要）。
+ * 每轮对话要回灌给模型的动态上下文（时间 + 用户选择范围内的最近账单）。
  *
  * R9 之后对话历史改走 messages 数组（见 AiRepository.recentTurns），本类只剩账本段；
  * R6 定稿「历史只追加、永不回改」，原先基于消息表的摘要函数（toLine / draftSummary /
  * commandSummary 与 ChatContext.recentMessages）随「三态摘要」方案一并删除——
  * QA 已验证它们在全仓无任何生产调用方，是死代码。
  *
- * 两条边界（coder 拍板）：
- * - 账单：**最近 3 天**，含分类/细则/金额/时间
- * - 不做 Function Calling：预灌即可，一趟往返，省时省钱
+ * 时间范围、条数和字符预算只约束聊天预灌，不删除账单，也不限制精确数据库查询。
  */
 data class ChatContext(
     val now: String,
     val timeZone: String,
-    val recentBills: List<BillLine>
+    val recentBills: List<BillLine>,
+    val billsNotice: String = ""
 ) {
     data class BillLine(val label: String)
 }
@@ -41,6 +40,8 @@ object ChatContextBuilder {
      * 裁掉一半确实省 token。历史消息不受此影响（见 [MAX_MESSAGES]）。
      */
     const val MAX_BILLS = 30
+    const val MAX_BILL_CONTEXT_CHARS = 48_000
+    private const val MAX_BILL_LINE_CHARS = 2_000
 
     /**
      * 消息条数上限，约 30 轮。
@@ -66,28 +67,53 @@ object ChatContextBuilder {
         bills: List<BillEntity>,
         categories: List<CategoryEntity>,
         requestMillis: Long,
-        zone: ZoneId
+        zone: ZoneId,
+        windowDays: Int? = BILL_WINDOW_DAYS.toInt(),
+        maxBills: Int = MAX_BILLS
     ): ChatContext {
+        require(windowDays == null || windowDays > 0)
+        require(maxBills > 0)
         val nowZoned = Instant.ofEpochMilli(requestMillis).atZone(zone)
         // v0.6：`{now}` 粒度降到分钟。秒级时间每轮都在变，会让动态段最后一行的前缀永远错位；
         // 记账也只需要到分钟，带上秒纯属噪声。
         val clock = nowZoned.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))
         val weekday = nowZoned.format(DateTimeFormatter.ofPattern("EEEE", java.util.Locale.CHINA))
 
-        val billCutoff = requestMillis - BILL_WINDOW_DAYS * 86_400_000L
+        val billCutoff = windowDays?.let { requestMillis - it.toLong() * 86_400_000L }
         val categoryNames = categories.associate { it.id to CategoryLabels.displayName(it.name) }
-        val billLines = bills
-            .filter { it.timestamp >= billCutoff }
+        val eligibleBills = bills
+            .filter { billCutoff == null || it.timestamp >= billCutoff }
             .sortedByDescending { it.timestamp }
-            .take(MAX_BILLS)
-            .map { bill ->
-                ChatContext.BillLine(formatBill(bill, categoryNames[bill.categoryId], zone))
+        var usedChars = 0
+        var textTruncated = false
+        val billLines = buildList {
+            for (bill in eligibleBills.take(maxBills)) {
+                if (bill.detail.length > 800 || bill.note.length > 800 || (categoryNames[bill.categoryId]?.length ?: 0) > 100)
+                    textTruncated = true
+                val fullLine = formatBill(bill, categoryNames[bill.categoryId], zone)
+                val line = if (fullLine.length > MAX_BILL_LINE_CHARS) {
+                    textTruncated = true
+                    fullLine.take(MAX_BILL_LINE_CHARS - 10) + "…（细则已截取）"
+                } else fullLine
+                if (usedChars + line.length + 1 > MAX_BILL_CONTEXT_CHARS) {
+                    textTruncated = true
+                    break
+                }
+                add(ChatContext.BillLine(line))
+                usedChars += line.length + 1
             }
+        }
+        val rangeLabel = windowDays?.let { "最近${it}天" } ?: "全部时间范围"
+        // The DAO already limits its input: always state the cap, even if omitted rows are unknown here.
+        val notice = "$rangeLabel；按时间从新到旧，最多带入${maxBills}笔，本次${billLines.size}笔。" +
+            if (textTruncated || eligibleBills.size > billLines.size) "明细已按条数或字符预算截取，不代表完整账本；精确查询仍以全账本为准。"
+            else "此段为有限聊天上下文，不代表完整账本；精确查询仍以全账本为准。"
 
         return ChatContext(
             now = "$clock（$weekday）",
             timeZone = zone.id,
-            recentBills = billLines
+            recentBills = billLines,
+            billsNotice = notice
         )
     }
 
@@ -99,11 +125,12 @@ object ChatContextBuilder {
      */
     private fun formatBill(bill: BillEntity, categoryName: String?, zone: ZoneId): String {
         val when_ = Instant.ofEpochMilli(bill.timestamp).atZone(zone).format(dateFormat)
-        val category = categoryName?.ifBlank { null } ?: "未分类"
-        val name = bill.detail.ifBlank { category }
+        fun excerpt(value: String, max: Int) = if (value.length > max) value.take(max) + "…（已截取）" else value
+        val category = excerpt(categoryName?.ifBlank { null } ?: "未分类", 100)
+        val name = excerpt(bill.detail.ifBlank { category }, 800)
         val amount = "%.2f".format(java.util.Locale.ROOT, bill.amountFen / 100.0)
         val type = if (bill.type == BillType.EXPENSE) "支出" else "收入"
-        val note = if (bill.note.isNotBlank()) " · ${bill.note}" else ""
+        val note = if (bill.note.isNotBlank()) " · ${excerpt(bill.note, 800)}" else ""
         return "[${bill.id}] $when_ · $category · $name · $amount 元 · $type$note"
     }
 }

@@ -71,7 +71,7 @@ class PromptStructureTest {
     fun `the dynamic block keeps a fixed order`() {
         val rendered = renderer().renderContext("午饭 20 块")
         val category = rendered.indexOf("现有分类列表")
-        val bills = rendered.indexOf("【最近三天的账本】")
+        val bills = rendered.indexOf("【本轮账本上下文】")
         val time = rendered.indexOf("当前时间：")
         val input = rendered.indexOf("用户这轮说：")
 

@@ -206,7 +206,7 @@ class R9ContextStructureTest {
         // 「整理…恢复回收站」同时命中 {candidates}/{trashCandidates}/{otherBills}
         val out = fullRenderer().renderContext("整理一下并恢复回收站里那笔")
         val order = listOf(
-            "称呼说明", "现有分类列表", "【待补充的账】", "【最近三天的账本】",
+            "称呼说明", "现有分类列表", "【待补充的账】", "【本轮账本上下文】",
             "【候选账单】", "【回收站候选】", "【「待定」分类下的账单】",
             "当前时间：", "设备时区：", "用户这轮说："
         )
@@ -474,7 +474,7 @@ class R9HistoryFreezeTest {
     fun `empty history renders without crashing`() {
         val c = ChatContextBuilder.build(emptyList(), emptyList(), R9.now, R9.zone)
         assertTrue(c.recentBills.isEmpty())
-        assertTrue(newRenderer(ctx, context = c).renderContext("你好").contains("最近三天还没有记过账"))
+        assertTrue(newRenderer(ctx, context = c).renderContext("你好").contains("此范围暂无账单"))
     }
 }
 
