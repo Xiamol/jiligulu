@@ -83,38 +83,39 @@ fun CashFlowBarChart(bars: List<DayBar>, selectedDayMillis: Long?, onSelectDay: 
     color: Color, trackColor: Color, modifier: Modifier = Modifier, onVisibleRange: (Long, Long) -> Unit = { _, _ -> },
     compressedMonth: Boolean = false, onShiftWindow: (Int) -> Unit = {},
     anchor: CashFlowChartAnchor? = null, followToday: Boolean = false, todayMillis: Long? = null,
+    viewport: CashFlowViewport? = null,
     onCompactViewport: (Long, Long, Boolean) -> Unit = { _, _, _ -> },
     onMonthViewport: (Long, Boolean) -> Unit = { _, _ -> }) {
     val zone = remember { ZoneId.systemDefault() }
     fun date(millis: Long) = Instant.ofEpochMilli(millis).atZone(zone).toLocalDate()
     fun millis(day: LocalDate) = day.atStartOfDay(zone).toInstant().toEpochMilli()
-    val today = todayMillis?.let(::date) ?: LocalDate.now(zone)
+    val today = todayMillis?.let(::date) ?: bars.firstOrNull { it.isToday }?.dayStartMillis?.let(::date) ?: LocalDate.now(zone)
     val autoFollow = anchor?.followsToday ?: followToday
+    val selectedIndex = bars.indexOfFirst { it.dayStartMillis == selectedDayMillis }
+        .takeIf { it >= 0 } ?: bars.indexOfFirst { it.isToday }
+    val defaultFirst = if (selectedIndex >= 0) bars[(selectedIndex - 4).coerceIn(0, (bars.size - 10).coerceAtLeast(0))].dayStartMillis.let(::date)
+        else bars.firstOrNull()?.dayStartMillis?.let(::date) ?: selectedDayMillis?.let(::date)?.minusDays(4) ?: today.minusDays(9)
     val requested = if (autoFollow) CashFlowChartAnchor(today.minusDays(9), YearMonth.from(today),
         anchor?.revision ?: 0, anchor?.monthRevision ?: 0, followsToday = true)
-    else anchor ?: CashFlowChartAnchor(bars.firstOrNull()?.dayStartMillis?.let(::date)
-        ?: selectedDayMillis?.let(::date) ?: today, YearMonth.from(selectedDayMillis?.let(::date) ?: today))
-    val viewport = rememberCashFlowViewport(requested)
+    else anchor ?: CashFlowChartAnchor(defaultFirst, YearMonth.from(selectedDayMillis?.let(::date) ?: today))
+    val chartViewport = viewport ?: rememberCashFlowViewport(requested)
     val visibleCallback by rememberUpdatedState(onVisibleRange)
     val compactCallback by rememberUpdatedState(onCompactViewport)
     val monthCallback by rememberUpdatedState(onMonthViewport)
     val byDate = remember(bars) { bars.associateBy { date(it.dayStartMillis).toEpochDay() } }
-    var appliedDayRevision by remember { mutableLongStateOf(Long.MIN_VALUE) }
-    var appliedMonthRevision by remember { mutableLongStateOf(Long.MIN_VALUE) }
     LaunchedEffect(if (compressedMonth) requested.monthRevision else requested.revision, compressedMonth) {
         val revision = if (compressedMonth) requested.monthRevision else requested.revision
-        val previous = if (compressedMonth) appliedMonthRevision else appliedDayRevision
-        viewport.navigate(requested, compressedMonth, force = previous != revision)
-        if (compressedMonth) appliedMonthRevision = revision else appliedDayRevision = revision
+        val previous = if (compressedMonth) chartViewport.appliedMonthRevision else chartViewport.appliedDayRevision
+        chartViewport.navigate(requested, compressedMonth, force = previous != revision)
     }
     // A midnight wake follows today only before the user has chosen or scrolled dates.
     LaunchedEffect(today) {
-        if (autoFollow) viewport.navigate(CashFlowChartAnchor(today.minusDays(9), YearMonth.from(today)), compressedMonth)
+        if (autoFollow) chartViewport.navigate(requested, compressedMonth)
     }
-    LaunchedEffect(viewport, compressedMonth) {
+    LaunchedEffect(chartViewport, compressedMonth) {
         if (compressedMonth) snapshotFlow {
-            if (!viewport.ready || viewport.navigating) null
-            else viewport.months.currentPage to viewport.months.isScrollInProgress
+            if (!chartViewport.ready || chartViewport.navigating) null
+            else chartViewport.months.currentPage to chartViewport.months.isScrollInProgress
         }.distinctUntilChanged().collect { report ->
             report?.let { (page, moving) ->
                 val month = cashFlowIndexMonth(page)
@@ -122,10 +123,10 @@ fun CashFlowBarChart(bars: List<DayBar>, selectedDayMillis: Long?, onSelectDay: 
                 monthCallback(millis(month.atDay(1)), moving)
             }
         } else snapshotFlow {
-            val layout = viewport.days.layoutInfo
+            val layout = chartViewport.days.layoutInfo
             val visible = layout.visibleItemsInfo.filter { it.offset + it.size > layout.viewportStartOffset && it.offset < layout.viewportEndOffset }
-            if (!viewport.ready || viewport.navigating || visible.isEmpty()) null
-            else Triple(visible.first().index, visible.last().index, viewport.days.isScrollInProgress)
+            if (!chartViewport.ready || chartViewport.navigating || visible.isEmpty()) null
+            else Triple(visible.first().index, visible.last().index, chartViewport.days.isScrollInProgress)
         }.distinctUntilChanged().collect { report ->
             report?.let { (first, last, moving) ->
                 val start = millis(cashFlowIndexDate(first)); val end = millis(cashFlowIndexDate(last))
@@ -134,14 +135,14 @@ fun CashFlowBarChart(bars: List<DayBar>, selectedDayMillis: Long?, onSelectDay: 
             }
         }
     }
-    val visibleDays by remember(viewport) { derivedStateOf {
-        val layout = viewport.days.layoutInfo
+    val visibleDays by remember(chartViewport) { derivedStateOf {
+        val layout = chartViewport.days.layoutInfo
         val visible = layout.visibleItemsInfo.filter { it.offset + it.size > layout.viewportStartOffset && it.offset < layout.viewportEndOffset }
         (visible.firstOrNull()?.index ?: cashFlowDayIndex(requested.firstDay)) to
             (visible.lastOrNull()?.index ?: (cashFlowDayIndex(requested.firstDay) + 9).coerceAtMost(cashFlowDayCount - 1))
     } }
-    val currentMonth = cashFlowIndexMonth(viewport.months.currentPage)
-    val moving = if (compressedMonth) viewport.months.isScrollInProgress else viewport.days.isScrollInProgress
+    val currentMonth = cashFlowIndexMonth(chartViewport.months.currentPage)
+    val moving = if (compressedMonth) chartViewport.months.isScrollInProgress else chartViewport.days.isScrollInProgress
     val maxYuan = remember(byDate, visibleDays, currentMonth, compressedMonth) {
         byDate.asSequence().filter { (epoch, _) ->
             if (compressedMonth) YearMonth.from(LocalDate.ofEpochDay(epoch)) == currentMonth
@@ -176,15 +177,15 @@ fun CashFlowBarChart(bars: List<DayBar>, selectedDayMillis: Long?, onSelectDay: 
                         pathEffect = PathEffect.dashPathEffect(floatArrayOf(3.dp.toPx(), 5.dp.toPx())))
                 }
             }
-            if (!compressedMonth) LazyRow(state = viewport.days, modifier = Modifier.fillMaxSize().testTag("cash-flow-day-strip")) {
+            if (!compressedMonth) LazyRow(state = chartViewport.days, modifier = Modifier.fillMaxSize().testTag("cash-flow-day-strip")) {
                 items(count = cashFlowDayCount, key = { cashFlowIndexDate(it).toEpochDay() }) { index ->
                     val day = cashFlowIndexDate(index)
                     val width = with(density) { cashFlowDaySlotWidthPx(index, plotPixelWidth).toDp() }
                     CashFlowDayCell(day, byDate[day.toEpochDay()], selectedDayMillis, today, top, color, trackColor,
                         width, false, onSelectDay)
                 }
-            } else HorizontalPager(state = viewport.months, modifier = Modifier.fillMaxSize().testTag("cash-flow-month-pager"), beyondViewportPageCount = 1,
-                flingBehavior = PagerDefaults.flingBehavior(viewport.months, pagerSnapDistance = PagerSnapDistance.atMost(1)),
+            } else HorizontalPager(state = chartViewport.months, modifier = Modifier.fillMaxSize().testTag("cash-flow-month-pager"), beyondViewportPageCount = 1,
+                flingBehavior = PagerDefaults.flingBehavior(chartViewport.months, pagerSnapDistance = PagerSnapDistance.atMost(1)),
                 key = { it }) { page ->
                 val month = cashFlowIndexMonth(page)
                 val monthDates = remember(month) { (1..month.lengthOfMonth()).map(month::atDay) }

@@ -117,6 +117,7 @@ import com.jiligulu.app.ui.components.LedgerCard
 import com.jiligulu.app.ui.components.LedgerBillRow
 import com.jiligulu.app.ui.billdetail.BillDetailSheet
 import com.jiligulu.app.ui.stats.charts.CashFlowBarChart
+import com.jiligulu.app.ui.stats.charts.rememberCashFlowViewport
 import com.jiligulu.app.ui.stats.charts.DonutChart
 import com.jiligulu.app.ui.stats.charts.SpendingLineChart
 import com.jiligulu.app.ui.stats.charts.SpendingLinePoint
@@ -156,6 +157,7 @@ fun StatsScreen(
         vm.monthlyExpenseAverages.collectAsStateWithLifecycle().value else emptyList()
     val today by vm.today.collectAsStateWithLifecycle()
     val chartAnchor by vm.chartAnchor.collectAsStateWithLifecycle()
+    val chartViewport = rememberCashFlowViewport(chartAnchor)
     val chartFollowsToday by vm.chartFollowsToday.collectAsStateWithLifecycle()
     val compactVisibleWindow by vm.compactVisibleWindow.collectAsStateWithLifecycle()
     val chartMonth by vm.chartMonth.collectAsStateWithLifecycle()
@@ -281,6 +283,7 @@ fun StatsScreen(
                     bars = visibleBars,
                     compressedMonth = barMode == StatsBarMode.MONTH_COMPRESSED,
                     anchor = chartAnchor,
+                    viewport = chartViewport,
                     followToday = chartFollowsToday,
                     todayMillis = today.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli(),
                     onCompactViewport = vm::reportCompactViewport,

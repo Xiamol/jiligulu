@@ -37,6 +37,8 @@ internal fun cashFlowDateSlotWidthPx(index: Int, count: Int, plotWidthPx: Int): 
 @OptIn(ExperimentalFoundationApi::class)
 class CashFlowViewport(val days: LazyListState, val months: PagerState) {
     private var navigationTicket = 0L
+    internal var appliedDayRevision = Long.MIN_VALUE
+    internal var appliedMonthRevision = Long.MIN_VALUE
     internal var navigating by mutableStateOf(false)
         private set
     internal var ready by mutableStateOf(false)
@@ -44,6 +46,7 @@ class CashFlowViewport(val days: LazyListState, val months: PagerState) {
 
     internal suspend fun navigate(anchor: CashFlowChartAnchor, compressedMonth: Boolean, force: Boolean = true) {
         val ticket = ++navigationTicket
+        var completed = false
         navigating = true
         ready = false
         try {
@@ -54,8 +57,13 @@ class CashFlowViewport(val days: LazyListState, val months: PagerState) {
                 val target = cashFlowDayIndex(anchor.firstDay)
                 if (force || target != days.firstVisibleItemIndex) days.scrollToItem(target)
             }
+            completed = true
         } finally {
             if (ticket == navigationTicket) {
+                if (completed) {
+                    if (compressedMonth) appliedMonthRevision = anchor.monthRevision
+                    else appliedDayRevision = anchor.revision
+                }
                 navigating = false
                 ready = true
             }

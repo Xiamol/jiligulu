@@ -6,6 +6,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -18,9 +20,13 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNode
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.dp
@@ -42,6 +48,69 @@ import java.time.ZoneId
 @OptIn(ExperimentalTestApi::class)
 class CashFlowDraggingTest {
     @get:Rule val compose = createComposeRule()
+
+    @Test fun directDateApiInitiallyShowsTheSelectionAndUsesTheSuppliedTodayDate() {
+        val month = YearMonth.of(2026, 9)
+        val selected = month.atDay(24).millis()
+        val supplied = (1..30).map { day ->
+            DayBar(day, month.atDay(day).millis(), if (day % 3 == 0) day * 120L else day * 60L, day == 24)
+        }
+        var explicitToday by mutableStateOf<Long?>(null)
+        compose.setContent {
+            MaterialTheme {
+                CashFlowBarChart(supplied, selected, {}, Color.Red, Color.LightGray,
+                    Modifier.fillMaxWidth().height(202.dp), todayMillis = explicitToday)
+            }
+        }
+        compose.onNode(hasContentDescription("9月24日，28.8元，已选中") and hasText("今天")).assertIsDisplayed()
+        compose.runOnIdle { explicitToday = month.atDay(25).millis() }
+        compose.onNode(hasContentDescription("9月25日，15元") and hasText("今天")).assertIsDisplayed()
+        compose.onNodeWithContentDescription("9月24日，28.8元，已选中").assertIsDisplayed()
+    }
+
+    @Test fun externallyRetainedViewportKeepsItsFractionalOffsetAfterTheChartIsUnmounted() {
+        val first = LocalDate.of(2026, 12, 27)
+        val today = LocalDate.of(2026, 12, 31)
+        var anchor by mutableStateOf(CashFlowChartAnchor(first, YearMonth.from(today)))
+        var showBars by mutableStateOf(true)
+        var retained: CashFlowViewport? = null
+        compose.setContent {
+            val viewport = rememberCashFlowViewport(anchor)
+            SideEffect { retained = viewport }
+            MaterialTheme {
+                if (showBars) CashFlowBarChart(bars(), today.millis(), {}, Color.Red, Color.LightGray,
+                    Modifier.fillMaxWidth().height(202.dp), anchor = anchor, viewport = viewport,
+                    todayMillis = today.millis(), onCompactViewport = { start, _, _ ->
+                        anchor = anchor.copy(firstDay = start.date())
+                    })
+                else Box(Modifier.fillMaxWidth().height(202.dp)) { Text("折线视图") }
+            }
+        }
+        compose.waitForIdle()
+        compose.onNodeWithTag("cash-flow-day-strip").performTouchInput {
+            down(Offset(width * .8f, height * .5f))
+            moveTo(Offset(width * .6f, height * .5f), delayMillis = 250)
+            // Stop the finger before release so this checks a partial slot, not an ongoing fling.
+            moveTo(Offset(width * .6f, height * .5f), delayMillis = 150)
+            up()
+        }
+        compose.waitForIdle()
+        var before: Pair<Int, Int>? = null
+        compose.runOnIdle {
+            val state = requireNotNull(retained).days
+            before = state.firstVisibleItemIndex to state.firstVisibleItemScrollOffset
+            assertTrue("The fixture must retain a real partially visible slot", state.firstVisibleItemScrollOffset > 0)
+            showBars = false
+        }
+        compose.waitForIdle()
+        compose.onNodeWithText("折线视图").assertIsDisplayed()
+        compose.runOnIdle { showBars = true }
+        compose.waitForIdle()
+        compose.runOnIdle {
+            val state = requireNotNull(retained).days
+            assertEquals(before, state.firstVisibleItemIndex to state.firstVisibleItemScrollOffset)
+        }
+    }
 
     @Test fun compactDatesMoveBeforeReleaseAndDataOrSelectionUpdatesNeverReanchor() {
         val first = LocalDate.of(2026, 12, 27)
