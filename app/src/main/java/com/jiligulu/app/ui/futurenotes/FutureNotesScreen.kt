@@ -35,6 +35,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.Lifecycle
@@ -53,6 +54,8 @@ import com.jiligulu.app.ui.littleworld.StickerPaperArtwork
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import java.time.*
 import java.time.format.DateTimeFormatter
 
@@ -102,13 +105,13 @@ fun FutureNotesScreen(onBack: () -> Unit) {
             DestinationObject("旧信匣", .18f, .62f, .62f, .22f,
                 labelX = .43f, labelY = .78f, tilt = 2f, soundCue = com.jiligulu.app.core.audio.UiCue.PAPER) { tab = 2; drawer = true },
             DestinationObject("写一封信", .50f, .82f, .42f, .14f,
-                labelX = .72f, labelY = .92f, soundCue = com.jiligulu.app.core.audio.UiCue.PAPER) { editing = null; creating = true }
+                labelX = .72f, labelY = .92f, soundCue = com.jiligulu.app.core.audio.UiCue.PAPER) { editing = state.futureNoteDraft; creating = true }
         ), Modifier.fillMaxSize().navigationBarsPadding(), hasMail = arrived > 0)
     if (drawer) DestinationDrawer(
         title = when(tab) { 0 -> "阿噜还在送信"; 1 -> "今天的收件箱"; else -> "收好的旧信笺" },
         subtitle = when(tab) { 0 -> "${rows.size} 封信，正走向未来的你。"; 1 -> "${rows.size} 封信，到了可以拆开的日子。"; else -> "${rows.size} 封信，藏着过去的心事。" },
         onDismiss = { drawer = false }, compact = true,
-        actions = { TextButton(onClick = uiTap(UiCue.LETTER) { editing = null; creating = true }, modifier = Modifier.weight(1f)) { Text("写一封") } }
+        actions = { TextButton(onClick = uiTap(UiCue.LETTER) { editing = state.futureNoteDraft; creating = true }, modifier = Modifier.weight(1f)) { Text("写一封") } }
     ) {
         if (rows.isEmpty()) item {
             Text(when(tab) {
@@ -143,16 +146,16 @@ fun FutureNotesScreen(onBack: () -> Unit) {
         try { FutureNoteReminder.schedule(context,note) } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled } catch (_: Exception) { error="便签已保存，后台提醒暂时没接上，下次打开会重试。" }
     } })
     opened?.let { n -> PostPaperDialog(n.title, { opened = null }, height = 300.dp, busy = busy,
-        confirmLabel = if (n.dueAt <= System.currentTimeMillis()) "收好信笺" else "等它到达",
+        confirmLabel = if (n.dueAt <= System.currentTimeMillis() && n.readAt == null) "标记已读" else null,
         onConfirm = {
             if (n.dueAt <= System.currentTimeMillis() && n.readAt == null) write(successCue = null) {
                 repo.markNoteRead(n.id); FutureNoteReminder.cancel(context, n.id); opened = null
             } else opened = null
         }) {
-        Text(n.body, style = MaterialTheme.typography.bodyMedium)
+        FutureNoteContents(n, state)
         Text(noteDate(n.dueAt), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     } }
-    deleting?.let { n -> GuluDialog("删除这张便签？",onDismiss={deleting=null},busy=busy,compact=true,compactWidth=260.dp,dense=true,dismissLabel="留着",confirmLabel="删除",onConfirm={write(UiCue.REMOVE){
+    deleting?.let { n -> GuluDialog("删除这张便签？",onDismiss={deleting=null},busy=busy,compact=true,compactWidth=260.dp,dense=true,confirmLabel="删除",onConfirm={write(UiCue.REMOVE){
         repo.deleteFutureNote(n.id);FutureNoteReminder.cancel(context,n.id);deleting=null
     }}){Text("这张便签和它的提醒会一起移除。")} }
     error?.let { GuluDialog("这次还没完成",onDismiss={error=null},compact=true,compactWidth=260.dp,dense=true){Text(it)} }
@@ -161,7 +164,11 @@ fun FutureNotesScreen(onBack: () -> Unit) {
 @Composable
 private fun NoteEditor(original: FutureNote?, busy: Boolean, onDismiss: () -> Unit, onSave: (FutureNote) -> Unit) {
     val context = LocalContext.current
+    val repo = (context.applicationContext as JiliguluApp).container.littleWorld
+    val scope = rememberCoroutineScope()
     val zone = ZoneId.systemDefault()
+    val id = rememberSaveable(original?.id) { original?.id ?: java.util.UUID.randomUUID().toString() }
+    val createdAt = rememberSaveable(original?.id) { original?.createdAt ?: System.currentTimeMillis() }
     var title by rememberSaveable(original?.id) { mutableStateOf(original?.title.orEmpty()) }
     var body by rememberSaveable(original?.id) { mutableStateOf(original?.body.orEmpty()) }
     var due by rememberSaveable(original?.id) { mutableLongStateOf(original?.dueAt ?: LocalDate.now(zone).plusDays(1)
@@ -170,11 +177,29 @@ private fun NoteEditor(original: FutureNote?, busy: Boolean, onDismiss: () -> Un
     var showDate by remember { mutableStateOf(false) }
     var showTime by remember { mutableStateOf(false) }
     var permissionTip by remember { mutableStateOf(false) }
+    var draftError by remember { mutableStateOf<String?>(null) }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok -> notify = ok; permissionTip = !ok }
     val canSend = title.isNotBlank() && body.isNotBlank() && due > System.currentTimeMillis()
-    PostPaperDialog("写给未来的你", onDismiss, height = 330.dp, busy = busy, confirmLabel = "寄出去",
-        dismissLabel = "取消", confirmEnabled = canSend, onConfirm = {
-            onSave((original ?: FutureNote(title = title, body = body, dueAt = due)).copy(
+    fun draft() = FutureNote(id, title, body, due, notify, createdAt = createdAt)
+    LaunchedEffect(id, title, body, due, notify) {
+        delay(250)
+        try { repo.saveFutureDraft(draft().takeUnless { it.title.isBlank() && it.body.isBlank() }); draftError = null }
+        catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+        catch (_: Exception) { draftError = "草稿暂时没存好，关闭前请再试一次" }
+    }
+    fun closeEditor() {
+        if (busy) return
+        scope.launch {
+            try {
+                withContext(NonCancellable) { repo.saveFutureDraft(draft().takeUnless { it.title.isBlank() && it.body.isBlank() }) }
+                onDismiss()
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (_: Exception) { draftError = "草稿还没收好，请再试一次" }
+        }
+    }
+    PostPaperDialog("写给未来的你", ::closeEditor, height = 330.dp, busy = busy, confirmLabel = "寄出去",
+        confirmEnabled = canSend, onConfirm = {
+            onSave(draft().copy(
                 title = title.trim(), body = body.trim(), dueAt = due, notificationEnabled = notify,
                 presentedAt = null, readAt = null, notifiedAt = null))
         }) {
@@ -201,7 +226,7 @@ private fun NoteEditor(original: FutureNote?, busy: Boolean, onDismiss: () -> Un
             }, enabled = !busy, modifier = Modifier.size(28.dp))
             Text("到期时也用手机提醒", style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(start = 4.dp))
         }
-        Text(when {
+        Text(draftError ?: when {
             permissionTip -> "通知未开启，仍会在软件内送达"
             due <= System.currentTimeMillis() -> "要挑一个未来的时间哦"
             notify -> "手机提醒可能略晚，进软件可直接读信"
@@ -220,7 +245,7 @@ private fun NoteEditor(original: FutureNote?, busy: Boolean, onDismiss: () -> Un
 /** Fixed paper size, independently scrollable letter area, and two immovable footer slots. */
 @Composable
 private fun PostPaperDialog(title: String, onDismiss: () -> Unit, height: androidx.compose.ui.unit.Dp,
-    busy: Boolean = false, confirmLabel: String, dismissLabel: String? = null, confirmEnabled: Boolean = true,
+    busy: Boolean = false, confirmLabel: String?, confirmEnabled: Boolean = true,
     confirmCue: UiCue = UiCue.PAPER,
     onConfirm: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
     Dialog(onDismissRequest = { if (!busy) onDismiss() }, properties = DialogProperties(usePlatformDefaultWidth = false,
@@ -232,10 +257,7 @@ private fun PostPaperDialog(title: String, onDismiss: () -> Unit, height: androi
                 maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth().height(30.dp))
             SpringScrollColumn(Modifier.fillMaxWidth().weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp), content = content)
-            Row(Modifier.fillMaxWidth().height(42.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (dismissLabel != null) TextButton(onClick = uiTap(UiCue.PAPER, onDismiss), enabled = !busy, modifier = Modifier.weight(1f)) {
-                    Text(dismissLabel, style = MaterialTheme.typography.labelMedium)
-                }
+            if (confirmLabel != null) Row(Modifier.fillMaxWidth().height(42.dp), verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = uiTap(confirmCue, onConfirm), enabled = !busy && confirmEnabled, modifier = Modifier.weight(1f)) {
                     if (busy) CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 1.5.dp)
                     else Text(confirmLabel, style = MaterialTheme.typography.labelMedium, maxLines = 1)
@@ -253,7 +275,7 @@ private fun PostTimeDialog(due: Long, onDismiss: () -> Unit, onSave: (Long) -> U
     var minute by rememberSaveable { mutableStateOf("%02d".format(old.minute)) }
     val h = hour.toIntOrNull()?.takeIf { it in 0..23 }
     val m = minute.toIntOrNull()?.takeIf { it in 0..59 }
-    PostPaperDialog("几点送到？", onDismiss, 180.dp, confirmLabel = "确定", dismissLabel = "取消", confirmEnabled = h != null && m != null,
+    PostPaperDialog("几点送到？", onDismiss, 180.dp, confirmLabel = "确定", confirmEnabled = h != null && m != null,
         confirmCue = UiCue.SELECT,
         onConfirm = { if (h != null && m != null) onSave(old.toLocalDate().atTime(h, m).atZone(zone).toInstant().toEpochMilli()) }) {
         Row(Modifier.fillMaxWidth().height(46.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
@@ -279,7 +301,8 @@ private fun noteDate(value:Long)=Instant.ofEpochMilli(value).atZone(ZoneId.syste
 fun DueFutureNoteHost(enabled:Boolean,requestedId:String?,onConsumed:()->Unit) {
     val context=LocalContext.current
     val repo=(context.applicationContext as JiliguluApp).container.littleWorld
-    val state by repo.state.collectAsStateWithLifecycle(initialValue=LittleWorldState())
+    val loadedState: LittleWorldState? by repo.state.collectAsStateWithLifecycle(initialValue=null)
+    val state = loadedState ?: return
     val scope=rememberCoroutineScope()
     var current by remember{mutableStateOf<String?>(null)}
     var handled by remember{mutableStateOf(setOf<String>())}
@@ -324,9 +347,14 @@ fun DueFutureNoteHost(enabled:Boolean,requestedId:String?,onConsumed:()->Unit) {
             publish = { value = it })
     }
     LaunchedEffect(enabled,requestedId,state.futureNotes,now){
-        if(enabled&&current==null){
-            current=state.futureNotes.firstOrNull{it.id==requestedId}?.id
-                ?: state.futureNotes.filter{it.dueAt<=now&&it.readAt==null&&it.presentedAt==null&&it.id !in handled}.minByOrNull{it.dueAt}?.id
+        if(enabled){
+            if (current != null && state.futureNotes.none { it.id == current }) current = null
+            if (requestedId != null) {
+                val requested = state.futureNotes.firstOrNull { it.id == requestedId }
+                if (requested == null) onConsumed() else current = requested.id
+            } else if (current == null) {
+                current=state.futureNotes.filter{it.dueAt<=now&&it.readAt==null&&it.presentedAt==null&&it.id !in handled}.minByOrNull{it.dueAt}?.id
+            }
         }
     }
     val note=state.futureNotes.firstOrNull{it.id==current}
@@ -335,11 +363,25 @@ fun DueFutureNoteHost(enabled:Boolean,requestedId:String?,onConsumed:()->Unit) {
             handled=handled+note.id;current=null;if(note.id==requestedId)onConsumed()
             scope.launch{ try { if(read){repo.markNoteRead(note.id);FutureNoteReminder.cancel(context,note.id)}else repo.markNotePresented(note.id) } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled } catch (_: Exception) { android.util.Log.w("FutureNote","Inbox acknowledgement will retry next visit") } }
         }
-        PostPaperDialog(note.title, onDismiss={close(false)}, height=300.dp, dismissLabel="留在信匣", confirmLabel="收好啦", onConfirm={close(true)}){
-            Text(note.body,style=MaterialTheme.typography.bodyMedium)
-            Text("过去的你，托阿噜送来的 ♡",style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.primary)
+        PostPaperDialog(note.title, onDismiss={close(false)}, height=300.dp,
+            confirmLabel=if(note.readAt == null) "标记已读" else null, onConfirm={close(true)}){
+            FutureNoteContents(note, state)
         }
     }
+}
+
+@Composable
+private fun FutureNoteContents(note: FutureNote, state: LittleWorldState) {
+    Text(note.body, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag("future-note-body"))
+    val source = state.heartLetters.firstOrNull { it.paper.id == note.sourcePaperId }?.paper
+    if (source != null) {
+        var showSource by remember(note.id) { mutableStateOf(false) }
+        Text("阿噜写给你的回信 ♡", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+        TextButton(onClick = { showSource = !showSource }, modifier = Modifier.testTag("heart-letter-source")) {
+            Text(if (showSource) "收起原信" else "看看我的原信", style = MaterialTheme.typography.labelSmall)
+        }
+        if (showSource) Text(source.body, style = MaterialTheme.typography.bodySmall)
+    } else Text("过去的你，托阿噜送来的 ♡", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
 }
 
 /** No periodic poll: pause off-screen, refresh on return, then wait for the next future letter. */

@@ -39,6 +39,10 @@ class AppContainer(private val app: Application) {
     }
 
     val littleWorld: com.jiligulu.app.data.littleworld.LittleWorldRepository by lazy { com.jiligulu.app.data.littleworld.LittleWorldRepository(app) }
+    val heartLetters: com.jiligulu.app.data.littleworld.HeartLetterRepository by lazy {
+        com.jiligulu.app.data.littleworld.HeartLetterRepository(littleWorld, createClient = { aiRepository.createClient() },
+            onArrived = { note -> com.jiligulu.app.ui.futurenotes.FutureNoteReminder.schedule(app, note) })
+    }
     val userPrefs: UserPrefs by lazy { UserPrefs(app) }
     val aiProviders: com.jiligulu.app.data.prefs.AiProviderPrefs by lazy { com.jiligulu.app.data.prefs.AiProviderPrefs(app) }
     val aiUsage: com.jiligulu.app.data.prefs.AiUsageRepository by lazy {

@@ -1077,13 +1077,15 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
             controlsBottom = gameControlsBottom,
             onDecorSecret = { if (toy == SecretActivity.XIANGQI) requestXiangqiHelp() else if (toy == SecretActivity.GOMOKU) requestGomokuHelp() },
             content = toyContent)
-        else if (toy == SecretActivity.PAPER) SecretPapersDialog(secretNotes, ::closeToy)
+        else if (toy == SecretActivity.PAPER) SecretPapersDialog(secretNotes, ::closeToy,
+            onOpenReplies = { closeToy(); onOpenNotes() })
         else SecretToyDialog(title, ::closeToy, reservedHeight = 265, content = toyContent)
         }
         // The paper is a child of the wheel, not a replacement destination. Keeping the
         // wheel composed preserves its angle, picked task and tab when the paper closes.
         if (!sleeping && activity == SecretActivity.WHEEL && paperFromWheel) {
-            SecretPapersDialog(secretNotes, { paperFromWheel = false })
+            SecretPapersDialog(secretNotes, { paperFromWheel = false },
+                onOpenReplies = { paperFromWheel = false; onOpenNotes() })
         }
         if (clockSetupVisible && activity == SecretActivity.XIANGQI &&
             xiangqiMode != XiangqiPlayMode.ONLINE && xiangqiMode != XiangqiPlayMode.LAN) {

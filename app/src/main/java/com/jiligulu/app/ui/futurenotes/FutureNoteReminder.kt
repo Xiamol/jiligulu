@@ -10,6 +10,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.net.Uri
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.jiligulu.app.JiliguluApp
@@ -36,7 +37,10 @@ object FutureNoteReminder {
             alarm.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, note.dueAt.coerceAtLeast(System.currentTimeMillis() + 1500), intent)
         }
     }
-    fun cancel(context: Context, id: String) { context.getSystemService(AlarmManager::class.java).cancel(pending(context,id)) }
+    fun cancel(context: Context, id: String) {
+        context.getSystemService(AlarmManager::class.java).cancel(pending(context,id))
+        context.getSystemService(NotificationManager::class.java).cancel(id, 1)
+    }
     suspend fun restore(context: Context) {
         val repo = (context.applicationContext as JiliguluApp).container.littleWorld
         repo.snapshot().futureNotes.forEach { schedule(context, it) }
@@ -47,10 +51,11 @@ object FutureNoteReminder {
         if (!manager.areNotificationsEnabled()) return false
         manager.createNotificationChannel(NotificationChannel(CHANNEL,"未来的小信笺", NotificationManager.IMPORTANCE_DEFAULT))
         val open = PendingIntent.getActivity(context, note.id.hashCode(),
-            Intent(context, MainActivity::class.java).putExtra(EXTRA_ID,note.id).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            Intent(context, MainActivity::class.java).setData(Uri.parse("jiligulu://future-note/${Uri.encode(note.id)}"))
+                .putExtra(EXTRA_ID,note.id).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         manager.notify(note.id, 1, NotificationCompat.Builder(context,CHANNEL)
-            .setSmallIcon(R.drawable.ic_water_notification).setContentTitle("阿噜替你收着的便签到啦 💌")
+            .setSmallIcon(R.drawable.ic_water_notification).setContentTitle(if (note.sourcePaperId != null) "阿噜的回信到啦 💌" else "阿噜替你收着的便签到啦 💌")
             .setContentText(note.title).setContentIntent(open).setAutoCancel(true)
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE).build())
         return true

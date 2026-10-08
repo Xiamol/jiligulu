@@ -27,18 +27,23 @@ import java.util.UUID
 @Serializable data class FutureNote(val id: String = UUID.randomUUID().toString(), val title: String,
     val body: String, val dueAt: Long, val notificationEnabled: Boolean = false,
     val presentedAt: Long? = null, val readAt: Long? = null, val notifiedAt: Long? = null,
-    val createdAt: Long = System.currentTimeMillis())
+    val createdAt: Long = System.currentTimeMillis(), val sourcePaperId: String? = null)
 @Serializable data class MemoryCard(val id: String = UUID.randomUUID().toString(), val title: String,
     val caption: String = "", val imagePath: String, val createdAt: Long = System.currentTimeMillis())
 @Serializable data class SecretPaper(val id: String = UUID.randomUUID().toString(), val title: String = "给阿噜的小纸条",
     val body: String, val createdAt: Long = System.currentTimeMillis())
+@Serializable enum class HeartLetterStatus { PENDING, FAILED, CANCELLED, REPLIED }
+@Serializable data class HeartLetter(val paper: SecretPaper, val status: HeartLetterStatus = HeartLetterStatus.PENDING,
+    val sentAt: Long, val replyNoteId: String? = null)
 @Serializable data class TrainTicket(val dayEpoch: Long, val createdAt: Long = System.currentTimeMillis())
 @Serializable data class LittleWorldState(val stickers: List<Sticker> = defaultStickers(),
     val wishes: List<Wish> = emptyList(), val waiting: List<WaitingWish> = emptyList(),
     val futureNotes: List<FutureNote> = emptyList(), val cards: List<MemoryCard> = emptyList(),
     val favoriteFortunes: Set<Int> = emptySet(), val timeMachineEnabled: Boolean = true,
     val favoriteSecretPapers: List<SecretPaper> = emptyList(), val writtenSecretPapers: List<SecretPaper> = emptyList(),
-    val trainTickets: List<TrainTicket> = emptyList())
+    val trainTickets: List<TrainTicket> = emptyList(),
+    val heartLetterDraft: SecretPaper? = null, val heartLetters: List<HeartLetter> = emptyList(),
+    val futureNoteDraft: FutureNote? = null)
 
 fun defaultStickers(): List<Sticker> = listOf(
     Triple("早餐", "🍳", 800L), Triple("地铁", "🚇", 300L), Triple("咖啡", "☕", 1200L),
@@ -122,7 +127,15 @@ class LittleWorldRepository(context: Context,
     suspend fun archiveWaiting(id: String) = update { it.copy(waiting = it.waiting.map { w -> if (w.id == id) w.copy(archived = true) else w }) }
     suspend fun saveFutureNote(note: FutureNote) {
         require(note.title.trim().isNotEmpty() && note.body.trim().isNotEmpty() && note.dueAt > 0)
-        update { s -> s.copy(futureNotes = if (s.futureNotes.any { it.id == note.id }) s.futureNotes.map { if (it.id == note.id) note else it } else s.futureNotes + note) }
+        update { s -> s.copy(futureNotes = if (s.futureNotes.any { it.id == note.id }) s.futureNotes.map { if (it.id == note.id) note else it } else s.futureNotes + note,
+            futureNoteDraft = s.futureNoteDraft?.takeUnless { it.id == note.id }) }
+    }
+    suspend fun saveFutureDraft(note: FutureNote?) {
+        require(note == null || note.id.isNotBlank() && note.title.length <= 40 && note.body.length <= 2000)
+        update { state -> state.copy(futureNoteDraft = note?.takeUnless { draft ->
+            state.futureNotes.any { saved -> saved.id == draft.id && saved.title == draft.title.trim() &&
+                saved.body == draft.body.trim() && saved.dueAt == draft.dueAt && saved.notificationEnabled == draft.notificationEnabled }
+        }) }
     }
     suspend fun deleteFutureNote(id: String) = update { it.copy(futureNotes = it.futureNotes.filterNot { n -> n.id == id }) }
     suspend fun markNotePresented(id: String) = update { it.copy(futureNotes = it.futureNotes.map { n -> if (n.id == id) n.copy(presentedAt = System.currentTimeMillis()) else n }) }
@@ -145,6 +158,56 @@ class LittleWorldRepository(context: Context,
     suspend fun deleteSecretPaper(id: String) = update { state -> state.copy(
         writtenSecretPapers = state.writtenSecretPapers.filterNot { it.id == id },
         favoriteSecretPapers = state.favoriteSecretPapers.filterNot { it.id == id }) }
+    suspend fun saveHeartDraft(paper: SecretPaper?) {
+        require(paper == null || paper.id.isNotBlank() && paper.title.length <= 40 && paper.body.length <= 1500)
+        update { state -> state.copy(heartLetterDraft = paper?.takeUnless { draft ->
+            state.writtenSecretPapers.any { it.id == draft.id }
+        }) }
+    }
+    /** Source and send receipt are committed together before any network request. */
+    internal suspend fun prepareHeartLetter(paper: SecretPaper, now: Long): HeartLetter {
+        require(paper.id.isNotBlank() && paper.title.trim().length in 1..40 && paper.body.trim().length in 1..1500)
+        val saved = paper.copy(title = paper.title.trim(), body = paper.body.trim())
+        var prepared: HeartLetter? = null
+        update { state ->
+            val old = state.heartLetters.firstOrNull { it.paper.id == saved.id }
+            check(old == null || old.paper == saved) { "已寄出的原信不能改写，请另写一张" }
+            val letter = if (old?.status == HeartLetterStatus.REPLIED) old
+                else (old ?: HeartLetter(saved, sentAt = now)).copy(status = HeartLetterStatus.PENDING)
+            prepared = letter
+            state.copy(writtenSecretPapers = state.writtenSecretPapers.filterNot { it.id == saved.id } + saved,
+                heartLetters = state.heartLetters.filterNot { it.paper.id == saved.id } + letter,
+                heartLetterDraft = state.heartLetterDraft?.takeUnless { it.id == saved.id })
+        }
+        return checkNotNull(prepared)
+    }
+    internal suspend fun failHeartLetter(id: String, cancelled: Boolean) = update { state ->
+        state.copy(heartLetters = state.heartLetters.map { letter ->
+            if (letter.paper.id == id && letter.status != HeartLetterStatus.REPLIED)
+                letter.copy(status = if (cancelled) HeartLetterStatus.CANCELLED else HeartLetterStatus.FAILED) else letter
+        })
+    }
+    /** Idempotent receipt: a retry cannot add a second reply, reset read state, or resurrect a deleted reply. */
+    internal suspend fun completeHeartLetter(id: String, body: String, now: Long): FutureNote? {
+        require(body.trim().length in 1..6000)
+        var receipt: FutureNote? = null
+        update { state ->
+            val letter = checkNotNull(state.heartLetters.firstOrNull { it.paper.id == id })
+            if (letter.status == HeartLetterStatus.REPLIED) {
+                receipt = state.futureNotes.firstOrNull { it.id == letter.replyNoteId }
+                state
+            } else {
+                val note = FutureNote(id = "heart-reply-$id", title = "阿噜的回信 · ${letter.paper.title}",
+                    body = body.trim(), dueAt = now.coerceAtLeast(1), notificationEnabled = true,
+                    createdAt = now, sourcePaperId = id)
+                receipt = note
+                state.copy(futureNotes = state.futureNotes.filterNot { it.id == note.id } + note,
+                    heartLetters = state.heartLetters.map { if (it.paper.id == id)
+                        it.copy(status = HeartLetterStatus.REPLIED, replyNoteId = note.id) else it })
+            }
+        }
+        return receipt
+    }
     suspend fun saveTrainTicket(dayEpoch: Long) {
         require(dayEpoch in java.time.LocalDate.of(1900, 1, 1).toEpochDay()..java.time.LocalDate.now().toEpochDay())
         update { state -> if(state.trainTickets.any { it.dayEpoch == dayEpoch }) state
