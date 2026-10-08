@@ -32,13 +32,17 @@ data class GomokuSearchDiagnostics(
 /** Freestyle rules, shared by both colours. Call from a cancellable background dispatcher. */
 object GomokuStrongMoveHelper {
     /** Retain positional three-argument callers as well as trailing cancellation lambdas. */
-    fun chooseMove(state: GomokuState, timeBudgetMillis: Long, shouldCancel: () -> Boolean): GridCell? =
-        chooseMove(state, timeBudgetMillis, onDiagnostics = null, shouldCancel = shouldCancel)
-
     fun chooseMove(
         state: GomokuState,
         timeBudgetMillis: Long = 1_500,
-        onDiagnostics: ((GomokuSearchDiagnostics) -> Unit)? = null,
+        shouldCancel: () -> Boolean = { false },
+    ): GridCell? = chooseMove(state, onDiagnostics = null, timeBudgetMillis = timeBudgetMillis, shouldCancel = shouldCancel)
+
+    /** QA callers supply the listener by name; it cannot occupy an old third lambda argument. */
+    fun chooseMove(
+        state: GomokuState,
+        onDiagnostics: ((GomokuSearchDiagnostics) -> Unit)?,
+        timeBudgetMillis: Long = 1_500,
         shouldCancel: () -> Boolean = { false },
     ): GridCell? {
         val budget = GomokuSearchBudget(shouldCancel, timeBudgetMillis.coerceIn(100, 5_000))

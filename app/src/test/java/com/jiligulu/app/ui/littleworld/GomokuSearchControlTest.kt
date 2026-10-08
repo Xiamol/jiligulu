@@ -200,6 +200,8 @@ class GomokuSearchControlTest {
 
         // This exact positional form was supported before diagnostics were introduced.
         assertNull(GomokuStrongMoveHelper.chooseMove(empty, 1_000, { true }))
+        assertNull(GomokuStrongMoveHelper.chooseMove(empty) { true })
+        assertNull(GomokuStrongMoveHelper.chooseMove(empty, shouldCancel = { true }))
         reports.clear()
         val cancelled = GomokuStrongMoveHelper.chooseMove(empty, onDiagnostics = { reports.add(it) }) { true }
         assertNull(cancelled)
