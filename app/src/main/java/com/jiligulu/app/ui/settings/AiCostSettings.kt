@@ -19,6 +19,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -198,8 +199,12 @@ private fun CostChart(start: LocalDate, days: Int, rows: List<AiCostGroup>, sele
     }
     Row(Modifier.fillMaxWidth()) { dates.forEachIndexed { index, date ->
         val pending = unknown(grouped[date.toString()].orEmpty())
-        Text(if (pending > 0) "?" else if (days == 7 || index % 5 == 0 || index == days - 1) date.dayOfMonth.toString() else "·",
-            Modifier.weight(1f).clickable { onSelect(date) }, fontSize = 9.sp, color = if (pending > 0) tint else MaterialTheme.colorScheme.primary)
+        val dateLabel = if (days == 7 || index % 5 == 0 || index == days - 1) date.dayOfMonth.toString() else "·"
+        val label = if (pending > 0 && days == 7) "$dateLabel?" else if (pending > 0 && dateLabel == "·") "?" else dateLabel
+        // The canvas owns day selection. Thirty separately enlarged tap targets shift
+        // and overlap narrow date slots, so labels stay centered over their bars.
+        Text(label, Modifier.weight(1f), fontSize = 9.sp, textAlign = TextAlign.Center, maxLines = 1,
+            color = if (pending > 0) tint else MaterialTheme.colorScheme.primary)
     } }
 }
 

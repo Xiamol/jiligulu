@@ -254,13 +254,9 @@ class FloatingCaptureService : Service() {
 }
 
 internal fun captureNotification(context: Context, title: String, text: String, service: Class<*>): Notification {
-    val manager = context.getSystemService(NotificationManager::class.java)
     // Foreground services require LOW or higher: MIN can cause an additional system
     // app-running notice. This dedicated LOW channel is silent and never heads-up.
-    val channel = "screen-capture-silent-low"
-    manager.createNotificationChannel(NotificationChannel(channel, "悬浮记账（静默）", NotificationManager.IMPORTANCE_LOW).apply {
-        setSound(null, null); enableVibration(false); setShowBadge(false)
-    })
+    val channel = CaptureNotificationChannels.ensure(context, service == FloatingCaptureService::class.java)
     val open = PendingIntent.getActivity(context, 3100, Intent(context, MainActivity::class.java), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
     val stop = PendingIntent.getService(context, 3101, Intent(context, service).setAction("stop"), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
     val builder = Notification.Builder(context, channel).setSmallIcon(R.mipmap.ic_launcher).setContentTitle(title).setContentText(text)

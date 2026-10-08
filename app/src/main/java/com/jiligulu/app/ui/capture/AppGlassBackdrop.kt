@@ -34,12 +34,14 @@ internal object AppGlassBackdrop {
     private val viewLocation=IntArray(2)
     private val windowLocation=IntArray(2)
     private var inFlight=false
+    private var copyFailures=0
     private var epoch=0L
     private var drawnFrame=0L
     private var committedFrame=0L
     private var lastCommitAt=0L
     private var motionUntil=0L
     private var publishedTicket:OwnGlassFrameTicket?=null
+    private var publishedSourceChangedAt:Long?=null
     private var lastRequest=0L
     private var buffers=arrayOfNulls<Bitmap>(2)
     private var nextBuffer=0
@@ -53,6 +55,8 @@ internal object AppGlassBackdrop {
     private var drawListener:ViewTreeObserver.OnDrawListener?=null
     private var queued=false
     private var refreshPending=false
+    private var expiryTask:Runnable?=null
+    private var expiryTicket:OwnGlassFrameTicket?=null
     private val refreshTask=Runnable {
         refreshPending=false
         watched.get()?.takeIf {it.isAttachedToWindow && it.isShown}?.refreshBackdrop()
@@ -82,8 +86,33 @@ internal object AppGlassBackdrop {
     private fun cancelRefresh() {
         handler.removeCallbacks(refreshTask);handler.removeCallbacks(drawTask)
         refreshPending=false;queued=false
+        expiryTask?.let(handler::removeCallbacks);expiryTask=null;expiryTicket=null
     }
-    private fun forgetPublishedFrame() {publishedBitmap=null;publishedRect=null;publishedTicket=null}
+    private fun forgetPublishedFrame() {
+        publishedBitmap=null;publishedRect=null;publishedTicket=null;publishedSourceChangedAt=null
+        expiryTask?.let(handler::removeCallbacks);expiryTask=null;expiryTicket=null
+    }
+    /** One deadline only after source content changes; a still scene never starts a timer. */
+    private fun armExpiry() {
+        val ticket=publishedTicket ?: return
+        if(ticket.committedFrame==committedFrame) {
+            expiryTask?.let(handler::removeCallbacks);expiryTask=null;expiryTicket=null
+            return
+        }
+        if(expiryTicket===ticket) return
+        expiryTask?.let(handler::removeCallbacks)
+        expiryTicket=ticket
+        val task=Runnable {
+            expiryTask=null;expiryTicket=null
+            if(publishedTicket===ticket) {
+                if(!publishedIsFresh()) {forgetPublishedFrame();watched.get()?.clearOwnBackdrop()}
+                else if(publishedSourceChangedAt!=null) armExpiry()
+            }
+        }
+        expiryTask=task
+        val deadline=(publishedSourceChangedAt ?: ticket.completedAtMillis)+OwnGlassFramePolicy.holdMillis(targetFps)+1
+        handler.postDelayed(task,(deadline-SystemClock.uptimeMillis()).coerceAtLeast(0))
+    }
     /** Coalesce only requested work. There is no timer while the scene and bubble are idle. */
     private fun deferRefresh() {
         refreshPending=true
@@ -108,7 +137,7 @@ internal object AppGlassBackdrop {
     }
     private fun switchWindow(window:Window?) {
         epoch++
-        drawnFrame=0L;committedFrame=0L;lastCommitAt=0L;motionUntil=0L
+        drawnFrame=0L;committedFrame=0L;lastCommitAt=0L;motionUntil=0L;copyFailures=0
         cancelRefresh()
         forgetPublishedFrame()
         source.get()?.let {old ->drawListener?.let {if(old.decorView.viewTreeObserver.isAlive) old.decorView.viewTreeObserver.removeOnDrawListener(it)}}
@@ -124,7 +153,12 @@ internal object AppGlassBackdrop {
                 val now=SystemClock.uptimeMillis()
                 if(lastCommitAt>0L&&now-lastCommitAt<50L)motionUntil=now+80L
                 lastCommitAt=now;committedFrame=maxOf(committedFrame,frame)
+                // A quiet texture can be hours old. Its first changed frame starts the
+                // grace interval now, instead of briefly clearing it at the start of a swipe.
+                if(publishedTicket?.committedFrame?.let { committedFrame>it }==true && publishedSourceChangedAt==null)
+                    publishedSourceChangedAt=now
                 if(!publishedIsFresh())watched.get()?.clearOwnBackdrop()
+                armExpiry()
                 if(!queued){queued=true;handler.post(drawTask)}
             }
             // Android recommends the commit callback with PixelCopy: OnDraw itself has
@@ -141,7 +175,7 @@ internal object AppGlassBackdrop {
     fun pause(window:Window) {if(owner.get()===window) {preferenceJob?.cancel();preferenceJob=null;owner.clear();switchWindow(null)}}
     fun available()=source.get()?.decorView?.isShown==true
     private fun publishedIsFresh():Boolean =publishedTicket?.let {
-        OwnGlassFramePolicy.isFresh(it,epoch,committedFrame,SystemClock.uptimeMillis(),targetFps)
+        OwnGlassFramePolicy.canDisplay(it,epoch,committedFrame,SystemClock.uptimeMillis(),targetFps,publishedSourceChangedAt)
     }==true
     fun matchesCurrentContent(bitmap:Bitmap?)=bitmap!=null&&publishedBitmap===bitmap&&publishedIsFresh()
     /** Reproject the last trustworthy crop at the current coordinates, never its old offset. */
@@ -186,7 +220,7 @@ internal object AppGlassBackdrop {
         val ticket=OwnGlassFrameTicket(epoch,committedFrame,lastRequest)
         try { PixelCopy.request(window,rect,bitmap,{result ->
             scope.launch {
-            if(result==PixelCopy.SUCCESS && OwnGlassFramePolicy.isFresh(ticket,epoch,committedFrame,SystemClock.uptimeMillis(),targetFps) && source.get()===window && view.canSampleOwnBackdrop) {
+            if(result==PixelCopy.SUCCESS && OwnGlassFramePolicy.acceptsResult(ticket,epoch,committedFrame,SystemClock.uptimeMillis()) && source.get()===window && view.canSampleOwnBackdrop) {
                 val previous=publishedBitmap
                 val sameGeometry = publishedRect==rect && publishedOffsetX==offsetX && publishedOffsetY==offsetY &&
                     publishedViewWidth==view.width && publishedViewHeight==view.height && !view.isPressed &&
@@ -196,14 +230,20 @@ internal object AppGlassBackdrop {
                 val unchanged = sameGeometry && SystemClock.uptimeMillis()>motionUntil && withContext(Dispatchers.Default) {
                     runCatching { previous!!.sameAs(bitmap) }.getOrDefault(false)
                 }
-                if(!OwnGlassFramePolicy.isFresh(ticket,epoch,committedFrame,SystemClock.uptimeMillis(),targetFps) || source.get()!==window || !view.isAttachedToWindow) {
-                    inFlight=false;forgetPublishedFrame();callback(null,0f,0f)
+                if(!OwnGlassFramePolicy.acceptsResult(ticket,epoch,committedFrame,SystemClock.uptimeMillis()) || source.get()!==window || !view.isAttachedToWindow) {
+                    inFlight=false
+                    val held=cachedFor(view)
+                    if(held!=null) callback(held.bitmap,held.offsetX,held.offsetY)
+                    else {forgetPublishedFrame();callback(null,0f,0f)}
                     if(refreshPending) deferRefresh()
                     return@launch
                 }
+                copyFailures=0
+                val completed=ticket.copy(completedAtMillis=SystemClock.uptimeMillis())
+                publishedSourceChangedAt=completed.completedAtMillis.takeIf { committedFrame>completed.committedFrame }
                 if(!unchanged) {
                     publishedBitmap=bitmap;publishedRect=rect
-                    publishedTicket=ticket
+                    publishedTicket=completed
                     publishedOffsetX=offsetX;publishedOffsetY=offsetY
                     publishedViewWidth=view.width;publishedViewHeight=view.height
                     nextBuffer=1-index
@@ -218,18 +258,29 @@ internal object AppGlassBackdrop {
                     }
                 }
                 else {
-                    publishedTicket=ticket
+                    publishedTicket=completed
                     if(!view.hasOwnBackdrop(previous))cachedFor(view)?.let {callback(it.bitmap,it.offsetX,it.offsetY)}
                 }
                 // No callback means no shader rebind or overlay invalidate when a page
                 // redraw changed only pixels outside this small lens region.
+                armExpiry()
             }
-            else {forgetPublishedFrame();callback(null,0f,0f);if(source.get()!==window) handler.post {watched.get()?.refreshBackdrop()}}
+            else {
+                val held=cachedFor(view)
+                if(held!=null) callback(held.bitmap,held.offsetX,held.offsetY)
+                else {forgetPublishedFrame();callback(null,0f,0f)}
+                if(source.get()!==window) handler.post {watched.get()?.refreshBackdrop()}
+                else if(view.canSampleOwnBackdrop && ++copyFailures<3) refreshPending=true
+            }
             inFlight=false
             if(refreshPending) deferRefresh()
             }
         },handler) } catch (_:Exception) {
-            inFlight=false;forgetPublishedFrame();callback(null,0f,0f)
+            inFlight=false
+            val held=cachedFor(view)
+            if(held!=null) callback(held.bitmap,held.offsetX,held.offsetY)
+            else {forgetPublishedFrame();callback(null,0f,0f)}
+            if(view.canSampleOwnBackdrop && ++copyFailures<3) refreshPending=true
             if(refreshPending) deferRefresh()
         }
     }

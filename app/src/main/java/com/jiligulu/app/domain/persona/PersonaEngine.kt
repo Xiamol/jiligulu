@@ -90,7 +90,7 @@ class PersonaEngine(private val library: QuipLibrary) {
         val n = if (nicknameWithSuffix.isBlank()) "" else "，$nicknameWithSuffix"
         return template.replace("{n}", n)
             .replace(Regex("，{2,}"), "，")
-            .replace(Regex("([。！？.!?])[,，]+")) { it.groupValues[1] }
+            .replace(Regex("([。！？.!?：:])[,，]+")) { it.groupValues[1] }
             .trimStart(' ', '\n', '\r', '，', ',', '、', '；', ';', '：', ':')
     }
 

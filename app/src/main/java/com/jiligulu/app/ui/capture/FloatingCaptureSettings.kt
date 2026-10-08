@@ -107,8 +107,36 @@ fun FloatingCaptureSettings() {
         if (!ready && !hidden) TextButton(onClick = { runCatching { prepare() }.onFailure { error = "暂时无法打开授权页面，请重试" } }) { Text("准备截屏") }
     }
     HorizontalDivider(Modifier.padding(vertical = 4.dp))
+    FloatingNotificationSettings()
     GlassSamplingSettings(glassPrefs, enabled = Build.VERSION.SDK_INT >= 33)
     error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+}
+
+@Composable
+private fun FloatingNotificationSettings() {
+    val context = LocalContext.current
+    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    var shown by remember { mutableStateOf(CaptureNotificationChannels.floatingShown(context)) }
+    var error by remember { mutableStateOf(false) }
+    DisposableEffect(context, lifecycle) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) shown = CaptureNotificationChannels.floatingShown(context)
+        }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
+    }
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text("悬浮常驻通知", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+        SettingHelpButton("隐藏悬浮常驻通知", "Android 要求持续悬浮服务提交通知。点右侧进入系统通知类别，关闭「阿噜悬浮记账」，这条常驻通知就不会出现在通知中心。喝水、回信等是独立类别。\n\n这是系统管理的开关，App 不能代替你修改。Android 13 起的「正在运行的应用」管理提示仍由系统显示。主动截图的共享标识也由系统管理。")
+        TextButton(modifier = Modifier.testTag("floating-notification-settings"), onClick = {
+            CaptureNotificationChannels.ensure(context, floating = true)
+            runCatching { context.startActivity(CaptureNotificationChannels.floatingSettings(context)) }
+                .recoverCatching { context.startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)) }
+                .onFailure { error = true }
+        }) { Text(if (shown) "去隐藏" else "已隐藏") }
+    }
+    if (error) Text("请在系统通知设置中关闭「阿噜悬浮记账」类别", style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.error)
 }
 
 @Composable
@@ -121,7 +149,7 @@ private fun GlassSamplingSettings(prefs: AppGlassPrefs, enabled: Boolean) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text("采样速度", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
         Text("次/秒", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        SettingHelpButton("采样速度", "设置液态玻璃每秒采样的目标次数，默认 30。它与外观页的屏幕刷新率（Hz）是两个设置；实际采样速度受设备画面与处理速度限制，较高档位会增加耗电，静止时不持续重绘。\n\n仅对 App 内的背景折射起效；App 外保持透明材质，不持续采集屏幕。取样无需屏幕共享授权。拖动时固定透明材质，松手后渐显折射。选项立即保存。")
+        SettingHelpButton("采样速度", "设置液态玻璃每秒采样的目标次数，默认 15。它与外观页的屏幕刷新率（Hz）是两个设置；实际采样速度受设备画面与处理速度限制，较高档位会增加耗电，静止时不持续重绘。\n\n仅对 App 内的背景折射起效；App 外保持透明材质，不持续采集屏幕。取样无需屏幕共享授权。移动图标时按当前位置取样，滑动页面时由新采样连续替换，边缘和透明度保持稳定。选项立即保存。")
     }
     Row(Modifier.fillMaxWidth().testTag("app-glass-frame-rate"), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         AppGlassFrameRate.entries.forEach { rate ->
