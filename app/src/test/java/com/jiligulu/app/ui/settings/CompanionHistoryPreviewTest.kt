@@ -10,6 +10,7 @@ import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsNodeInteraction
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
@@ -18,7 +19,6 @@ import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasTestTag
-import androidx.compose.ui.test.hasToggleableState
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
@@ -107,7 +107,8 @@ class CompanionHistoryPreviewTest {
     }
 
     private fun checkbox(id: String): SemanticsNodeInteraction = compose.onNode(
-        hasToggleableState() and hasAnyAncestor(hasTestTag("companion-history-$id")),
+        SemanticsMatcher("has checkbox state") { it.config.contains(SemanticsProperties.ToggleableState) } and
+            hasAnyAncestor(hasTestTag("companion-history-$id")),
         useUnmergedTree = true)
 
     private fun awaitSaved(prefs: UserPrefs, expected: (CompanionMemoryState) -> Boolean) {
