@@ -17,8 +17,17 @@ class DraftHistoryCodecTest {
     @Test fun payloadFromEarlierVersionGetsNewFieldDefaults() {
         val drafts = DraftHistoryCodec.decode("""{"drafts":[{"amountText":"9","type":"EXPENSE","detail":"午饭"}]}""")
         assertNull(drafts.single().timestamp)
+        assertNull(drafts.single().photoUri)
         assertFalse(drafts.single().timeNeedsReview)
         assertTrue(drafts.single().isValid)
+    }
+    @Test fun eachDraftKeepsItsOwnPhotoThroughAnUnrelatedDetailEdit() {
+        val original = DraftUi(amountText = "9", photoUri = "/private/photos/a.jpg")
+        val second = DraftUi(amountText = "20", photoUri = "/private/photos/b.jpg")
+        val restored = DraftHistoryCodec.decode(DraftHistoryCodec.encode(listOf(original.copy(detail = "午饭"), second)))
+        assertEquals(original.photoUri, restored.first().photoUri)
+        assertEquals("午饭", restored.first().detail)
+        assertEquals(second, restored.last())
     }
 
     @Test fun fieldsFromFutureVersionDoNotDestroyHistory() {

@@ -49,7 +49,7 @@ fun ImageAttachment(enabled: Boolean, onText: (String) -> Unit) {
                     preview?.let { Image(it.asImageBitmap(), "待识别的账单图片", Modifier.size(76.dp)) }
                     Column(Modifier.weight(1f).padding(start = 12.dp)) {
                         Text("让阿噜读一读 🧾", style = MaterialTheme.typography.titleSmall)
-                        Text("点击识别后发给 DeepSeek；结果可修改，确认后才记账。", style = MaterialTheme.typography.bodySmall)
+                        Text("点击识别后发给当前 AI 服务；结果可修改，确认后才记账。", style = MaterialTheme.typography.bodySmall)
                     }
                 }
                 Row {

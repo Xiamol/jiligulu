@@ -40,7 +40,7 @@ class AiCompanionMemoryTest {
     private inner class Fixture(
         val results: List<AiParseResult>,
         private val beforeReply: () -> Unit = {},
-        writeMemory: (suspend (Long, List<CompanionFact>) -> Unit)? = null
+        writeMemory: (suspend (Long, List<CompanionFact>) -> Boolean)? = null
     ) {
         val prefs = UserPrefs(context)
         val requests = mutableListOf<JsonObject>()
@@ -69,7 +69,7 @@ class AiCompanionMemoryTest {
             ai = AiRepository(context, CategoryRepository(db.categoryDao()), BillRepository(db.billDao()), prefs,
                 ChatHistoryRepository(db), CategoryAdminRepository(db), clientFactory = { DeepSeekClient(it, client) },
                 ledgerLookupRepository = LedgerLookupRepository(db),
-                rememberCompanionFacts = writeMemory ?: { revision, facts -> prefs.rememberCompanionFactsIfCurrent(revision, facts); Unit })
+                rememberCompanionFacts = writeMemory ?: { revision, facts -> prefs.rememberCompanionFactsIfCurrent(revision, facts) })
         }
         fun content(request: Int, message: Int) = requests[request]["messages"]!!.jsonArray[message].jsonObject["content"]!!.jsonPrimitive.content
         fun currentContent(request: Int) = requests[request]["messages"]!!.jsonArray.last().jsonObject["content"]!!.jsonPrimitive.content
@@ -111,6 +111,34 @@ class AiCompanionMemoryTest {
         assertEquals(1, fixture.requests.size)
     }
 
+    @Test fun aFailedLocalCompareAndSetCannotAdoptTheClearedSettingsRevision() = runBlocking {
+        var firstWrite = true
+        val fixture = Fixture(listOf(AiParseResult(reply = "好呀", memoryUpdates = listOf(cycling))), writeMemory = { revision, facts ->
+            val prefs = UserPrefs(context)
+            if (firstWrite) { firstWrite = false; prefs.clearCompanionMemories() }
+            prefs.rememberCompanionFactsIfCurrent(revision, facts)
+        })
+        val initial = fixture.prefs.companionMemory.first().revision
+        fixture.ai.parse("我喜欢骑车", now, zone).getOrThrow()
+        val after = fixture.prefs.companionMemory.first()
+        assertEquals(initial + 1, after.revision)
+        assertTrue(after.facts.isEmpty())
+        assertEquals(1, fixture.requests.size)
+    }
+
+    @Test fun aClearImmediatelyAfterLocalSuccessStillInvalidatesTheLaterApiUpdate() = runBlocking {
+        var firstWrite = true
+        val fixture = Fixture(listOf(AiParseResult(reply = "好呀", memoryUpdates = listOf(cycling))), writeMemory = { revision, facts ->
+            val prefs = UserPrefs(context)
+            val applied = prefs.rememberCompanionFactsIfCurrent(revision, facts)
+            if (firstWrite) { firstWrite = false; prefs.clearCompanionMemories() }
+            applied
+        })
+        fixture.ai.parse("我是大学生，我喜欢骑车", now, zone).getOrThrow()
+        assertTrue(fixture.prefs.companionMemory.first().facts.isEmpty())
+        assertEquals(1, fixture.requests.size)
+    }
+
     @Test fun memoryWriteFailureDoesNotDiscardAnOtherwiseValidBillDraft() = runBlocking {
         listOf(java.io.IOException("fixture"), CancellationException("optional store only")).forEach { failure ->
             val fixture = Fixture(listOf(AiParseResult(bills = listOf(AiBillDraft(amountYuan = 8.0, detail = "午饭", category = "吃饭")),
@@ -124,7 +152,7 @@ class AiCompanionMemoryTest {
         }
     }
 
-    @Test fun cancellationBeforeTheReplyNeverStoresTheProposedMemory() = runBlocking {
+    @Test fun cancellingTheApiReplyDoesNotEraseTheUsersAlreadySentSelfDisclosure() = runBlocking {
         val entered = CountDownLatch(1); val release = CountDownLatch(1)
         val fixture = Fixture(listOf(AiParseResult(reply = "好呀", memoryUpdates = listOf(cycling))), beforeReply = {
             entered.countDown(); check(release.await(5, TimeUnit.SECONDS))
@@ -132,7 +160,22 @@ class AiCompanionMemoryTest {
         val request = async(Dispatchers.Default) { fixture.ai.parse("我喜欢骑车", now, zone) }
         assertTrue(withContext(Dispatchers.IO) { entered.await(5, TimeUnit.SECONDS) })
         request.cancel(); release.countDown(); request.join()
-        assertTrue(fixture.prefs.companionMemory.first().facts.isEmpty())
+        assertEquals(listOf("骑车"), fixture.prefs.companionMemory.first().facts.map { it.value })
+    }
+
+    @Test fun aValidReplyWithoutOptionalMemoryMetadataStillLearnsAndReopens() = runBlocking {
+        val fixture = Fixture(listOf(AiParseResult(reply = "记住啦")))
+        fixture.ai.parse("请记住：我是大学生，我喜欢骑车", now, zone).getOrThrow()
+        assertEquals(setOf("大学生", "骑车"), UserPrefs(context).companionMemory.first().facts.map { it.value }.toSet())
+        assertEquals(1, fixture.requests.size)
+    }
+
+    @Test fun missingApiCredentialDoesNotPreventExplicitLocalMemory() = runBlocking {
+        val fixture = Fixture(emptyList())
+        fixture.prefs.setApiKeyOverride("")
+        runCatching { fixture.ai.parse("我是大学生", now, zone) }
+        assertEquals(listOf("大学生"), fixture.prefs.companionMemory.first().facts.map { it.value })
+        assertTrue(fixture.requests.isEmpty())
     }
 
     @Test fun imageReceiptPathsNeverLearnPersonalFactsFromOcrOrStartAnExtraRequest() = runBlocking {

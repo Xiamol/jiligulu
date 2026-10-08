@@ -30,6 +30,28 @@ class ConversationLifecycleTest {
 
     @After fun close() { db.close(); context.deleteDatabase(name) }
 
+    @Test fun individualDraftPhotoPersistsToTheBillAndItsReferenceQueryOmitsChatText() = runBlocking {
+        val path = "/private/life-memories/photos/fixture.jpg"
+        val (user, _) = history.beginRequest("午饭9元", 100)
+        assertEquals("", history.getById(user.id)!!.draftPayload)
+        assertEquals("午饭9元", user.content)
+        val draft = com.jiligulu.app.ui.chat.DraftUi(amountText = "9", categoryName = "吃饭", detail = "午饭", photoUri = path)
+        val payload = com.jiligulu.app.ui.chat.DraftHistoryCodec.encode(listOf(draft))
+        val card = history.insert(ChatMessageEntity(kind = "DRAFT", status = "EDITING", draftPayload = payload))
+        val ai = AiRepository(context, CategoryRepository(db.categoryDao()), bills,
+            com.jiligulu.app.data.prefs.UserPrefs(context), history, CategoryAdminRepository(db))
+        val selected = ConfirmItem("9", BillType.EXPENSE, "吃饭", false, "", "", "", "午饭", "", true,
+            timestamp = 100, photoUri = path)
+        assertEquals(1, ai.confirm(card, listOf(selected), "午饭9元", payload))
+        // A replay reports the original saved count, without inserting another bill.
+        assertEquals(1, ai.confirm(card, listOf(selected), "午饭9元", payload))
+        assertEquals(1, db.billDao().observeAll().first().size)
+        assertEquals(path, db.billDao().observeAll().first().single().photoUri)
+        val refs = history.mediaReferenceRows()
+        assertEquals(setOf("DRAFT"), refs.map { it.kind }.toSet())
+        assertTrue(refs.all { "午饭9元" !in it.draftPayload })
+    }
+
     @Test fun clearingHistoryKeepsLedgerTrashAndBothKindsOfActiveDraft() = runBlocking {
         withTimeout(10_000) {
             val live = bills.addManual(1200, BillType.EXPENSE, 1, "午饭", "")

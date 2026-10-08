@@ -224,7 +224,7 @@ class CashFlowDraggingTest {
         compose.runOnIdle { assertEquals(YearMonth.of(2027, 1), reportedMonth) }
         // Both are actual page contents while the finger is still down.
         compose.onNodeWithContentDescription("12月31日，1元").assertIsDisplayed()
-        compose.onNodeWithContentDescription("1月1日，1元").assertIsDisplayed()
+        compose.onNodeWithContentDescription("1月1日，1元，已选中").assertIsDisplayed()
         pager.performTouchInput { up() }
         compose.waitForIdle()
         compose.runOnIdle {
@@ -233,7 +233,7 @@ class CashFlowDraggingTest {
         }
     }
 
-    @Test fun dailyMonthEndSpringsFirstThenTheSecondGestureCanRevealOnlyTheNeighbourMonth() {
+    @Test fun crossingConsumesTheRestOfThePointerGestureAndItsFlingAtBothMonthEdges() {
         val first = LocalDate.of(2027, 1, 27)
         val today = LocalDate.of(2027, 1, 29)
         var anchor by mutableStateOf(CashFlowChartAnchor(first, YearMonth.from(first), dayCount = 5))
@@ -241,14 +241,17 @@ class CashFlowDraggingTest {
         var visible: Pair<Long, Long>? = null
         var parentDrag = 0f
         var bounds: Rect? = null
+        var retained: CashFlowViewport? = null
         compose.setContent {
+            val viewport = rememberCashFlowViewport(anchor)
+            SideEffect { retained = viewport }
             MaterialTheme {
                 Box(Modifier.fillMaxSize().forwardMainPageSwipe(enabled = { true },
                     onDrag = { parentDrag += it }, onDragEnd = {}, allowRight = true,
                     startAllowed = { bounds?.contains(it) != true })) {
                 CashFlowBarChart(bars(), selected, { selected = it }, Color.Red, Color.LightGray,
                     Modifier.fillMaxWidth().height(202.dp).onGloballyPositioned { bounds = it.boundsInRoot() },
-                    anchor = anchor, todayMillis = today.millis(),
+                    anchor = anchor, viewport = viewport, todayMillis = today.millis(),
                     onCompactViewport = { start, end, _ -> visible = start to end; anchor = anchor.copy(firstDay = start.date()) },
                     onCompactMonthCross = { month, direction ->
                         val next = if (direction > 0) month.atDay(1) else month.atEndOfMonth().minusDays(4)
@@ -272,7 +275,7 @@ class CashFlowDraggingTest {
         compose.waitForIdle()
         strip.performTouchInput {
             down(Offset(width * .9f, height * .5f))
-            moveTo(Offset(width * .1f, height * .5f), delayMillis = 30)
+            moveTo(Offset(width * .5f, height * .5f), delayMillis = 30)
         }
         compose.runOnIdle {
             assertEquals(LocalDate.of(2027, 2, 1), requireNotNull(visible).first.date())
@@ -280,11 +283,21 @@ class CashFlowDraggingTest {
             assertEquals(LocalDate.of(2027, 2, 1).millis(), selected)
             assertEquals(0f, parentDrag)
         }
+        // Keep the same finger down after the cross has remeasured, then move rapidly far
+        // beyond the edge. The new month's first window must consume all of this movement.
+        strip.performTouchInput { moveTo(Offset(-width * .3f, height * .5f), delayMillis = 16) }
+        compose.runOnIdle {
+            assertEquals(LocalDate.of(2027, 2, 1), requireNotNull(visible).first.date())
+            assertEquals(LocalDate.of(2027, 2, 5), requireNotNull(visible).second.date())
+            assertEquals(0, requireNotNull(retained).days.firstVisibleItemScrollOffset)
+            assertEquals(0f, parentDrag)
+        }
         strip.performTouchInput { up() }
         compose.waitForIdle()
         compose.runOnIdle {
             assertEquals(LocalDate.of(2027, 2, 1), requireNotNull(visible).first.date())
             assertEquals(LocalDate.of(2027, 2, 5), requireNotNull(visible).second.date())
+            assertEquals(0, requireNotNull(retained).days.firstVisibleItemScrollOffset)
         }
         strip.performTouchInput {
             down(Offset(width * .1f, height * .5f))
@@ -295,7 +308,7 @@ class CashFlowDraggingTest {
         compose.waitForIdle()
         strip.performTouchInput {
             down(Offset(width * .1f, height * .5f))
-            moveTo(Offset(width * .9f, height * .5f), delayMillis = 250)
+            moveTo(Offset(width * .5f, height * .5f), delayMillis = 30)
         }
         compose.runOnIdle {
             assertEquals(LocalDate.of(2027, 1, 27), requireNotNull(visible).first.date())
@@ -303,7 +316,21 @@ class CashFlowDraggingTest {
             assertEquals(LocalDate.of(2027, 1, 31).millis(), selected)
             assertEquals(0f, parentDrag)
         }
+        strip.performTouchInput { moveTo(Offset(width * 1.3f, height * .5f), delayMillis = 16) }
+        compose.runOnIdle {
+            assertEquals(LocalDate.of(2027, 1, 27), requireNotNull(visible).first.date())
+            assertEquals(LocalDate.of(2027, 1, 31), requireNotNull(visible).second.date())
+            assertEquals(0, requireNotNull(retained).days.firstVisibleItemScrollOffset)
+            assertEquals(0f, parentDrag)
+        }
         strip.performTouchInput { up() }
+        compose.waitForIdle()
+        compose.runOnIdle {
+            assertEquals(LocalDate.of(2027, 1, 27), requireNotNull(visible).first.date())
+            assertEquals(LocalDate.of(2027, 1, 31), requireNotNull(visible).second.date())
+            assertEquals(LocalDate.of(2027, 1, 31).millis(), selected)
+            assertEquals(0, requireNotNull(retained).days.firstVisibleItemScrollOffset)
+        }
     }
 
     private fun bars(): List<DayBar> = (0 until 151).map { offset ->

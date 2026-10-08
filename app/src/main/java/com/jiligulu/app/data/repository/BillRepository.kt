@@ -152,7 +152,8 @@ class BillRepository(
         detail: String,
         note: String,
         rawText: String,
-        timestamp: Long = System.currentTimeMillis()
+        timestamp: Long = System.currentTimeMillis(),
+        photoUri: String? = null
     ): Long = billDao.insert(
         BillEntity(
             amountFen = amountFen,
@@ -162,7 +163,8 @@ class BillRepository(
             note = note.trim(),
             timestamp = timestamp,
             source = BillSource.AI_CHAT,
-            rawText = rawText
+            rawText = rawText,
+            photoUri = photoUri
         )
     )
 

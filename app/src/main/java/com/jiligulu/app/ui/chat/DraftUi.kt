@@ -25,7 +25,8 @@ data class DraftUi(
     /** null means the instant of confirmation, rather than the time the screen opened. */
     val timestamp: Long? = null,
     val timeNeedsReview: Boolean = false,
-    val timeHint: String = "未提及时间，确认入账时记录此刻"
+    val timeHint: String = "未提及时间，确认入账时记录此刻",
+    val photoUri: String? = null
 ) {
     /** Receipt metadata remains stored, while only a human note or actionable warning is shown. */
     val displayNote: String get() = draftNoteForDisplay(note)

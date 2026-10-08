@@ -17,7 +17,7 @@ import org.robolectric.annotation.Config
 @Config(sdk = [28], application = Application::class, manifest = Config.NONE)
 class FutureNoteNotificationTest {
     @Test fun clickingAReplyNotificationOpensTheExactSavedLetterWithoutReadingIt() {
-        val app = RuntimeEnvironment.getApplication<Application>()
+        val app = RuntimeEnvironment.getApplication()
         val note = FutureNote("reply/with spaces", "阿噜的回信", "只在拆信时展示的正文", 1,
             notificationEnabled = true, sourcePaperId = "paper")
         assertTrue(FutureNoteReminder.notify(app, note))
@@ -33,7 +33,7 @@ class FutureNoteNotificationTest {
     }
 
     @Test fun collidingJavaHashIdsStillOpenDifferentLetters() {
-        val app = RuntimeEnvironment.getApplication<Application>()
+        val app = RuntimeEnvironment.getApplication()
         assertEquals("Aa".hashCode(), "BB".hashCode())
         val one = FutureNote("Aa", "第一封", "first", 1, notificationEnabled = true)
         val two = FutureNote("BB", "第二封", "second", 1, notificationEnabled = true)
@@ -50,7 +50,7 @@ class FutureNoteNotificationTest {
     }
 
     @Test fun readOrDeleteCancellationOnlyRemovesTheMatchingLetterNotification() {
-        val app = RuntimeEnvironment.getApplication<Application>()
+        val app = RuntimeEnvironment.getApplication()
         val one = FutureNote("one", "第一封", "first", 1, notificationEnabled = true)
         val two = FutureNote("two", "第二封", "second", 1, notificationEnabled = true)
         FutureNoteReminder.notify(app, one)

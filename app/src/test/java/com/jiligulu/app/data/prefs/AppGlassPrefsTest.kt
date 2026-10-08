@@ -23,9 +23,9 @@ import org.robolectric.annotation.Config
 @Config(sdk=[28], application=Application::class, manifest=Config.NONE)
 class AppGlassPrefsTest {
     @get:Rule val temporary=TemporaryFolder()
-    @Test fun targetsDefaultToThirtyAndHaveHonestNotFasterThanRequestedIntervals() {
-        assertEquals(AppGlassFrameRate.FPS_30, AppGlassFrameRate.fromFps(null))
-        assertEquals(AppGlassFrameRate.FPS_30, AppGlassFrameRate.fromFps(999))
+    @Test fun targetsDefaultToFifteenAndHaveHonestNotFasterThanRequestedIntervals() {
+        assertEquals(AppGlassFrameRate.FPS_15, AppGlassFrameRate.fromFps(null))
+        assertEquals(AppGlassFrameRate.FPS_15, AppGlassFrameRate.fromFps(999))
         for(rate in AppGlassFrameRate.entries) {
             assertTrue(rate.intervalMillis*rate.fps>=1000)
             assertTrue(rate.intervalNanos>0)

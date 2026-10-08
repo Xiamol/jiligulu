@@ -63,7 +63,7 @@ class RoomAvatarSessionTest {
     }
 
     @Test fun onlineGomokuExchangesBothPhotosThenMakesAnOrdinaryLegalMove() {
-        val app = RuntimeEnvironment.getApplication<Application>()
+        val app = RuntimeEnvironment.getApplication()
         val host = GomokuOnlineSession(app); val guest = GomokuOnlineSession(app); val channel = Channel()
         val one = photo(Color.RED); val two = photo(Color.BLUE)
         host.wireFactory = channel.factory; guest.wireFactory = channel.factory; host.firstPlayer = { 1 }
@@ -101,7 +101,7 @@ class RoomAvatarSessionTest {
     }
 
     @Test fun noCapabilityProofLeavesTheLegacyFiveFieldHelloAndGameplayUnchanged() {
-        val app = RuntimeEnvironment.getApplication<Application>()
+        val app = RuntimeEnvironment.getApplication()
         val host = GomokuOnlineSession(app); val guest = GomokuOnlineSession(app); val channel = Channel()
         val jpeg = photo(Color.GREEN)
         host.wireFactory = channel.factory; guest.wireFactory = channel.factory; host.firstPlayer = { 1 }
@@ -120,7 +120,7 @@ class RoomAvatarSessionTest {
     }
 
     @Test fun malformedPortraitsDoNotDisconnectOrConsumeLegalChessPackets() {
-        val app = RuntimeEnvironment.getApplication<Application>()
+        val app = RuntimeEnvironment.getApplication()
         val host = GomokuOnlineSession(app); val guest = GomokuOnlineSession(app); val channel = Channel()
         host.wireFactory = channel.factory; guest.wireFactory = channel.factory; host.firstPlayer = { 1 }
         try {
@@ -137,7 +137,7 @@ class RoomAvatarSessionTest {
     }
 
     @Test fun sessionExpiryDropsAnIncompletePhotoAndLateChunksWhileKeepingTheBoardPlayable() {
-        val app = RuntimeEnvironment.getApplication<Application>()
+        val app = RuntimeEnvironment.getApplication()
         val host = GomokuOnlineSession(app); val guest = GomokuOnlineSession(app); val channel = Channel()
         host.wireFactory = channel.factory; guest.wireFactory = channel.factory; host.firstPlayer = { 1 }
         try {
@@ -155,7 +155,7 @@ class RoomAvatarSessionTest {
     }
 
     @Test fun auxiliaryQueuePressureOnlyDropsThePortraitAndTheGameStillStartsAndMoves() {
-        val app = RuntimeEnvironment.getApplication<Application>()
+        val app = RuntimeEnvironment.getApplication()
         val host = GomokuOnlineSession(app); val guest = GomokuOnlineSession(app); val channel = Channel()
         host.wireFactory = channel.factory; guest.wireFactory = channel.factory; host.firstPlayer = { 1 }
         try {
@@ -172,7 +172,7 @@ class RoomAvatarSessionTest {
     }
 
     @Test fun onlineXiangqiSharesBothJpegsAndPreservesRedMoveAuthority() {
-        val app = RuntimeEnvironment.getApplication<Application>()
+        val app = RuntimeEnvironment.getApplication()
         val host = XiangqiOnlineSession(app); val guest = XiangqiOnlineSession(app); val channel = Channel()
         val one = photo(Color.RED); val two = photo(Color.BLUE)
         host.wireFactory = channel.factory; guest.wireFactory = channel.factory; host.firstPlayer = { 1 }
@@ -189,7 +189,7 @@ class RoomAvatarSessionTest {
     }
 
     @Test fun closingARoomCancelsRemainingPortraitTimersAndCannotSendIntoAnotherRoom() {
-        val app = RuntimeEnvironment.getApplication<Application>()
+        val app = RuntimeEnvironment.getApplication()
         val host = GomokuOnlineSession(app); val guest = GomokuOnlineSession(app); val channel = Channel()
         host.wireFactory = channel.factory; guest.wireFactory = channel.factory
         host.host("END123", avatarJpeg = photo(Color.RED)); guest.join("END123", avatarJpeg = photo(Color.BLUE))

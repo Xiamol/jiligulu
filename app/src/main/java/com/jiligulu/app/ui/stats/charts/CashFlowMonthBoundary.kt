@@ -72,7 +72,11 @@ internal fun Modifier.cashFlowMonthBoundary(viewport: CashFlowViewport, compress
         (from until to).sumOf { cashFlowDaySlotWidthPx(it, width, days) }.toFloat()
     else -(to until from).sumOf { cashFlowDaySlotWidthPx(it, width, days) }.toFloat()
     fun consume(delta: Float, source: NestedScrollSource): Offset {
-        if (!gesture.active || !delta.isFinite() || delta == 0f || !viewport.ready || viewport.navigating) return Offset.Zero
+        if (!delta.isFinite() || delta == 0f) return Offset.Zero
+        // Navigation stops the old scroll, but its pointer remains down. Keep consuming that
+        // gesture through the remeasure and release so it cannot shift the new month's window.
+        if (gesture.crossed) return Offset(delta, 0f)
+        if (!gesture.active || !viewport.ready || viewport.navigating) return Offset.Zero
         val direction = if (delta > 0f) 1 else -1
         if (source == NestedScrollSource.UserInput && motion.touching && gesture.primary == 0) gesture.primary = direction
         val grant = gesture.allowed.takeIf { it == gesture.primary } ?: 0
@@ -126,7 +130,8 @@ internal fun Modifier.cashFlowMonthBoundary(viewport: CashFlowViewport, compress
     }
     val connection = remember(viewport, compressed, days, motion, gesture) { object : NestedScrollConnection {
         override fun onPreScroll(available: Offset, source: NestedScrollSource) = consume(available.x, source)
-        override suspend fun onPreFling(available: Velocity) = if (gesture.active && gesture.blocked != 0) Velocity(available.x, 0f) else Velocity.Zero
+        override suspend fun onPreFling(available: Velocity) =
+            if (gesture.crossed || gesture.active && gesture.blocked != 0) Velocity(available.x, 0f) else Velocity.Zero
         override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
             if (!motion.touching) gesture.active = false
             return Velocity.Zero

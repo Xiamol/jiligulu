@@ -7,6 +7,18 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class CompanionMemoryPolicyTest {
+    @Test fun directSelfDisclosuresAreCapturedWithoutAiMetadata() {
+        val facts = CompanionMemoryPolicy.explicitFacts("请记住：我是大学生，我今年十九岁，我喜欢草莓，我不吃辣椒", 123)
+        assertEquals(setOf("大学生", "19岁", "草莓", "辣椒"), facts.map { it.value }.toSet())
+        assertTrue(facts.all { it.updatedAt == 123L && it.evidence in "请记住：我是大学生，我今年十九岁，我喜欢草莓，我不吃辣椒" })
+        assertEquals("学生", CompanionMemoryPolicy.explicitFacts("我是学生", 1).single().value)
+    }
+    @Test fun localExtractionAlsoRejectsQuestionsQuotesThirdPartiesAndOcr() {
+        listOf("我是女生吗？", "妈妈说：我是护士", "如果我是大学生", "他说：我喜欢草莓",
+            "【图片记账】我是大学生", "截图里写着：我是护士", "我是老师的学生").forEach {
+            assertTrue(it, CompanionMemoryPolicy.explicitFacts(it, 1).isEmpty())
+        }
+    }
     @Test fun ordinaryChineseSelfDisclosuresCanUpdateLifeStages() {
         assertEquals("21岁", remember("我今年二十一岁哦", "age", "21").single().value)
         assertEquals("18岁", remember("我现在十八岁", "age", "18").single().value)

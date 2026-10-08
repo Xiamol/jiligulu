@@ -62,8 +62,6 @@ internal fun BillContextSettings(enabled: Boolean = true) {
                     modifier = Modifier.weight(1f).testTag("bill-context-${window.key}"))
             }
         }
-        Text("最多${selected.maxBillCount}笔 · 更多范围会增加输入费用", style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant)
         error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
     }
 }

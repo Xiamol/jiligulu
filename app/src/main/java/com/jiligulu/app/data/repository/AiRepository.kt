@@ -61,7 +61,8 @@ data class ConfirmItem(
     val timestamp: Long? = null,
     /** 时间没识别清楚时必须让用户先选，不能默认成此刻。 */
     val timeNeedsReview: Boolean = false,
-    val timeHint: String = ""
+    val timeHint: String = "",
+    val photoUri: String? = null
 )
 
 /**
@@ -111,7 +112,7 @@ class AiRepository(
     private val ledgerLookupRepository: LedgerLookupRepository? = null,
     private val providerPrefs: com.jiligulu.app.data.prefs.AiProviderPrefs? = null,
     private val providerClientFactory: ((com.jiligulu.app.core.ai.AiProviderConnection) -> DeepSeekClient)? = null,
-    private val rememberCompanionFacts: suspend (Long, List<CompanionFact>) -> Unit = { revision, facts ->
+    private val rememberCompanionFacts: suspend (Long, List<CompanionFact>) -> Boolean = { revision, facts ->
         userPrefs.rememberCompanionFactsIfCurrent(revision, facts)
     }
 ) {
@@ -176,13 +177,25 @@ class AiRepository(
             }
         }.onFailure { if (it is CancellationException) throw it }
         // A single snapshot both renders current memory and protects the eventual write from settings changes.
-        val memory = try { userPrefs.companionMemory.first() }
+        var memory = try { userPrefs.companionMemory.first() }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { CompanionMemoryState(enabled = false) }
+        val explicit = if (memory.enabled) CompanionMemoryPolicy.explicitFacts(input, requestMillis) else emptyList()
+        if (explicit.isNotEmpty()) try {
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            if (rememberCompanionFacts(memory.revision, explicit)) {
+                // Only our own compare-and-set advances this request's authority. Never adopt
+                // a newer settings revision after a failed write or a concurrent clear/edit.
+                memory = memory.copy(revision = memory.revision + 1,
+                    facts = CompanionMemoryPolicy.merge(memory.facts, explicit))
+            }
+        } catch (_: CancellationException) { kotlinx.coroutines.currentCoroutineContext().ensureActive() }
+        catch (_: Exception) { /* Optional memory is independent of bookkeeping and API availability. */ }
         suspend fun complete(result: Result<AiParseResult>, earlierUpdates: List<com.jiligulu.app.core.ai.AiMemoryUpdate> = emptyList()): Result<AiParseResult> {
             val parsed = result.getOrNull() ?: return result
             if (memory.enabled) {
                 val facts = CompanionMemoryPolicy.accepted(input, earlierUpdates + parsed.memoryUpdates, requestMillis)
+                    .filterNot { fact -> memory.facts.any { it.id == fact.id && it.value == fact.value } }
                 if (facts.isNotEmpty()) try {
                     kotlinx.coroutines.currentCoroutineContext().ensureActive()
                     rememberCompanionFacts(memory.revision, facts)
@@ -515,8 +528,10 @@ class AiRepository(
         requestMillis: Long,
         zone: ZoneId
     ): ChatContext = try {
-        val bills = billRepository.recent(ChatContextBuilder.MAX_BILLS)
-        ChatContextBuilder.build(bills, categories, requestMillis, zone)
+        val window = com.jiligulu.app.data.prefs.BillContextPrefs(context).window.first()
+        val bills = billRepository.recent(window.maxBillCount)
+        ChatContextBuilder.build(bills, categories, requestMillis, zone,
+            windowDays = window.windowDays, maxBills = window.maxBillCount)
     } catch (cancelled: CancellationException) { throw cancelled
     } catch (_: Exception) { ChatContextBuilder.build(emptyList(), categories, requestMillis, zone) }
 
@@ -595,7 +610,8 @@ class AiRepository(
                     detail = item.detail,
                     note = item.note,
                     rawText = rawText,
-                    timestamp = item.timestamp ?: confirmedAt
+                    timestamp = item.timestamp ?: confirmedAt,
+                    photoUri = item.photoUri
                 )
             }
             valid.size

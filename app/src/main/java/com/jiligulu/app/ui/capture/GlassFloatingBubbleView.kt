@@ -61,9 +61,7 @@ class GlassFloatingBubbleView @JvmOverloads constructor(
     private var lens:GlassLensShader?=null
     private var backdrop:Bitmap?=null
     private var dragging=false
-    private var backdropMix=0f
-    private var backdropAnimator: ValueAnimator?=null
-    internal val canSampleOwnBackdrop get() = isAttachedToWindow && isShown && !dragging
+    internal val canSampleOwnBackdrop get() = isAttachedToWindow && isShown
     private val backdropRefreshTask=Runnable {refreshBackdrop()}
 
     init {
@@ -86,8 +84,7 @@ class GlassFloatingBubbleView @JvmOverloads constructor(
         side = min(w, h).toFloat()
         val cx = w / 2f
         val cy = h / 2f
-        // Platform background blur occupies the complete decor bounds. Its rounded corners,
-        // our fill and the optional AGSL lens must share these exact bounds, not separate insets.
+        // The shell and AGSL lens share one outline, without a second transparent inset.
         radius = GlassBubbleGeometry.cornerRadius(w, h)
         glassBounds.set(0f, 0f, w.toFloat(), h.toFloat())
         glassPath.reset()
@@ -146,12 +143,12 @@ class GlassFloatingBubbleView @JvmOverloads constructor(
         val cx = width / 2f
         val cy = height / 2f
         val body = canvas.save()
-        // The platform blur outline cannot deform with this View. Keep one stable shell
-        // and let the sprite flex inside it, avoiding a halo during a press or release.
+        // Keep one stable shell while the sprite flexes inside, avoiding a press halo.
         softShadow?.let { canvas.drawBitmap(it, 0f, 0f, bitmapPaint) }
         if (!AppGlassBackdrop.available() || (backdrop!=null&&!AppGlassBackdrop.matchesCurrentContent(backdrop))) clearOwnBackdrop()
-        if(backdropPaint.shader!=null&&!dragging) {
-            backdropPaint.alpha=(backdropMix*255).toInt().coerceIn(0,255)
+        AppGlassBackdrop.cachedFor(this)?.let { bindOwnBackdrop(it.bitmap,it.offsetX,it.offsetY, redraw = false) }
+        if(backdropPaint.shader!=null) {
+            backdropPaint.alpha=255
             canvas.drawPath(glassPath,backdropPaint)
         }
         canvas.drawRoundRect(glassBounds, radius, radius, glassPaint)
@@ -176,15 +173,14 @@ class GlassFloatingBubbleView @JvmOverloads constructor(
         canvas.restoreToCount(body)
     }
 
-    /** A drag keeps one transparent material throughout; asynchronous crops cannot toggle it. */
+    /** Moving reprojects the valid crop before sampling; the shell and opacity remain stable. */
     fun setGlassDragging(value: Boolean) {
         if(dragging==value) return
         dragging=value
-        if(value) { removeCallbacks(backdropRefreshTask); AppGlassBackdrop.suspendForDrag(this); clearBackdrop() }
-        else refreshBackdropAfterMove()
+        refreshBackdropAfterMove()
     }
     fun refreshBackdropAfterMove() {
-        if(android.os.Build.VERSION.SDK_INT<33 || !isAttachedToWindow || dragging) return
+        if(android.os.Build.VERSION.SDK_INT<33 || !isAttachedToWindow) return
         removeCallbacks(backdropRefreshTask)
         postOnAnimation(backdropRefreshTask)
     }
@@ -192,39 +188,30 @@ class GlassFloatingBubbleView @JvmOverloads constructor(
     fun refreshBackdrop() {
         if(android.os.Build.VERSION.SDK_INT<33 || !canSampleOwnBackdrop) return
         if (!AppGlassBackdrop.available()) { clearBackdrop(); return }
+        AppGlassBackdrop.cachedFor(this)?.let { bindOwnBackdrop(it.bitmap,it.offsetX,it.offsetY) }
         AppGlassBackdrop.copyBehind(this) {bitmap,x,y ->
             if(!canSampleOwnBackdrop) return@copyBehind
             if(bitmap==null || !AppGlassBackdrop.available()) clearOwnBackdrop()
             else bindOwnBackdrop(bitmap,x,y)
         }
     }
-    private fun bindOwnBackdrop(bitmap:Bitmap,x:Float,y:Float) {
-        val first=backdrop==null
+    private fun bindOwnBackdrop(bitmap:Bitmap,x:Float,y:Float, redraw:Boolean=true) {
         backdrop=bitmap
         runCatching {
                 val next=lens ?: GlassLensShader().also {lens=it;android.util.Log.d("GlassLens","Own-window refraction initialized")}
                 next.bind(bitmap,x,y,width,height,lightX,lightY)
                 backdropPaint.shader=next.shader
             }.onFailure {backdropPaint.shader=null;backdrop=null;android.util.Log.w("GlassLens","Shader unavailable",it)}
-        if(first&&backdrop!=null) {
-            backdropAnimator?.cancel()
-            if(!ValueAnimator.areAnimatorsEnabled()) backdropMix=1f
-            else backdropAnimator=ValueAnimator.ofFloat(0f,1f).apply {
-                duration=120L
-                addUpdateListener {backdropMix=it.animatedValue as Float;invalidate()}
-                start()
-            }
-        }
-        invalidate()
+        if(redraw) invalidate()
     }
 
     fun clearBackdrop() {
-        backdropAnimator?.cancel();backdropAnimator=null
         val changed=backdrop!=null||backdropPaint.shader!=null
-        backdrop=null;backdropPaint.shader=null;backdropMix=0f
+        backdrop=null;backdropPaint.shader=null
         if(changed)invalidate()
     }
     internal fun clearOwnBackdrop() {if(backdrop!=null)clearBackdrop()}
+    internal fun releaseOwnBackdrop() {clearBackdrop();lens=null}
     internal fun hasOwnBackdrop(bitmap:Bitmap?)=bitmap!=null&&backdrop===bitmap&&backdropPaint.shader!=null
     override fun onAttachedToWindow() {super.onAttachedToWindow();AppGlassBackdrop.watch(this);postDelayed(backdropRefreshTask,100)}
 

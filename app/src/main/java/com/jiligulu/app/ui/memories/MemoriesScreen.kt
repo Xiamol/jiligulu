@@ -130,7 +130,7 @@ fun MemoriesScreen(onBack: () -> Unit) {
                 AlbumPaperPage(Modifier.clickable(onClick = uiTap(com.jiligulu.app.core.audio.UiCue.PAPER) { selectedPhoto = bill })) {
                     MemoryPhoto(bill.photoUri.orEmpty(), Modifier.fillMaxWidth().height(160.dp).clip(RoundedCornerShape(12.dp)))
                     Text(bill.detail.ifBlank { "一张生活照片" }, style = MaterialTheme.typography.bodyMedium, maxLines = 2)
-                    if (bill.note.isNotBlank()) Text(bill.note, style = MaterialTheme.typography.bodySmall, maxLines = 3)
+                    com.jiligulu.app.ui.chat.draftNoteForDisplay(bill.note).takeIf { it.isNotBlank() }?.let { Text(it, style = MaterialTheme.typography.bodySmall, maxLines = 3) }
                     Text(Formatters.dayLabel(bill.timestamp), style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
@@ -158,9 +158,9 @@ fun MemoriesScreen(onBack: () -> Unit) {
     selectedPhoto?.takeIf { selectedBill == null }?.let { photo -> GuluDialog(photo.detail.ifBlank { "这一页生活" },{selectedPhoto=null},compact=true,dense=true,
         compactWidth=300.dp,confirmLabel="查看账单",onConfirm={selectedBill=photo.id}) {
         MemoryPhoto(photo.photoUri.orEmpty(),Modifier.fillMaxWidth().height(240.dp),androidx.compose.ui.layout.ContentScale.Fit)
-        if(photo.note.isNotBlank()) Text(photo.note,style=MaterialTheme.typography.bodySmall)
+        com.jiligulu.app.ui.chat.draftNoteForDisplay(photo.note).takeIf { it.isNotBlank() }?.let { Text(it,style=MaterialTheme.typography.bodySmall) }
         Text(Formatters.dayLabel(photo.timestamp),style=MaterialTheme.typography.labelSmall)
-        MemoryPosterButton(photo.detail,photo.note,photo.photoUri.orEmpty(),photo.amountFen,photo.timestamp)
+        MemoryPosterButton(photo.detail,com.jiligulu.app.ui.chat.draftNoteForDisplay(photo.note),photo.photoUri.orEmpty(),photo.amountFen,photo.timestamp)
     } }
 }
 

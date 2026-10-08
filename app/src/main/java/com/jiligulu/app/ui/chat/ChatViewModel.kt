@@ -440,8 +440,39 @@ class ChatViewModel(
         viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
             withContext(NonCancellable) {
                 try {
-                    writes.withLock { history.updateDraft(cardId, DraftHistoryCodec.encode(updated.drafts)) }
+                    writes.withLock {
+                        val stored = history.getById(cardId)?.takeIf {
+                            it.kind == "DRAFT" && it.status in setOf("EDITING", "DISMISSED")
+                        } ?: return@withLock
+                        val latest = DraftHistoryCodec.decode(stored.draftPayload)
+                        val changed = latest.mapIndexed { i, draft -> if (i == index) transform(draft) else draft }
+                        history.updateDraft(cardId, DraftHistoryCodec.encode(changed))
+                    }
                 } catch (_: Exception) { _error.value = "这次草稿修改还未保存，确认入账前会再尝试保存。" }
+            }
+        }
+    }
+
+    /** Photo imports await the durable field write before releasing their private-file claim. */
+    suspend fun attachDraftPhoto(cardId: Long, index: Int, path: String?): Boolean = withContext(NonCancellable) {
+        writes.withLock {
+            val card = findCard(cardId)?.takeIf { it.status == ChatItem.DraftCard.Status.EDITING } ?: return@withLock false
+            if (index !in card.drafts.indices) return@withLock false
+            try {
+                val stored = history.getById(cardId)?.takeIf {
+                    it.kind == "DRAFT" && it.status in setOf("EDITING", "DISMISSED")
+                } ?: return@withLock false
+                val latest = DraftHistoryCodec.decode(stored.draftPayload)
+                if (index !in latest.indices) return@withLock false
+                val changed = latest.mapIndexed { i, draft -> if (i == index) draft.copy(photoUri = path) else draft }
+                if (history.updateDraft(cardId, DraftHistoryCodec.encode(changed)) != 1) return@withLock false
+                findCard(cardId)?.let { current -> replace(current.copy(drafts = current.drafts.mapIndexed { i, draft ->
+                    if (i == index) draft.copy(photoUri = path) else draft
+                })) }
+                true
+            } catch (_: Exception) {
+                _error.value = "照片还未夹进草稿，再试一下吧。"
+                false
             }
         }
     }
@@ -749,12 +780,12 @@ class ChatViewModel(
         isNewCategory = isNewCategory, iconEmoji = iconEmoji, iconSvg = iconSvg,
         keywords = keywords, detail = detail, note = note, checked = checked,
         timestamp = timestamp, timeNeedsReview = timeNeedsReview,
-        timeHint = timeHint.ifBlank { "未提及时间，确认入账时记录此刻" }
+        timeHint = timeHint.ifBlank { "未提及时间，确认入账时记录此刻" }, photoUri = photoUri
     )
 
     private fun DraftUi.toConfirmItem() = ConfirmItem(
         amountText, type, categoryName, isNewCategory, iconEmoji, iconSvg, keywords,
-        detail, note, checked, timestamp, timeNeedsReview, timeHint
+        detail, note, checked, timestamp, timeNeedsReview, timeHint, photoUri
     )
 
     private fun findCard(id: Long) = _items.value.firstOrNull { it.id == id } as? ChatItem.DraftCard

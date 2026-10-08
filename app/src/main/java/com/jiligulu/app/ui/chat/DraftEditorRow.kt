@@ -46,7 +46,10 @@ internal fun DraftEditorRow(
     categories: List<CategoryEntity>,
     enabled: Boolean,
     tag: String,
-    onUpdate: ((DraftUi) -> DraftUi) -> Unit
+    onUpdate: ((DraftUi) -> DraftUi) -> Unit,
+    onPhotoChange: (suspend (String?) -> Boolean)? = null,
+    photoBusy: Boolean = false,
+    onPhotoBusyChange: (Boolean) -> Unit = {}
 ) {
     val soundContext = LocalContext.current
     var showCategories by rememberSaveable(tag) { mutableStateOf(false) }
@@ -96,7 +99,7 @@ internal fun DraftEditorRow(
                     }
                 })
         }
-        Row(Modifier.padding(start = 37.dp), horizontalArrangement = Arrangement.spacedBy(6.dp),
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically) {
             Surface(Modifier.widthIn(max = 94.dp), color = MaterialTheme.colorScheme.primary.copy(alpha = .055f),
                 shape = RoundedCornerShape(9.dp)) {
@@ -131,6 +134,9 @@ internal fun DraftEditorRow(
             Icon(Icons.Outlined.EditNote, if (draft.note.isBlank()) "添加备注" else "编辑备注",
                 Modifier.size(26.dp).clickable(enabled = enabled, onClick = uiTap(UiCue.TOGGLE) { showNote = !showNote }).padding(5.dp),
                 tint = MaterialTheme.colorScheme.primary.copy(alpha = .7f))
+            onPhotoChange?.let { callback ->
+                DraftPhotoPicker(draft.photoUri, enabled && !photoBusy, tag, callback, onPhotoBusyChange)
+            }
         }
         if (draft.displayNote.isNotBlank() && !showNote) Text(draft.displayNote, maxLines = 1,
                 overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall,

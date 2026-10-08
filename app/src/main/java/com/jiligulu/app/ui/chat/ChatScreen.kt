@@ -110,8 +110,10 @@ fun ChatScreen(
     val today by androidx.compose.runtime.produceState(LocalDate.now(), lifecycleOwner) {
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             while (true) {
-                value = LocalDate.now()
-                delay(60_000)
+                val zone = ZoneId.systemDefault()
+                value = LocalDate.now(zone)
+                val nextDay = value.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
+                delay((nextDay - System.currentTimeMillis()).coerceAtLeast(1_000L))
             }
         }
     }
@@ -218,6 +220,7 @@ fun ChatScreen(
                             onUpdate = { index, transform -> vm.updateDraft(item.id, index, transform) },
                             onConfirm = { vm.confirmCard(item.id) },
                             onDelete = { vm.deleteDraft(item.id) },
+                            onPhotoChange = { index, path -> vm.attachDraftPhoto(item.id, index, path) },
                             expanded = item.id in expandedDrafts,
                             onExpandedChange = { vm.setDraftExpanded(item.id, it) }
                         )
@@ -409,9 +412,12 @@ internal fun DraftCardView(
     onConfirm: () -> Unit,
     onDelete: () -> Unit,
     expanded: Boolean,
-    onExpandedChange: (Boolean) -> Unit
+    onExpandedChange: (Boolean) -> Unit,
+    onPhotoChange: (suspend (Int, String?) -> Boolean)? = null
 ) {
     val editing = card.status == ChatItem.DraftCard.Status.EDITING
+    var photoBusy by remember(card.id) { mutableStateOf(emptySet<Int>()) }
+    fun photoBusyChange(index: Int, busy: Boolean) { photoBusy = if (busy) photoBusy + index else photoBusy - index }
     var confirmDelete by remember(card.id) { mutableStateOf(false) }
     if (card.status == ChatItem.DraftCard.Status.DELETED) {
         Text("草稿已删除", Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)
@@ -451,10 +457,11 @@ internal fun DraftCardView(
         Spacer(Modifier.height(8.dp))
 
         if (!expanded || card.status == ChatItem.DraftCard.Status.CONFIRMED) {
-            val visibleDrafts = if (card.status == ChatItem.DraftCard.Status.CONFIRMED)
-                card.drafts.filter { it.checked } else card.drafts
+            val visibleDrafts = card.drafts.withIndex().filter {
+                card.status != ChatItem.DraftCard.Status.CONFIRMED || it.value.checked
+            }
             val summaryDrafts = if (card.status == ChatItem.DraftCard.Status.CONFIRMED) visibleDrafts else visibleDrafts.take(3)
-            summaryDrafts.forEach { draft ->
+            summaryDrafts.forEach { (index, draft) ->
                 Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     val category = categories.firstOrNull { it.name.equals(draft.categoryName, true) }
                     CategoryBadge(draft.categoryName, category?.iconValue ?: draft.iconEmoji, size = 28.dp)
@@ -472,6 +479,10 @@ internal fun DraftCardView(
                     Text("${if (draft.type == BillType.EXPENSE) "−" else "+"}¥${draft.amountText}",
                         style = MaterialTheme.typography.titleSmall,
                         color = if (draft.type == BillType.EXPENSE) ExpenseCoral else IncomeGreen)
+                    if (editing && onPhotoChange != null) DraftPhotoPicker(draft.photoUri, index !in photoBusy,
+                        "${card.id}-$index", { path -> onPhotoChange(index, path) }, { photoBusyChange(index, it) })
+                    else if (!draft.photoUri.isNullOrBlank()) com.jiligulu.app.ui.memories.MemoryPhoto(draft.photoUri,
+                        Modifier.size(24.dp).clip(RoundedCornerShape(5.dp)), maxSide = 80)
                 }
             }
             if (visibleDrafts.size > summaryDrafts.size) Text("还有 ${visibleDrafts.size - summaryDrafts.size} 笔", style = MaterialTheme.typography.labelSmall,
@@ -480,8 +491,11 @@ internal fun DraftCardView(
         }
 
         card.drafts.forEachIndexed { index, draft ->
+            val photoCallback: (suspend (String?) -> Boolean)? = if (onPhotoChange == null) null else { path -> onPhotoChange(index, path) }
             DraftEditorRow(draft = draft, categories = categories, enabled = editing,
-                tag = "${card.id}-$index", onUpdate = { change -> onUpdate(index, change) })
+                tag = "${card.id}-$index", onUpdate = { change -> onUpdate(index, change) },
+                onPhotoChange = photoCallback,
+                photoBusy = index in photoBusy, onPhotoBusyChange = { photoBusyChange(index, it) })
             if (index < card.drafts.size - 1) {
                 Spacer(Modifier.height(9.dp))
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -506,7 +520,7 @@ internal fun DraftCardView(
                     val validCount = selected.size
                     Button(
                         onClick = uiTap(onConfirm),
-                        enabled = validCount > 0 && selected.all { it.isValid },
+                        enabled = validCount > 0 && selected.all { it.isValid } && photoBusy.isEmpty(),
                         modifier = Modifier.testTag("draft-confirm-${card.id}")
                     ) {
                         Text("确认记账（$validCount）")

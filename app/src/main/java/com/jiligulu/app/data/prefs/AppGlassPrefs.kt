@@ -19,7 +19,7 @@ enum class AppGlassFrameRate(val fps: Int, val label: String) {
     val intervalNanos: Long get() = 1_000_000_000L / fps
     val intervalMillis: Long get() = (1000L + fps - 1L) / fps
     companion object {
-        val DEFAULT = FPS_30
+        val DEFAULT = FPS_15
         fun fromFps(fps: Int?) = entries.firstOrNull { it.fps == fps } ?: DEFAULT
     }
 }

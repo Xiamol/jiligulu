@@ -74,6 +74,9 @@ internal object AppGlassBackdrop {
                 if(window.decorView.viewTreeObserver.isAlive) window.decorView.viewTreeObserver.removeOnDrawListener(it)
             } }
             drawListener=null
+            forgetPublishedFrame()
+            // Drop strong pixel references. Do not recycle a bitmap still submitted to RenderThread.
+            buffers=arrayOfNulls(2);nextBuffer=0
         }
     }
     private fun cancelRefresh() {
@@ -109,7 +112,8 @@ internal object AppGlassBackdrop {
         cancelRefresh()
         forgetPublishedFrame()
         source.get()?.let {old ->drawListener?.let {if(old.decorView.viewTreeObserver.isAlive) old.decorView.viewTreeObserver.removeOnDrawListener(it)}}
-        drawListener=null;source=WeakReference(window);watched.get()?.clearBackdrop()
+        drawListener=null;source=WeakReference(window);watched.get()?.releaseOwnBackdrop()
+        if (window == null) {buffers=arrayOfNulls(2);nextBuffer=0}
         if(window==null || watched.get()==null) return
         val listener=ViewTreeObserver.OnDrawListener {
             if(watched.get()?.canSampleOwnBackdrop!=true)return@OnDrawListener
@@ -163,7 +167,8 @@ internal object AppGlassBackdrop {
         if(inFlight || SystemClock.uptimeMillis()-lastRequest<minCopyIntervalMillis) {deferRefresh();return}
         view.getLocationOnScreen(viewLocation);window.decorView.getLocationOnScreen(windowLocation)
         val x=viewLocation[0]-windowLocation[0];val y=viewLocation[1]-windowLocation[1]
-        val pad=(view.width*.28f).roundToInt()
+        // A bounded surrounding crop supports continuous reprojection between position updates.
+        val pad=(view.width*1.5f).roundToInt()
         val cropWidth=minOf(window.decorView.width,view.width+pad*2)
         val cropHeight=minOf(window.decorView.height,view.height+pad*2)
         if(cropWidth<=0 || cropHeight<=0) {forgetPublishedFrame();callback(null,0f,0f);return}

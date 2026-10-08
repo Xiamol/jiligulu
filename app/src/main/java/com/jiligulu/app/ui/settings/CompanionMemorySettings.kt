@@ -56,7 +56,7 @@ internal fun CompanionMemorySettings(enabled: Boolean, prefs: UserPrefs = rememb
     }
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text("聊天时慢慢记住我", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-        SettingHelpButton("阿噜的记性", "只记你在聊天中亲口说的身份、学业和喜好，不从花销推测。小记忆保存在这台手机，启用时会随对话发送给 DeepSeek；可随时关闭、逐条更正、删除或全部清空。关闭后，已有小记忆会保留，但不再带进新的 AI 请求。")
+        SettingHelpButton("阿噜的记性", "只记你在聊天中亲口说的身份、学业和喜好，不从花销推测。小记忆保存在这台手机，启用时会随对话发送给当前 AI 服务；可随时关闭、逐条更正、删除或全部清空。关闭后，已有小记忆会保留，但不再带进新的 AI 请求。")
         Switch(memory?.enabled ?: false, enabled = enabled && memory != null && !busy,
             onCheckedChange = { checked -> UiSound.toggle(context); write({ prefs.setCompanionMemoryEnabled(checked) }) },
             modifier = Modifier.testTag("companion-memory-enabled"))

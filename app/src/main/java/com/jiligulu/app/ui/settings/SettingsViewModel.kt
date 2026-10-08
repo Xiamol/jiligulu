@@ -95,7 +95,9 @@ class SettingsViewModel(
         _uiState.update { it.copy(isClearingHistory = true, historyMessage = null) }
         viewModelScope.launch {
             try {
-                val cleared = history.clearConversation()
+                val cleared = history.clearConversation { paths ->
+                    com.jiligulu.app.ui.memories.MemoryFiles.releaseDraftCopies(app, paths)
+                }
                 _uiState.update { it.copy(historyMessage = if (cleared)
                     "聊天已清空，账单和未入账草稿都还在。"
                 else "阿噜还在回复，请等这次对话结束后再清空。") }

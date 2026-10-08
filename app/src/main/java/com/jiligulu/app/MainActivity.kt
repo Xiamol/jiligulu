@@ -90,6 +90,8 @@ class MainActivity : ComponentActivity() {
         com.jiligulu.app.core.audio.UiSound.warmup(applicationContext)
         if (savedInstanceState == null && intent?.action == Intent.ACTION_MAIN) {
             com.jiligulu.app.ui.capture.FloatingCaptureService.hiddenForSession.value = false
+            // Launching the app never keeps an old screen-sharing session alive or asks for a new one.
+            stopService(Intent(this, com.jiligulu.app.ui.capture.ScreenCaptureService::class.java))
         }
         handleWaterIntent(intent)
         handleFutureNoteIntent(intent)
@@ -141,6 +143,9 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        if (intent.action == Intent.ACTION_MAIN) {
+            stopService(Intent(this, com.jiligulu.app.ui.capture.ScreenCaptureService::class.java))
+        }
         handleWaterIntent(intent)
         handleFutureNoteIntent(intent)
         handleChessRoomIntent(intent)

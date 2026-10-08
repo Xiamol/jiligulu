@@ -7,8 +7,15 @@ import androidx.room.Update
 import com.jiligulu.app.data.local.entity.ChatMessageEntity
 import kotlinx.coroutines.flow.Flow
 
+data class ChatMediaReferenceRow(val kind: String, val status: String, val draftPayload: String)
+
 @Dao
 interface ChatMessageDao {
+    @Query("SELECT kind, status, draftPayload FROM chat_messages WHERE kind = 'DRAFT' AND status != 'DELETED' AND draftPayload != ''")
+    suspend fun mediaReferenceRows(): List<ChatMediaReferenceRow>
+    /** Files from rows physically removed by an explicit history reset, including tombstones. */
+    @Query("SELECT kind, status, draftPayload FROM chat_messages WHERE kind = 'DRAFT' AND status NOT IN ('EDITING','DISMISSED') AND draftPayload != ''")
+    suspend fun removedDraftMediaRows(): List<ChatMediaReferenceRow>
     @Query("SELECT * FROM chat_messages ORDER BY id ASC")
     fun observeAll(): Flow<List<ChatMessageEntity>>
 

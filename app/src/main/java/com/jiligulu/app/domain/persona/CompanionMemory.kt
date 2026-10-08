@@ -30,7 +30,9 @@ data class CompanionMemoryState(val enabled: Boolean = true, val revision: Long 
                     put("reported_date", Instant.ofEpochMilli(fact.updatedAt).atZone(ZoneId.systemDefault()).toLocalDate().toString())
                 }
             }) } })
-        }.toString()
+        }.toString() + if (enabled) "\n若本轮用户直接说出自己的新资料，使用可选 memory_updates 数组返回，每项为" +
+            "{\"kind\":\"study|occupation|interest|dislike|age|gender\",\"value\":\"简短原意\",\"evidence\":\"本轮原话的连续片段\"}。" +
+            "只记录本人明确自述，不从消费推测年龄、性别或身份；没有新资料返回空数组。" else ""
 }
 
 /** Bounded self-disclosures, rather than inferred demographic profiles or a copy of chat history. */
@@ -61,6 +63,38 @@ object CompanionMemoryPolicy {
     fun encode(facts: List<CompanionFact>): String = json.encodeToString(facts.take(MAX_FACTS))
 
     fun validValue(value: String): Boolean = value.isNotBlank() && value.length <= MAX_VALUE_LENGTH && value.none(Char::isISOControl)
+
+    /** Clear self-disclosures do not depend on a model honoring optional response fields. */
+    fun explicitFacts(input: String, now: Long): List<CompanionFact> {
+        if (input.length > 10000) return emptyList()
+        val updates = mutableListOf<AiMemoryUpdate>()
+        Regex("[^，,。；;！!？?\\n]+[？?]?").findAll(input).forEach { clause ->
+            // Keep the evidence verbatim; the existing quote/third-person guards validate its context.
+            val evidence = clause.value.trim().replace(Regex("^(?:请)?(?:记住|记一下|记得|记好)[：:\\s]*"), "").trim()
+            if (!evidence.startsWith("我")) return@forEach
+            val age = chineseAge.find(evidence)?.groupValues?.get(1)?.let(::statedNumber)
+            if (age != null) updates += AiMemoryUpdate("age", age.toString(), evidence)
+            gender.find(evidence)?.groupValues?.get(1)?.let { updates += AiMemoryUpdate("gender", it, evidence) }
+            if (Regex("^我(?:已经|刚刚|刚|已|今年|去年|现在)?毕业(?:了)?$").matches(evidence)) {
+                updates += AiMemoryUpdate("study", "已毕业", evidence)
+            }
+            val preference = Regex("^我(?:现在|一直|最|特别|很)?(不喜欢|讨厌|不爱|不吃|不喝|喜欢|热爱|爱|的爱好是)(.+)$").find(evidence)
+            if (preference != null) {
+                val value = preference.groupValues[2].trim().removeSuffix("哦").removeSuffix("呀").removeSuffix("啦")
+                val kind = if (preference.groupValues[1] in setOf("不喜欢", "讨厌", "不爱", "不吃", "不喝")) "dislike" else "interest"
+                if (value.length <= MAX_VALUE_LENGTH) updates += AiMemoryUpdate(kind, value, evidence)
+            }
+            val study = Regex("^我(?:现在|目前|今年|还)?(?:是(?:一名|一个|个)?|在读|读|上)([^的]{0,40}(?:学生|研究生|博士生|大学|高中|初中|小学|大专|本科|硕士|博士))$").find(evidence)
+            study?.groupValues?.get(1)?.let { updates += AiMemoryUpdate("study", it, evidence) }
+            val work = Regex("^我(?:现在|目前|其实)?(?:的工作是|的职业是|从事|在做)([^的]{1,40})$").find(evidence)
+            work?.groupValues?.get(1)?.let { updates += AiMemoryUpdate("occupation", it, evidence) }
+            // A small explicit occupation vocabulary avoids guessing from arbitrary '我是…' sentences.
+            Regex("^我(?:现在|目前|其实)?是(?:一名|一个|个)?(老师|教师|护士|医生|程序员|工程师|设计师|厨师|司机|会计|律师|学生)$")
+                .find(evidence)?.groupValues?.get(1)?.takeIf { it != "学生" }
+                ?.let { updates += AiMemoryUpdate("occupation", it, evidence) }
+        }
+        return accepted(input, updates, now)
+    }
 
     fun accepted(input: String, updates: List<AiMemoryUpdate>, now: Long): List<CompanionFact> {
         if (input.length > 10000 || Regex("^\\s*【(?:图片|截图|账单识别|OCR)").containsMatchIn(input)) return emptyList()

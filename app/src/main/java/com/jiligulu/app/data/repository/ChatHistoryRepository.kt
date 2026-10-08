@@ -20,18 +20,32 @@ class ChatHistoryRepository(private val database: AppDatabase) {
     suspend fun <T> withConversationLock(block: suspend () -> T): T = conversationLock.withLock { block() }
 
     /** The settings confirmation is the only caller. Never erase a response still in flight. */
-    suspend fun clearConversation(): Boolean = withConversationLock {
+    suspend fun clearConversation(onRemovedDraftPhotos: ((List<String>) -> Unit)? = null): Boolean = withConversationLock {
+        var removedPhotos = emptyList<String>()
         val cleared = database.withTransaction {
             if (dao.hasPendingResponse()) return@withTransaction false
+            if (onRemovedDraftPhotos != null) {
+                // Metadata only; unconfirmed drafts remain in the database and retain their photos.
+                // A malformed payload must not authorize file deletion or block an explicit reset.
+                val removedRows = dao.removedDraftMediaRows()
+                removedPhotos = runCatching { removedRows.asSequence()
+                    .flatMap { com.jiligulu.app.ui.chat.DraftHistoryCodec.decode(it.draftPayload).asSequence() }
+                    .mapNotNull { it.photoUri }.filter { it.isNotBlank() }.distinct().toList()
+                }.getOrDefault(emptyList())
+            }
             dao.clearConversationKeepingDrafts()
             true
         }
-        if (cleared) generation.update { it + 1 }
+        if (cleared) {
+            generation.update { it + 1 }
+            if (removedPhotos.isNotEmpty()) runCatching { onRemovedDraftPhotos?.invoke(removedPhotos) }
+        }
         cleared
     }
 
     fun observeAll(): Flow<List<ChatMessageEntity>> = dao.observeAll()
     suspend fun getAll(): List<ChatMessageEntity> = dao.getAll()
+    suspend fun mediaReferenceRows(): List<com.jiligulu.app.data.local.dao.ChatMediaReferenceRow> = dao.mediaReferenceRows()
 
     /** UI pages never trim the stored conversation or change the independent AI context window. */
     suspend fun uiPageBefore(beforeId: Long, limit: Int): List<ChatMessageEntity> =

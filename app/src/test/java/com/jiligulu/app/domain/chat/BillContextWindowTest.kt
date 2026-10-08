@@ -24,7 +24,7 @@ class BillContextWindowTest {
         assertEquals(30, context.recentBills.size)
         assertFalse(context.recentBills.any { it.label.startsWith("[40]") })
         assertTrue(context.billsNotice.contains("最近3天"))
-        assertTrue(context.billsNotice.contains("最多30笔"))
+        assertTrue(context.billsNotice.contains("最多带入30笔"))
     }
 
     @Test fun theSelectedWindowUsesNewestBillsAndAllDoesNotApplyATimeCutoff() {
