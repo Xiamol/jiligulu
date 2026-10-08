@@ -260,7 +260,7 @@ class ChatViewModel(
                 val parsed = result.getOrNull() ?: if (disclosure.personalOnly) AiParseResult()
                     else localParse(disclosure.billInput, result.exceptionOrNull())
                 val turn = if (disclosure.personalOnly) {
-                    aiRepository.personalTurn(disclosure, parsed.reply)
+                    aiRepository.personalTurn(disclosure, parsed.reply, carried)
                 } else if (result.isSuccess) {
                     aiRepository.toTurn(parsed, input, requestMillis, zone, carried, disclosure)
                 } else {

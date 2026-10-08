@@ -5,7 +5,7 @@ import java.time.MonthDay
 /** Assistant text supplies a question slot, never a value or personal evidence. */
 data class MemoryConversationTurn(val id: Long, val role: String, val text: String, val sentAt: Long)
 data class PersonalDisclosure(val facts: List<CompanionFact>, val personalOnly: Boolean,
-    val billInput: String, val rejectedAmount: String? = null)
+    val billInput: String, val rejectedAmount: String? = null, val explicitlyCorrectsAmount: Boolean = false)
 
 object PersonalDisclosurePolicy {
     private enum class Slot { AGE, GENDER, BIRTHDAY, SCHOOL, GRADE, OCCUPATION, STUDY }
@@ -21,7 +21,9 @@ object PersonalDisclosurePolicy {
     fun analyze(input: String, now: Long, previous: List<MemoryConversationTurn> = emptyList()): PersonalDisclosure {
         if (input.length > 10_000 || Regex("^\\s*【(?:图片|截图|账单识别|OCR)").containsMatchIn(input))
             return PersonalDisclosure(emptyList(), false, input)
-        val slots = replySlots(previous, now)
+        val context = replyContext(previous, now)
+        val slots = context.slots
+        var otherPerson = context.otherPerson
         val strict = CompanionMemoryPolicy.strictExplicitFacts(input, now).toMutableList()
         val extra = mutableListOf<CompanionFact>()
         val personalClauses = mutableSetOf<IntRange>()
@@ -29,6 +31,9 @@ object PersonalDisclosurePolicy {
         var rejected = correction.find(input)?.let { match -> match.groupValues.drop(1).firstOrNull { it.isNotBlank() } }
         for (clause in clausePattern.findAll(input)) {
             val evidence = clause.value.trim().replace(Regex("^(?:请)?(?:记住|记一下|记得|记好)[：:\\s]*"), "").trim()
+            if (thirdPersonTopic(evidence)) otherPerson = true
+            else if (explicitSelfTopic(evidence)) otherPerson = false
+            if (otherPerson && !explicitSelfClaim(evidence)) continue
             if (!safeClaim(input, clause.range.first, evidence)) continue
             val bare = input.trim().trimEnd('。', '！', '!') == evidence
             val startsDisclosure = input.substring(0, clause.range.first).isBlank()
@@ -84,7 +89,7 @@ object PersonalDisclosurePolicy {
         val bill = hasBillIntent(remaining)
         val personalOnly = (facts.isNotEmpty() || personalAnswer) && !bill
         return PersonalDisclosure(facts, personalOnly, if (personalClauses.isEmpty()) input else remaining,
-            rejected)
+            rejected, Regex("(?:没有|不是)[^。！？?]{0,30}(?:账单|金额|钱)|我说的(?:\\s*[0-9]{1,3})?(?:是|指的是)[^。！？?]*岁").containsMatchIn(input))
     }
 
     /** Separate windows have separate question contexts; callers never bridge a missing history gap. */
@@ -98,27 +103,46 @@ object PersonalDisclosurePolicy {
         return facts
     }
 
-    private fun replySlots(previous: List<MemoryConversationTurn>, now: Long): Set<Slot> {
+    private data class ReplyContext(val slots: Set<Slot>, val otherPerson: Boolean)
+    private fun replyContext(previous: List<MemoryConversationTurn>, now: Long): ReplyContext {
         var slots = emptySet<Slot>()
         var at = 0L
         var fromUserQuestion = false
-        for (turn in previous.takeLast(8)) {
+        var otherPerson = false
+        var topicAt = 0L
+        for (turn in previous.sortedBy { it.id }.takeLast(8)) {
+            if (thirdPersonTopic(turn.text)) { otherPerson = true; topicAt = turn.sentAt }
+            else if (turn.role == "USER" && explicitSelfTopic(turn.text)) { otherPerson = false; topicAt = turn.sentAt }
             if (turn.role == "USER") {
                 slots = questionSlots(turn.text, ownQuestion = true)
                 at = turn.sentAt; fromUserQuestion = slots.isNotEmpty()
+                if (fromUserQuestion) { otherPerson = false; topicAt = turn.sentAt }
             } else if (turn.role == "ASSISTANT") {
                 val asked = questionSlots(turn.text, ownQuestion = false)
-                if (asked.isNotEmpty()) { slots = asked; at = turn.sentAt; fromUserQuestion = false }
+                if (thirdPersonTopic(turn.text) || moneyQuestion(turn.text)) { slots = emptySet(); fromUserQuestion = false }
+                else if (asked.isNotEmpty()) { slots = asked; at = turn.sentAt; fromUserQuestion = false; otherPerson = false; topicAt = turn.sentAt }
                 else if (!fromUserQuestion) slots = emptySet()
             }
         }
-        return slots.takeIf { now - at in 0..QUESTION_WINDOW } ?: emptySet()
+        return ReplyContext(slots.takeIf { now - at in 0..QUESTION_WINDOW } ?: emptySet(),
+            otherPerson && now - topicAt in 0..QUESTION_WINDOW)
     }
+
+    private fun thirdPersonTopic(text: String): Boolean {
+        if (Regex("(?:我|你)(?:的)?(?:那位|一个)?(?:妈妈|爸爸|弟弟|妹妹|哥哥|姐姐|朋友|同事|同学|对象|男朋友|女朋友|儿子|女儿)|(?:给|送|替|帮)(?:朋友|同事|同学|妈妈|爸爸|弟弟|妹妹)").containsMatchIn(text)) return true
+        return Regex("([\\p{L}]{1,20})的(?:资料|年龄|性别|生日|学校|年级|职业)").findAll(text).any {
+            val owner = it.groupValues[1]
+            !owner.endsWith("我") && !owner.endsWith("你") && owner !in setOf("本人", "我自己", "你自己")
+        }
+    }
+    private fun explicitSelfClaim(text: String): Boolean = text.startsWith("我") && !thirdPersonTopic(text)
+    private fun explicitSelfTopic(text: String): Boolean = explicitSelfClaim(text) || Regex("(?:现在|接下来|换个话题)?(?:说|聊|问)(?:我自己|我的资料)|我自己的(?:资料|年龄|性别|生日)").containsMatchIn(text)
+    private fun moneyQuestion(text: String): Boolean = Regex("多少钱|花(?:了)?多少(?:钱)?|(?:金额|费用|价格|价钱|支出|收入)\\s*(?:是|为|有)?\\s*多少|几(?:元|块钱)|(?:这笔|这顿|金额|[0-9]+元)[^。！？?]{0,20}(?:花在哪|花哪|名目|用途)").containsMatchIn(text)
 
     private fun questionSlots(text: String, ownQuestion: Boolean): Set<Slot> {
         if (text.length > 10_000 || !Regex("[？?]|多少|几岁|多大|哪|什么|还是|大几|研几|几年级").containsMatchIn(text)) return emptySet()
         val subject = if (ownQuestion) "我" else "你"
-        if (Regex("$subject(?:妈妈|爸爸|弟弟|妹妹|哥哥|姐姐|朋友|儿子|女儿)").containsMatchIn(text)) return emptySet()
+        if (Regex("$subject(?:的)?(?:妈妈|爸爸|弟弟|妹妹|哥哥|姐姐|朋友|同事|同学|儿子|女儿)").containsMatchIn(text)) return emptySet()
         val found = mutableSetOf<Slot>()
         if (Regex("$subject(?:今年|现在|的年龄(?:是|有)?)?\\s*(?:多少岁|几岁|多大)|${subject}的年龄").containsMatchIn(text)) found += Slot.AGE
         if (Regex("$subject(?:是|的性别)?[^。！？?]{0,12}(?:男生|女生|男孩|女孩|性别)").containsMatchIn(text)) found += Slot.GENDER

@@ -145,6 +145,27 @@ class PersonalReplyFlowTest {
         assertEquals("10", PromptRenderer.pendingOf(fixture.history.latestPending())!!.amountText)
     }
 
+    @Test fun ordinarySelfDisclosureKeepsARealPendingAmountEvenWhenItEqualsTheAge() = runBlocking {
+        val fixture = Fixture(); val now = System.currentTimeMillis()
+        fixture.history.suspendPending(PromptRenderer.encodePending(PendingDraft("19", rawInput = "买衣服19元", createdAt = now)), now)
+        val vm = fixture.model(); fixture.send(vm, "我19岁")
+        assertEquals("19岁", fixture.prefs.companionMemory.first().facts.single().value)
+        assertEquals("19", vm.pending.value!!.amountText)
+        assertEquals("买衣服19元", PromptRenderer.pendingOf(fixture.history.latestPending())!!.rawInput)
+    }
+
+    @Test fun anOriginalPersonalAgeAnswerIsProvenBeforeRemovingItsMistakenAmountPending() = runBlocking {
+        val fixture = Fixture(); val now = System.currentTimeMillis()
+        fixture.ageQuestion()
+        fixture.history.insert(ChatMessageEntity(kind = "USER", content = "19", createdAt = now))
+        fixture.history.insert(ChatMessageEntity(kind = "ASSISTANT", content = "19元花在哪儿？", createdAt = now))
+        fixture.history.suspendPending(PromptRenderer.encodePending(PendingDraft("19", rawInput = "19", createdAt = now)), now)
+        val vm = fixture.model(); fixture.send(vm, "19岁，笨蛋阿噜")
+        assertNull(vm.pending.value)
+        assertNull(fixture.history.latestPending())
+        assertEquals("19岁", fixture.prefs.companionMemory.first().facts.single().value)
+    }
+
     @Test fun foodCommaAmountKeepsARealTenYuanDraftOnlineAndOffline() = runBlocking {
         for (offline in listOf(false, true)) {
             val fixture = Fixture(AiParseResult(bills = listOf(AiBillDraft(amountYuan = 10.0, detail = "吃饭"))), offline)

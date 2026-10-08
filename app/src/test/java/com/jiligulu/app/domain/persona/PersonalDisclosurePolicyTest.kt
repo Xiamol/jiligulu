@@ -214,6 +214,33 @@ class PersonalDisclosurePolicyTest {
         assertEquals("吃饭19元", own.billInput)
     }
 
+    @Test fun aThirdPersonConversationBlocksLaterOmittedSubjectsAcrossMessageBoundaries() {
+        val previous = listOf(user(1, "我弟弟的资料"), assistant(2, "你弟弟是男生还是女生？"))
+        listOf("男生", "19岁", "生日2月28").forEach { input ->
+            assertTrue(input, PersonalDisclosurePolicy.analyze(input, now, previous).facts.isEmpty())
+        }
+        assertTrue(PersonalDisclosurePolicy.analyze("男生", now, listOf(assistant(1, "你的朋友是男生还是女生？"))).facts.isEmpty())
+        assertTrue(PersonalDisclosurePolicy.analyze("教师", now, listOf(assistant(1, "你的妈妈从事什么工作？"))).facts.isEmpty())
+    }
+
+    @Test fun anExplicitSelfStatementCanChangeTheTopicBackFromAnotherPerson() {
+        val previous = listOf(user(1, "我弟弟的资料"), assistant(2, "你弟弟是男生还是女生？"))
+        assertEquals(mapOf("age" to "19岁"), factsOf(PersonalDisclosurePolicy.analyze("我19岁", now, previous)))
+        assertEquals(mapOf("birthday" to "2月28日"), factsOf(PersonalDisclosurePolicy.analyze("我的生日2月28", now, previous)))
+        assertEquals(mapOf("age" to "19岁"), factsOf(PersonalDisclosurePolicy.analyze("19", now,
+            previous + assistant(3, "现在说说你，你今年几岁？"))))
+    }
+
+    @Test fun anExplicitAmountQuestionConsumesTheEarlierUserAgeQuestion() {
+        val previous = listOf(user(1, "你猜我多少岁？"), assistant(2, "先记这顿饭吧，花了多少钱？"))
+        val result = PersonalDisclosurePolicy.analyze("19", now, previous)
+        assertTrue(result.facts.isEmpty())
+        assertFalse(result.personalOnly)
+        assertNull(result.rejectedAmount)
+        assertEquals(mapOf("age" to "19岁"), factsOf(PersonalDisclosurePolicy.analyze("19", now,
+            listOf(user(1, "你猜我多少岁？"), assistant(2, "阿噜还不知道，想说就告诉我吧")))))
+    }
+
     @Test fun selfQuestionsQuotesOtherPeopleOcrAndHypothesesCannotSupplyPersonalFacts() {
         listOf(
             "我是男生吗？",

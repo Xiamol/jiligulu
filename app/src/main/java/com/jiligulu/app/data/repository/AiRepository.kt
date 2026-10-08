@@ -148,10 +148,22 @@ class AiRepository(
         return PersonalDisclosurePolicy.analyze(input, requestMillis, previous)
     }
 
-    fun personalTurn(disclosure: PersonalDisclosure, reply: String = ""): AiTurn.Chat {
+    suspend fun personalTurn(disclosure: PersonalDisclosure, reply: String = "", pending: PendingDraft? = null): AiTurn.Chat {
         val safeReply = reply.takeUnless { Regex("金额|花在哪|哪儿花|什么名目|账单|[0-9]+元").containsMatchIn(it) }
             ?.takeIf { it.isNotBlank() } ?: personalReply(disclosure)
-        return AiTurn.Chat(safeReply, preservePending = true, rejectedAmount = disclosure.rejectedAmount)
+        val reject = disclosure.rejectedAmount?.takeIf {
+            disclosure.explicitlyCorrectsAmount || pending?.let { source -> pendingWasPersonalAnswer(source) } == true
+        }
+        return AiTurn.Chat(safeReply, preservePending = true, rejectedAmount = reject)
+    }
+
+    private suspend fun pendingWasPersonalAnswer(pending: PendingDraft): Boolean {
+        if (!pending.rawInput.trim().matches(Regex("[0-9]{1,3}"))) return false
+        val row = chatHistoryRepository.latestPending() ?: return false
+        val nearby = chatHistoryRepository.personalMemoryBefore(row.id, 8)
+        val source = nearby.lastOrNull { it.role == "USER" && it.sentAt == pending.createdAt && it.text.trim() == pending.rawInput.trim() } ?: return false
+        val previous = chatHistoryRepository.personalMemoryBefore(source.id, 8)
+        return PersonalDisclosurePolicy.analyze(pending.rawInput, pending.createdAt, previous).personalOnly
     }
 
     private fun personalReply(disclosure: PersonalDisclosure): String {
@@ -349,7 +361,7 @@ class AiRepository(
         personal: PersonalDisclosure? = null
     ): AiTurn {
         val disclosure = personal ?: personalDisclosure(input, requestMillis)
-        if (disclosure.personalOnly) return personalTurn(disclosure, parsed.reply)
+        if (disclosure.personalOnly) return personalTurn(disclosure, parsed.reply, pending)
         if (parsed.ledgerLookupCompleted && parsed.bills.isEmpty()) return AiTurn.Chat(parsed.reply)
         parsed.appAction?.let { action ->
             if (!action.isValid || parsed.bills.isNotEmpty()) {
