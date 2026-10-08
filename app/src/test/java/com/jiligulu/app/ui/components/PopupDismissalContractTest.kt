@@ -15,6 +15,8 @@ import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.semantics.SemanticsActions
 import com.jiligulu.app.ui.littleworld.SecretWoodDialog
 import java.time.Duration
 import org.junit.Assert.*
@@ -31,7 +33,7 @@ import org.robolectric.shadows.ShadowDialog
 class PopupDismissalContractTest {
     @get:Rule val compose = createComposeRule()
 
-    @Test fun genericCancelAliasesAreHiddenWhileBusyProtectsOutsideAndActualConfirmationStillRuns() {
+    @Test fun genericCancelAliasesAreHiddenWhileBusyProtectsOutsideAndAccessibleConfirmationStillRuns() {
         var shown by mutableStateOf(true)
         var busy by mutableStateOf(false)
         var submits = 0
@@ -50,7 +52,9 @@ class PopupDismissalContractTest {
         awaitDismissed(closed)
         compose.runOnIdle { assertFalse(shown); assertEquals(0, submits); shown = true }
         awaitDeleteReady()
-        compose.onNodeWithText("删除").performClick()
+        // Robolectric retains the previous Dialog's pointer target after reopening. Activate
+        // the real enabled button through its accessibility action; this is not a touch probe.
+        activateDeleteAccessibly()
         compose.runOnIdle { assertFalse(shown); assertEquals(1, submits) }
     }
 
@@ -101,5 +105,9 @@ class PopupDismissalContractTest {
         // semantics action while the previous disabled dialog is being disposed.
         compose.mainClock.advanceTimeByFrame()
         compose.waitForIdle()
+    }
+    private fun activateDeleteAccessibly() {
+        compose.onNodeWithText("删除").assertIsDisplayed().assertIsEnabled()
+            .performSemanticsAction(SemanticsActions.OnClick) { it() }
     }
 }
