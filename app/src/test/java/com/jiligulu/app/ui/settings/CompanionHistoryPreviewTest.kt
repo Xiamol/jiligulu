@@ -19,6 +19,7 @@ import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
@@ -119,11 +120,13 @@ class CompanionHistoryPreviewTest {
     }
 
     private fun awaitChangedError() {
+        val dialogError = hasText("资料或开关已经变化，请重新预览再确认") and
+            hasAnyAncestor(SemanticsMatcher("is a dialog") { it.config.contains(SemanticsProperties.IsDialog) })
         compose.waitUntil(8_000L) {
             dialogFrame()
-            compose.onAllNodesWithText("资料或开关已经变化，请重新预览再确认").fetchSemanticsNodes().isNotEmpty()
+            compose.onAllNodes(dialogError).fetchSemanticsNodes().size == 1
         }
-        compose.onNodeWithText("资料或开关已经变化，请重新预览再确认").assertIsDisplayed()
+        compose.onNode(dialogError).assertIsDisplayed()
     }
 
     @Test fun previewDoesNotWriteAndConfirmationStoresOnlyNewSelectedFactsWithHistoricalDates() {
