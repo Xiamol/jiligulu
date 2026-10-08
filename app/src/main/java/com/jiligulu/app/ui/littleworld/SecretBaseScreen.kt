@@ -139,7 +139,8 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
     val nickname by prefs.nickname.collectAsStateWithLifecycle("")
     var chessName by rememberSaveable { mutableStateOf(gamePreferences.getString("chess_nickname", null)) }
     var chessAvatar by rememberSaveable { mutableStateOf(gamePreferences.getString("chess_avatar", "aru").orEmpty()) }
-    val chessProfile = ChessPlayerProfile(chessName ?: nickname, chessAvatar).normalized()
+    var chessAvatarJpeg by rememberSaveable { mutableStateOf(gamePreferences.getString("chess_avatar_jpeg", "").orEmpty()) }
+    val chessProfile = ChessPlayerProfile(chessName ?: nickname, chessAvatar, chessAvatarJpeg).normalized()
     var editChessProfile by remember { mutableStateOf(false) }
     var hubXiangqi by rememberSaveable { mutableStateOf(true) }
     var activity by rememberSaveable { mutableStateOf<SecretActivity?>(null) }
@@ -185,8 +186,8 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
     val gomokuLan by gomokuLanSession.state.collectAsStateWithLifecycle()
     val gomokuOnlineSession = remember(context) { GomokuOnlineSession(context) }
     val gomokuOnline by gomokuOnlineSession.state.collectAsStateWithLifecycle()
-    val xiangqiDiscovery = remember(context, chessProfile.name) { NsdRoomDiscovery(context, NearbyGameKind.XIANGQI, chessProfile.name) }
-    val gomokuDiscovery = remember(context, chessProfile.name) { NsdRoomDiscovery(context, NearbyGameKind.GOMOKU, chessProfile.name) }
+    val xiangqiDiscovery = remember(context, chessProfile.name, chessProfile.avatarId) { NsdRoomDiscovery(context, NearbyGameKind.XIANGQI, chessProfile.name, chessProfile.avatarId) }
+    val gomokuDiscovery = remember(context, chessProfile.name, chessProfile.avatarId) { NsdRoomDiscovery(context, NearbyGameKind.GOMOKU, chessProfile.name, chessProfile.avatarId) }
     val nearbyXiangqi by xiangqiDiscovery.state.collectAsStateWithLifecycle()
     val nearbyGomoku by gomokuDiscovery.state.collectAsStateWithLifecycle()
     var starTaps by rememberSaveable { mutableIntStateOf(0) }
@@ -504,7 +505,7 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
         if (value == GomokuPlayMode.NEARBY || value == GomokuPlayMode.ONLINE) {
             gomokuMode = value
             gomokuRoomEntry=value==GomokuPlayMode.ONLINE
-            if(value==GomokuPlayMode.NEARBY&&foreground) gomokuLanSession.host(playerName=chessProfile.name,avatarId=chessProfile.avatarId)
+            if(value==GomokuPlayMode.NEARBY&&foreground) gomokuLanSession.host(playerName=chessProfile.name,avatarId=chessProfile.avatarId,avatarJpeg=chessProfile.avatarJpeg)
             return
         }
         val localMode = if (value == GomokuPlayMode.CPU) LocalGameMode.CPU else LocalGameMode.HOTSEAT
@@ -529,7 +530,7 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
         if (value == XiangqiPlayMode.LAN || value == XiangqiPlayMode.ONLINE) {
             xiangqiMode = value
             xiangqiRoomEntry=value==XiangqiPlayMode.ONLINE
-            if(value==XiangqiPlayMode.LAN&&foreground) lanSession.host(playerName=chessProfile.name,avatarId=chessProfile.avatarId)
+            if(value==XiangqiPlayMode.LAN&&foreground) lanSession.host(playerName=chessProfile.name,avatarId=chessProfile.avatarId,avatarJpeg=chessProfile.avatarJpeg)
             return
         }
         val localMode = if (value == XiangqiPlayMode.CPU) LocalGameMode.CPU else LocalGameMode.HOTSEAT
@@ -618,7 +619,7 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
     }
     LaunchedEffect(activity, foreground, sleeping, archiveReady, gameLoading, choosingOpponent, xiangqiMode, xiangqiDiscovery, lan.connected, lan.hostAddress, lan.sessionActive, lan.error,lan.roomEnded,lan.awaitingMatch) {
         if (archiveReady && !gameLoading && !choosingOpponent && activity == SecretActivity.XIANGQI && foreground && !sleeping && xiangqiMode == XiangqiPlayMode.LAN && !lan.connected) {
-            if (!lanSession.state.value.sessionActive && lanSession.state.value.error == null && !lanSession.state.value.roomEnded) lanSession.host(playerName=chessProfile.name,avatarId=chessProfile.avatarId)
+            if (!lanSession.state.value.sessionActive && lanSession.state.value.error == null && !lanSession.state.value.roomEnded) lanSession.host(playerName=chessProfile.name,avatarId=chessProfile.avatarId,avatarJpeg=chessProfile.avatarJpeg)
             val room = lanSession.state.value
             if (room.sessionActive && room.isHost && !room.awaitingMatch && !room.roomEnded && room.hostAddress.isNotBlank() && room.error == null) {
                 xiangqiDiscovery.start();lanSession.allowNearbyMatching(xiangqiDiscovery.localId)
@@ -628,7 +629,7 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
     }
     LaunchedEffect(activity, foreground, sleeping, archiveReady, gameLoading, choosingOpponent, gomokuMode, gomokuDiscovery, gomokuLan.connected, gomokuLan.hostAddress, gomokuLan.sessionActive, gomokuLan.error,gomokuLan.roomEnded,gomokuLan.awaitingMatch) {
         if (archiveReady && !gameLoading && !choosingOpponent && activity == SecretActivity.GOMOKU && foreground && !sleeping && gomokuMode == GomokuPlayMode.NEARBY && !gomokuLan.connected) {
-            if (!gomokuLanSession.state.value.sessionActive && gomokuLanSession.state.value.error == null && !gomokuLanSession.state.value.roomEnded) gomokuLanSession.host(playerName=chessProfile.name,avatarId=chessProfile.avatarId)
+            if (!gomokuLanSession.state.value.sessionActive && gomokuLanSession.state.value.error == null && !gomokuLanSession.state.value.roomEnded) gomokuLanSession.host(playerName=chessProfile.name,avatarId=chessProfile.avatarId,avatarJpeg=chessProfile.avatarJpeg)
             val room = gomokuLanSession.state.value
             if (room.sessionActive && room.isHost && !room.awaitingMatch && !room.roomEnded && room.hostAddress.isNotBlank() && room.error == null) {
                 gomokuDiscovery.start();gomokuLanSession.allowNearbyMatching(gomokuDiscovery.localId)
@@ -641,14 +642,14 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
         val peer=nearbyXiangqi.autoCandidate;val own=nearbyXiangqi.localId
         if(peer!=null&&own.isNotBlank()&&foreground&&!sleeping&&!choosingOpponent&&activity==SecretActivity.XIANGQI&&
             xiangqiMode==XiangqiPlayMode.LAN&&!lan.connected&&!lan.awaitingMatch&&!lan.roomEnded&&triedNearbyPeers.add("xq:$own:${peer.id}")) {
-            lanSession.allowNearbyMatching(own);xiangqiDiscovery.stop();lanSession.joinNearby(peer,own,chessProfile.name,chessProfile.avatarId)
+            lanSession.allowNearbyMatching(own);xiangqiDiscovery.stop();lanSession.joinNearby(peer,own,chessProfile.name,chessProfile.avatarId,chessProfile.avatarJpeg)
         }
     }
     LaunchedEffect(nearbyGomoku.autoCandidate?.id,nearbyGomoku.localId,activity,foreground,choosingOpponent,gomokuMode,gomokuLan.connected,gomokuLan.awaitingMatch) {
         val peer=nearbyGomoku.autoCandidate;val own=nearbyGomoku.localId
         if(peer!=null&&own.isNotBlank()&&foreground&&!sleeping&&!choosingOpponent&&activity==SecretActivity.GOMOKU&&
             gomokuMode==GomokuPlayMode.NEARBY&&!gomokuLan.connected&&!gomokuLan.awaitingMatch&&!gomokuLan.roomEnded&&triedNearbyPeers.add("go:$own:${peer.id}")) {
-            gomokuLanSession.allowNearbyMatching(own);gomokuDiscovery.stop();gomokuLanSession.joinNearby(peer,own,chessProfile.name,chessProfile.avatarId)
+            gomokuLanSession.allowNearbyMatching(own);gomokuDiscovery.stop();gomokuLanSession.joinNearby(peer,own,chessProfile.name,chessProfile.avatarId,chessProfile.avatarJpeg)
         }
     }
 
@@ -844,11 +845,11 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
             activity = if (hubXiangqi) SecretActivity.XIANGQI else SecretActivity.GOMOKU
             if (hubXiangqi) {
                 changeXiangqiMode(XiangqiPlayMode.ONLINE)
-                onlineSession.join(invite.code, playerName = chessProfile.name, avatarId = chessProfile.avatarId)
+                onlineSession.join(invite.code, playerName = chessProfile.name, avatarId = chessProfile.avatarId, avatarJpeg = chessProfile.avatarJpeg)
                 if (onlineSession.state.value.sessionActive) xiangqiRoomEntry = false
             } else {
                 changeGomokuMode(GomokuPlayMode.ONLINE)
-                gomokuOnlineSession.join(invite.code, playerName = chessProfile.name, avatarId = chessProfile.avatarId)
+                gomokuOnlineSession.join(invite.code, playerName = chessProfile.name, avatarId = chessProfile.avatarId, avatarJpeg = chessProfile.avatarJpeg)
                 if (gomokuOnlineSession.state.value.sessionActive) gomokuRoomEntry = false
             }
         }
@@ -856,8 +857,8 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
         onRoomInviteConsumed()
     }
     if (editChessProfile) ChessProfileEditor(chessProfile, { editChessProfile = false }) { profile ->
-        chessName = profile.name; chessAvatar = profile.avatarId; editChessProfile = false
-        gamePreferences.edit().putString("chess_nickname", profile.name).putString("chess_avatar", profile.avatarId).apply()
+        chessName = profile.name; chessAvatar = profile.avatarId; chessAvatarJpeg = profile.avatarJpeg; editChessProfile = false
+        gamePreferences.edit().putString("chess_nickname", profile.name).putString("chess_avatar", profile.avatarId).putString("chess_avatar_jpeg", profile.avatarJpeg).apply()
     }
     BackHandler { if (activity != null) leaveNetworkSafely(::backFromToy) else { pauseToys(); onBack() } }
 
@@ -920,16 +921,16 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
                     mode = gomokuMode, onMode = { value -> leaveNetworkSafely { changeGomokuMode(value) } }, room = visibleGomokuRoom, nearby = nearbyGomoku,
                     humanPlayer=gomokuHumanPlayer,restorationToken=gomokuRestoreToken,onExit={leaveNetworkSafely(::returnChessHub)},
                     showRoomEntry=gomokuRoomEntry, playerProfile = chessProfile,
-                    onHost = { code -> if (foreground) {gomokuOnlineSession.host(code=code,playerName=chessProfile.name,avatarId=chessProfile.avatarId);
+                    onHost = { code -> if (foreground) {gomokuOnlineSession.host(code=code,playerName=chessProfile.name,avatarId=chessProfile.avatarId,avatarJpeg=chessProfile.avatarJpeg);
                         if(gomokuOnlineSession.state.value.sessionActive)gomokuRoomEntry=false} },
                     onJoin = { address -> if (foreground) {
-                        if (gomokuMode == GomokuPlayMode.ONLINE) {gomokuOnlineSession.join(address,playerName=chessProfile.name,avatarId=chessProfile.avatarId);
+                        if (gomokuMode == GomokuPlayMode.ONLINE) {gomokuOnlineSession.join(address,playerName=chessProfile.name,avatarId=chessProfile.avatarId,avatarJpeg=chessProfile.avatarJpeg);
                             if(gomokuOnlineSession.state.value.sessionActive)gomokuRoomEntry=false}
                         else { val own=nearbyGomoku.localId;val peer=nearbyGomoku.rooms.firstOrNull{it.address==address}
-                            if(own.isNotBlank()&&peer!=null){gomokuLanSession.allowNearbyMatching(own);gomokuDiscovery.stop();gomokuLanSession.joinNearby(peer,own,chessProfile.name,chessProfile.avatarId)} }
+                            if(own.isNotBlank()&&peer!=null){gomokuLanSession.allowNearbyMatching(own);gomokuDiscovery.stop();gomokuLanSession.joinNearby(peer,own,chessProfile.name,chessProfile.avatarId,chessProfile.avatarJpeg)} }
                     } },
                     onDisconnect = { leaveNetworkSafely(::returnChessHub) },
-                    onNearbyRetry = { if (foreground) { gomokuDiscovery.stop();gomokuLanSession.allowNearbyMatching(null);gomokuLanSession.host(playerName=chessProfile.name,avatarId=chessProfile.avatarId) } },
+                    onNearbyRetry = { if (foreground) { gomokuDiscovery.stop();gomokuLanSession.allowNearbyMatching(null);gomokuLanSession.host(playerName=chessProfile.name,avatarId=chessProfile.avatarId,avatarJpeg=chessProfile.avatarJpeg) } },
                     onMatchResponse={accept->if(gomokuMode==GomokuPlayMode.ONLINE)gomokuOnlineSession.respondToMatch(accept)else gomokuLanSession.respondToMatch(accept)},
                     onRematchResponse={accept->if(gomokuMode==GomokuPlayMode.ONLINE)gomokuOnlineSession.respondToRematch(accept)else gomokuLanSession.respondToRematch(accept)},
                     canUndo = when (gomokuMode) {
@@ -984,14 +985,14 @@ fun SecretBaseScreen(onBack: () -> Unit, onOpenNotes: () -> Unit, onOpenMemories
                             clockTickAt = 0L; clockEpoch++; xiangqiStarted = false; xiangqiPaused = true; resumeAfterClockSetup = false; clockSetupVisible = true; checkpointXiangqi() } },
                     humanSide=xiangqiHumanSide,onExit={leaveNetworkSafely(::returnChessHub)},
                     showRoomEntry=xiangqiRoomEntry, playerProfile = chessProfile,
-                    onHost = { code -> if (foreground) { if (xiangqiMode == XiangqiPlayMode.ONLINE) {onlineSession.host(code=code,playerName=chessProfile.name,avatarId=chessProfile.avatarId);
-                        if(onlineSession.state.value.sessionActive)xiangqiRoomEntry=false} else lanSession.host(playerName=chessProfile.name,avatarId=chessProfile.avatarId) } },
-                    onJoin = { address -> if (foreground) { if (xiangqiMode == XiangqiPlayMode.ONLINE) {onlineSession.join(address,playerName=chessProfile.name,avatarId=chessProfile.avatarId);
+                    onHost = { code -> if (foreground) { if (xiangqiMode == XiangqiPlayMode.ONLINE) {onlineSession.host(code=code,playerName=chessProfile.name,avatarId=chessProfile.avatarId,avatarJpeg=chessProfile.avatarJpeg);
+                        if(onlineSession.state.value.sessionActive)xiangqiRoomEntry=false} else lanSession.host(playerName=chessProfile.name,avatarId=chessProfile.avatarId,avatarJpeg=chessProfile.avatarJpeg) } },
+                    onJoin = { address -> if (foreground) { if (xiangqiMode == XiangqiPlayMode.ONLINE) {onlineSession.join(address,playerName=chessProfile.name,avatarId=chessProfile.avatarId,avatarJpeg=chessProfile.avatarJpeg);
                         if(onlineSession.state.value.sessionActive)xiangqiRoomEntry=false}
                         else { val own=nearbyXiangqi.localId;val peer=nearbyXiangqi.rooms.firstOrNull{it.address==address}
-                            if(own.isNotBlank()&&peer!=null){lanSession.allowNearbyMatching(own);xiangqiDiscovery.stop();lanSession.joinNearby(peer,own,chessProfile.name,chessProfile.avatarId)} } } },
+                            if(own.isNotBlank()&&peer!=null){lanSession.allowNearbyMatching(own);xiangqiDiscovery.stop();lanSession.joinNearby(peer,own,chessProfile.name,chessProfile.avatarId,chessProfile.avatarJpeg)} } } },
                     nearby = nearbyXiangqi,
-                    onNearbyRetry = { if (foreground) { xiangqiDiscovery.stop();lanSession.allowNearbyMatching(null);lanSession.host(playerName=chessProfile.name,avatarId=chessProfile.avatarId) } },
+                    onNearbyRetry = { if (foreground) { xiangqiDiscovery.stop();lanSession.allowNearbyMatching(null);lanSession.host(playerName=chessProfile.name,avatarId=chessProfile.avatarId,avatarJpeg=chessProfile.avatarJpeg) } },
                     onMatchResponse={accept->if(xiangqiMode==XiangqiPlayMode.ONLINE)onlineSession.respondToMatch(accept)else lanSession.respondToMatch(accept)},
                     onRematchResponse={accept->if(xiangqiMode==XiangqiPlayMode.ONLINE)onlineSession.respondToRematch(accept)else lanSession.respondToRematch(accept)},
                     onDisconnect = { leaveNetworkSafely(::returnChessHub) },

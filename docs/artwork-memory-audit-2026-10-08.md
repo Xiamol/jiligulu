@@ -6,7 +6,7 @@ Photo decoding keeps the same target size and EXIF orientation, performs target 
 
 Android 29+ poster fonts use the packaged Noto variable font through `Font.Builder(Resources, resId)` with the same explicit 400/650 weight axis and system fallback. Android 26–28, or a modern resource-font failure, retain the file-based builder. The legacy cache copy is 17,772,300 bytes. This change avoids creating it on the modern successful path; it does not delete already existing copies or claim all existing user caches became smaller. See the [Android Font.Builder reference](https://developer.android.com/reference/android/graphics/fonts/Font.Builder) and [CustomFallbackBuilder reference](https://developer.android.com/reference/android/graphics/Typeface.CustomFallbackBuilder).
 
-Cleanup remains limited to caller-owned draft paths, with active commit claims and references from live/deleted bills, wishes, cards, USER photo payloads, and all non-DELETED DRAFT photo payloads. Chat queries load only kind/status/payload, not message content. A failed reference query or malformed live attachment preserves candidates. Engine models, licenses, user files, and device caches were not swept.
+Cleanup remains limited to caller-owned draft paths, with active commit claims and references from live/deleted bills, wishes, cards, and all non-DELETED DRAFT photo payloads. Photos attach to individual bill drafts; the transient proposal to attach them to USER messages was withdrawn before release. Chat queries load only kind/status/payload, not message content. A failed reference query or malformed live attachment preserves candidates. Engine models, licenses, user files, and device caches were not swept.
 
 Seven obsolete packaged PNGs were removed, totaling 14,476,165 bytes:
 

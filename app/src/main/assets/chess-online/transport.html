@@ -4,6 +4,7 @@
 let peer=null,connection=null,host=false,stopped=false,code='',peerIdentity='',remoteIdentity='',remoteToken='';
 let token='',everConnected=false,retryTimer=null,connectTimer=null,signalTimer=null;
 let outgoing=0,incoming=0,pending=new Map(),inbox=new Map(),hasRelay=false;
+let remoteAvatarCapable=false;
 const protocol='gulu-xq-4';
 function emit(type,value=''){if(!stopped&&window.GuluTransport)window.GuluTransport.event(type,String(value).slice(0,2048));}
 function nonce(){const b=new Uint8Array(16);crypto.getRandomValues(b);return Array.from(b,v=>v.toString(16).padStart(2,'0')).join('');}
@@ -21,6 +22,8 @@ function receive(packet){
   if(!packet||typeof packet!=='object'||packet.v!==3){emit('error','protocol');return;}
   if(Number.isSafeInteger(packet.ack)&&packet.ack>=0&&packet.ack<=outgoing){
     for(const n of pending.keys())if(n<=packet.ack)pending.delete(n);
+    // Legacy v3 ACK readers ignore extra keys. No new line is sent until both sides prove support.
+    if(packet.avatarV===1&&!remoteAvatarCapable){remoteAvatarCapable=true;emit('avatar-capable');}
     return;
   }
   if(!Number.isSafeInteger(packet.n)||packet.n<1||typeof packet.line!=='string'||packet.line.length>1024||!/^[\x20-\x7e]*$/.test(packet.line)){
@@ -29,7 +32,7 @@ function receive(packet){
   if(packet.n>incoming+128){emit('error','invalid-data');return;}
   if(packet.n>incoming)inbox.set(packet.n,packet.line);
   while(inbox.has(incoming+1)){const n=++incoming;const line=inbox.get(n);inbox.delete(n);emit('data',line);}
-  transmit({v:3,ack:incoming});
+  transmit({v:3,ack:incoming,avatarV:1});
 }
 function recover(){
   if(stopped)return;
@@ -67,7 +70,7 @@ function bind(c){
     if(connection!==c||stopped)return;
     clearConnectionTimer();clearTimeout(retryTimer);retryTimer=null;
     if(host){remoteIdentity=c.peer;remoteToken=c.metadata.token;}
-    transmit({v:3,ack:incoming});
+    transmit({v:3,ack:incoming,avatarV:1});
     for(const [n,line] of pending)transmit({v:3,n,line});
     if(everConnected)emit('recovered');else{everConnected=true;emit('connected');}
   });
@@ -109,6 +112,11 @@ function guluSend(line){
   if(/\|(PING|PONG)$/.test(line)&&(!connection?.open||[...pending.values()].some(value=>/\|(PING|PONG)$/.test(value))))return;
   if(pending.size>=128||outgoing>=Number.MAX_SAFE_INTEGER){emit('error','queue-full');return;}
   const n=++outgoing;pending.set(n,line);transmit({v:3,n,line});
+}
+function guluSendAvatar(line){
+  // Leave game/control capacity untouched; optional portraits never grow the ordinary queue.
+  if(!remoteAvatarCapable||!connection?.open||pending.size>=112)return;
+  guluSend(line);
 }
 function guluForeground(value){if(value&&!stopped){if(!connection?.open)recover();else{for(const [n,line] of pending)transmit({v:3,n,line});}}}
 function guluStop(){

@@ -1,0 +1,13 @@
+# Optional room portrait transfer
+
+The existing game-line limit remains 1024 ASCII bytes. HELLO keeps its existing four/five fields and the five default avatar IDs. Photographs do not enter HELLO, game snapshots, AI requests, NSD TXT, URLs, or an image-hosting service.
+
+Internet rooms retain the existing PeerJS namespace and v3 ordered packet/ACK envelope. The new ACK adds `avatarV: 1`; the legacy ACK branch processes its valid acknowledgment and ignores extra keys. A new endpoint requires a peer ACK with that flag and a validated room HELLO before sending optional avatar lines. A legacy peer never proves support, so it receives the existing game/control lines only.
+
+Nearby rooms add the optional `avatar_v=1` TXT attribute while retaining discovery version 4. A joining client sends `AV1|CAP|1` only when the resolved host advertises that capability. The host responds only after receiving the new guest's capability and a valid HELLO. Old guests ignore TXT extras and do not offer capability; old hosts never receive a new opcode. Direct IP joins without a TXT proof retain default avatars.
+
+An avatar uses a BEGIN with a 16-hex transfer ID, encoded length and SHA-256 of canonical Base64 text; sequential CHUNK frames carry at most 640 characters, followed by END. At most 8192 encoded characters, 6144 JPEG bytes, 13 chunks, one incoming transfer, 32 optional frames per connection and a fixed five-second receive deadline are allowed. Final validation also requires a decodable square JPEG no larger than 112 pixels, through the same local photo validator. Invalid ordering, length, hash, image or deadline abandons only the optional portrait; chess data is not consumed or mutated. A completed portrait is applied once.
+
+Avatar sends are paced at 20 ms. LAN auxiliary frames stop when eight ordinary queue entries are waiting, preserving space inside the existing 16-entry game queue. Internet auxiliary sends require an open channel and fewer than 112 pending entries inside the existing 128-entry envelope. Congestion can leave a portrait incomplete; the receiver expires it to the default avatar while game control continues. Closing a room removes its auxiliary sender/expiry tasks and buffers. Reconnection does not change game, HELLO, revision or color authority.
+
+The selected portrait is held in the local chess preference as bounded JPEG text. New rooms copy it into their local profile; both chess boards retain it for the local HOTSEAT player and display validated remote portraits. Changes take effect in the next room handshake. Existing clients continue to see the selected default avatar.

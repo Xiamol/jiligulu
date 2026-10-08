@@ -309,8 +309,8 @@ internal fun ColumnScope.SecretGomokuGame(state: GomokuState, paused: Boolean, b
     Spacer(Modifier.height(boardTop))
     Row(Modifier.width(boardSize).height(56.dp), verticalAlignment = Alignment.CenterVertically) {
         val opponent = if (mode == GomokuPlayMode.CPU) ChessPlayerProfile("阿噜", "aru")
-            else ChessPlayerProfile(room?.remoteName ?: "棋友", room?.remoteAvatarId ?: "star")
-        fun profile(player: Int) = if (mode == GomokuPlayMode.HOTSEAT) ChessPlayerProfile(if (player == 1) playerProfile.name else "棋友", if (player == 1) playerProfile.avatarId else "cat")
+            else ChessPlayerProfile(room?.remoteName ?: "棋友", room?.remoteAvatarId ?: "star", room?.remoteAvatarJpeg.orEmpty())
+        fun profile(player: Int) = if (mode == GomokuPlayMode.HOTSEAT) if (player == 1) playerProfile else ChessPlayerProfile("棋友", "cat")
             else if (localPlayer == player) playerProfile else opponent
         fun seatStatus(player: Int) = when { finished -> "结束"; room?.peerLeft == true && player != localPlayer -> "已离开"
             network && room?.remoteBackground == true && player != localPlayer -> "暂离"; !network && paused -> "暂停"

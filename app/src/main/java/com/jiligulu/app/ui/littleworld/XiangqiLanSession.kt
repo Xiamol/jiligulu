@@ -64,6 +64,8 @@ data class XiangqiLanUiState(
     val pendingDrawId: Int = 0,
     val myDrawRequested: Boolean = false,
     val agreedDraw: Boolean = false,
+    val localAvatarJpeg: String = "",
+    val remoteAvatarJpeg: String = "",
 )
 
 /** The room creator is the board authority, independent of randomly assigned red/black. */

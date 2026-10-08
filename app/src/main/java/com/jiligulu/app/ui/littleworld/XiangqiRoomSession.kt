@@ -40,6 +40,12 @@ open class XiangqiRoomSession protected constructor(private val context: Context
     private var voteTask: Runnable? = null
     private var playerName = "棋友"
     private var avatarId = "aru"
+    private var avatarJpeg = ""
+    private var advertisedAvatar = false
+    private var avatarExchange: RoomAvatarExchange? = null
+    private val avatarFrames = java.util.ArrayDeque<String>()
+    private var avatarSendTask: Runnable? = null
+    private var avatarExpiryTask: Runnable? = null
     private var peerProfileReceived = false
     private var nearbyId: String? = null
     private var guestId = ""
@@ -68,17 +74,19 @@ open class XiangqiRoomSession protected constructor(private val context: Context
         enterResult()
     }
 
-    fun host(code: String = "", playerName: String = "棋友", avatarId: String = "aru") {
+    fun host(code: String = "", playerName: String = "棋友", avatarId: String = "aru", avatarJpeg: String = "") {
         val target = if (online) if(code.isBlank()) RoomRoundRules.randomCode() else RoomRoundRules.code(code) else ""
         if(target==null) {mutable.value=mutable.value.copy(error="房间码用4–12位英文或数字哦");return}
-        this.playerName=RoomRoundRules.name(playerName);this.avatarId=RoomRoundRules.avatar(avatarId);guestId="";targetId="";start(target,true)
+        this.playerName=RoomRoundRules.name(playerName);this.avatarId=RoomRoundRules.avatar(avatarId)
+        this.avatarJpeg=ChessAvatarPhoto.normalizedJpeg(avatarJpeg);advertisedAvatar=false;guestId="";targetId="";start(target,true)
     }
-    fun join(address: String, playerName: String = "棋友", avatarId: String = "aru") {
+    fun join(address: String, playerName: String = "棋友", avatarId: String = "aru", avatarJpeg: String = "") {
         val target = if (online) RoomRoundRules.code(address) else address.trim()
         val valid = target!=null && (online || runCatching { GomokuLanWire.privateEndpoint(target,XiangqiLanSession.PORT) }.isSuccess)
         if (!valid) { mutable.value = mutable.value.copy(error = if (online) "请输入4–12位房间码" else "这个附近房间暂时无法连接"); return }
         this.playerName=RoomRoundRules.name(playerName)
         this.avatarId=RoomRoundRules.avatar(avatarId)
+        this.avatarJpeg=ChessAvatarPhoto.normalizedJpeg(avatarJpeg);advertisedAvatar=false
         guestId="";targetId="";start(requireNotNull(target), false)
     }
 
@@ -88,8 +96,10 @@ open class XiangqiRoomSession protected constructor(private val context: Context
         val token = ++generation
         if (host && !online) handshake.close() // Active nearby radar may wait until the user cancels.
         else handshake.begin(SystemClock.uptimeMillis(), if (host) RoomRoundRules.WAITING_MILLIS else 45_000)
-        mutable.value = XiangqiLanUiState(isHost=host, hostAddress = address, localAvatarId = avatarId,
+        mutable.value = XiangqiLanUiState(isHost=host, hostAddress = address, localAvatarId = avatarId, localAvatarJpeg = avatarJpeg,
             sessionActive = true, busy = true, localBackground = !foreground, status = if (online) "正在连接互联网房间…" else "正在寻找附近伙伴…")
+        avatarExchange = RoomAvatarExchange(avatarJpeg, online, host, advertisedAvatar, ::queueAvatar,
+            { jpeg -> mutable.value = mutable.value.copy(remoteAvatarJpeg = jpeg) }, SystemClock::uptimeMillis)
         val events = GomokuWireEvents(
             waiting = { if (token == generation && !initialized) mutable.value = mutable.value.copy(hostAddress = it,
                 status = if (host) "房间已准备好，等待伙伴加入" else "正在寻找房间…") },
@@ -99,9 +109,11 @@ open class XiangqiRoomSession protected constructor(private val context: Context
                 mutable.value = mutable.value.copy(awaitingMatch=true,busy=true,error=null,status="等待棋友确认对弈…")
                 scheduleWaiting(token)
                 if(!host) send(XiangqiLanMessage.Control(RoomControl.Hello(this.playerName,guestId,targetId,avatarId)))
+                avatarExchange?.connected()
                 startHeartbeat(token)
             } },
             data = { if (token == generation) runCatching {
+                if (avatarExchange?.receive(it) == true) { scheduleAvatarExpiry(); return@runCatching }
                 val message = XiangqiLanProtocol.decode(it); refreshUndoDeadline(); lastPacket = SystemClock.uptimeMillis();
                 if (mutable.value.reconnecting) mutable.value = mutable.value.copy(reconnecting = false, error = null, status = turnStatus(mutable.value.game))
                 receive(message)
@@ -111,6 +123,7 @@ open class XiangqiRoomSession protected constructor(private val context: Context
             recovered = { if (token == generation) { refreshUndoDeadline(); lastPacket = SystemClock.uptimeMillis(); mutable.value = mutable.value.copy(reconnecting = false, error = null, status = turnStatus(mutable.value.game)); refreshUndoDeadline(); sendPresence() } },
             failure = { if (token == generation) fail(if(!initialized&&!mutable.value.connected)
                 "连接未建立，请确认双方已升级 1.0.3" else it) },
+            avatarCapable = { if (token == generation) avatarExchange?.transportCapability() },
         )
         wire = wireFactory?.invoke(address, host, events) ?: if (online) GomokuOnlineWire(requireNotNull(context), address, host, events,prefix="gulu-xq-") else GomokuLanWire(events,XiangqiLanSession.PORT).also {
             if (host) it.host() else it.join(address)
@@ -144,10 +157,12 @@ open class XiangqiRoomSession protected constructor(private val context: Context
         else finishRoom(RoomCloseReason.DECLINED.hint,RoomCloseReason.DECLINED)
     }
     fun allowNearbyMatching(localId:String?) { if(!online && assignment==null) nearbyId=localId?.takeIf {it.matches(Regex("[a-f0-9]{12}"))} }
-    fun joinNearby(room:NearbyGameRoom,localId:String,playerName:String="棋友",avatarId:String="aru") {
+    fun joinNearby(room:NearbyGameRoom,localId:String,playerName:String="棋友",avatarId:String="aru",avatarJpeg:String="") {
         require(localId.matches(Regex("[a-f0-9]{12}")) && room.id.matches(Regex("[a-f0-9]{12}")) && localId!=room.id)
         require(!online && runCatching {GomokuLanWire.privateEndpoint(room.address,XiangqiLanSession.PORT)}.isSuccess)
-        this.playerName=RoomRoundRules.name(playerName);this.avatarId=RoomRoundRules.avatar(avatarId);guestId=localId;targetId=room.id;start(room.address,false)
+        this.playerName=RoomRoundRules.name(playerName);this.avatarId=RoomRoundRules.avatar(avatarId)
+        this.avatarJpeg=ChessAvatarPhoto.normalizedJpeg(avatarJpeg);advertisedAvatar=room.avatarProtocol==1
+        guestId=localId;targetId=room.id;start(room.address,false)
     }
     fun requestRematch() = respondToRematch(true)
     fun respondToRematch(accept:Boolean) {
@@ -310,6 +325,30 @@ open class XiangqiRoomSession protected constructor(private val context: Context
         if(target.outcome==XiangqiOutcome.PLAYING) clearRound()
     }
     private fun send(message: XiangqiLanMessage) { wire?.send(XiangqiLanProtocol.encode(message)) }
+    private fun queueAvatar(lines: List<String>) {
+        if (avatarFrames.size + lines.size > 32) return
+        avatarFrames.addAll(lines)
+        if (avatarSendTask != null) return
+        val token = generation
+        avatarSendTask = object : Runnable { override fun run() {
+            if (token != generation || wire == null || !foreground) { avatarFrames.clear(); avatarSendTask = null; return }
+            val line = avatarFrames.pollFirst()
+            if (line == null || wire?.sendAvatar(line) != true) { avatarFrames.clear(); avatarSendTask = null; return }
+            if (avatarFrames.isEmpty()) avatarSendTask = null else main.postDelayed(this, 20)
+        } }.also { main.post(it) }
+    }
+    private fun scheduleAvatarExpiry() {
+        avatarExpiryTask?.let(main::removeCallbacks); avatarExpiryTask = null
+        val deadline = avatarExchange?.deadline ?: return
+        val token = generation
+        avatarExpiryTask = Runnable { if (token == generation) avatarExchange?.expire(); avatarExpiryTask = null }
+            .also { main.postDelayed(it, (deadline - SystemClock.uptimeMillis()).coerceAtLeast(1)) }
+    }
+    private fun clearAvatarExchange() {
+        avatarSendTask?.let(main::removeCallbacks); avatarSendTask = null
+        avatarExpiryTask?.let(main::removeCallbacks); avatarExpiryTask = null
+        avatarFrames.clear(); avatarExchange = null
+    }
     private fun turnStatus(game: XiangqiState): String = when (game.outcome) {
         XiangqiOutcome.RED_WON -> "红方获胜"
         XiangqiOutcome.BLACK_WON -> "黑方获胜"
@@ -384,6 +423,7 @@ open class XiangqiRoomSession protected constructor(private val context: Context
         if(notify!=null && wire!=null) send(XiangqiLanMessage.Control(RoomControl.Close(assignment?.round ?: 0,mutable.value.revision,notify)))
         val notifyPeer = notify != null && (initialized || mutable.value.awaitingMatch)
         val old=wire;wire=null
+        clearAvatarExchange()
         generation++; handshake.close(); clearWaiting(); clearAck(); clearUndo();draw.reset(); clearSelection(); heartbeat?.let(main::removeCallbacks); heartbeat = null
         clearRound();initialized = false; history = XiangqiUndoHistory();localVoteSequence=0;guestVoteSequence=0;pendingStart=null;nearbyId=null
         if(!notifyPeer) old?.close() else main.postDelayed({old?.close()},200)
@@ -402,6 +442,7 @@ open class XiangqiRoomSession protected constructor(private val context: Context
                     if (!current.awaitingMatch || control.guestId.isNotEmpty() || control.targetId.isNotEmpty()) throw LanProtocolException()
                     peerProfileReceived = true
                     mutable.value=current.copy(remoteName=control.name,remoteAvatarId=control.avatarId)
+                    avatarExchange?.profileAccepted()
                     return
                 }
                 peerProfileReceived = true
@@ -412,6 +453,7 @@ open class XiangqiRoomSession protected constructor(private val context: Context
                     if (RoomRoundRules.willingNearbyHost(nearbyId, control)) respondToMatch(true)
                     else finishRoom("这个附近邀请已过期，重新找找吧", RoomCloseReason.DECLINED)
                 }
+                avatarExchange?.profileAccepted()
             }
             is RoomControl.Start -> {
                 if(hosting || !RoomRoundRules.accepts(assignment,current.revision,control.assignment,current.myRematchRequested,hostReady&&guestReady)) throw LanProtocolException()

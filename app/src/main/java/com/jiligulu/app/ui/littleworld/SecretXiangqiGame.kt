@@ -219,9 +219,9 @@ internal fun ColumnScope.SecretXiangqiGame(state: XiangqiState, mode: XiangqiPla
     Spacer(Modifier.height(8.dp))
     Row(Modifier.width(boardWidth).height(56.dp), verticalAlignment = Alignment.CenterVertically) {
         val localSide = if (networkMode) lan.localSide else humanSide
-        val opponent = if (mode == XiangqiPlayMode.CPU) ChessPlayerProfile("阿噜", "aru") else ChessPlayerProfile(lan.remoteName, lan.remoteAvatarId)
+        val opponent = if (mode == XiangqiPlayMode.CPU) ChessPlayerProfile("阿噜", "aru") else ChessPlayerProfile(lan.remoteName, lan.remoteAvatarId, lan.remoteAvatarJpeg)
         fun profile(side: XiangqiSide) = if (mode == XiangqiPlayMode.HOTSEAT)
-            ChessPlayerProfile(if (side == XiangqiSide.RED) playerProfile.name else "棋友", if (side == XiangqiSide.RED) playerProfile.avatarId else "cat")
+            if (side == XiangqiSide.RED) playerProfile else ChessPlayerProfile("棋友", "cat")
             else if (side == localSide) playerProfile else opponent
         fun seatStatus(side: XiangqiSide) = when { finished -> "结束"; networkMode && lan.peerLeft && side != localSide -> "已离开"
             networkMode && lan.remoteBackground && side != localSide -> "暂离"; !networkMode && paused -> "暂停"

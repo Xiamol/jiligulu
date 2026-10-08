@@ -15,7 +15,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 enum class NearbyGameKind(val tag: String, val port: Int) { XIANGQI("xq", 49761), GOMOKU("go", 49762) }
-data class NearbyGameRoom(val id: String, val name: String, val address: String, val port: Int, val avatarId: String = "aru")
+data class NearbyGameRoom(val id: String, val name: String, val address: String, val port: Int, val avatarId: String = "aru",
+    val avatarProtocol: Int = 0)
 data class NearbyRoomsState(val rooms: List<NearbyGameRoom> = emptyList(), val searching: Boolean = false, val error: String? = null,
     val localId:String="", val diagnostic: String? = null) {
     val autoCandidate:NearbyGameRoom? get()=rooms.filter {it.id<localId && localId.isNotBlank()}.minByOrNull {it.id}
@@ -59,6 +60,7 @@ class NsdRoomDiscovery(context: Context, private val gameKind: NearbyGameKind, p
             setAttribute("version", "4"); setAttribute("kind", gameKind.tag); setAttribute("id", selfId)
             setAttribute("name", playerName.filter { !it.isISOControl() }.trim().take(16).ifEmpty { "阿噜的朋友" })
             setAttribute("avatar", RoomRoundRules.avatar(avatarId))
+            setAttribute("avatar_v", "1")
         }
         val registrationListener = object : NsdManager.RegistrationListener {
             override fun onServiceRegistered(serviceInfo: NsdServiceInfo) {
@@ -176,7 +178,8 @@ class NsdRoomDiscovery(context: Context, private val gameKind: NearbyGameKind, p
                         !address.isLoopbackAddress && !address.isAnyLocalAddress) {
                         val name = attr("name")?.filter { !it.isISOControl() }?.trim()?.take(20)?.ifEmpty { null }
                             ?: "阿噜的朋友"
-                        resolved[id] = NearbyGameRoom(id, name, address.hostAddress ?: "", serviceInfo.port,RoomRoundRules.avatar(attr("avatar").orEmpty()))
+                        resolved[id] = NearbyGameRoom(id, name, address.hostAddress ?: "", serviceInfo.port,
+                            RoomRoundRules.avatar(attr("avatar").orEmpty()), if (attr("avatar_v") == "1") 1 else 0)
                         publish()
                     }
                     resolveNext(token)

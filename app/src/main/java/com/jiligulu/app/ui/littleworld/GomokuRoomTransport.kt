@@ -32,6 +32,7 @@ import org.json.JSONObject
 internal interface GomokuRoomWire {
     val transportView: WebView? get() = null
     fun send(line: String)
+    fun sendAvatar(line: String): Boolean { send(line); return true }
     fun close()
     fun foreground(value: Boolean) {}
 }
@@ -43,6 +44,7 @@ internal data class GomokuWireEvents(
     val failure: (String) -> Unit,
     val recovering: () -> Unit = {},
     val recovered: () -> Unit = {},
+    val avatarCapable: () -> Unit = {},
 )
 
 /** Reliable local byte transport; all UI/game callbacks are serialized on the main looper. */
@@ -50,6 +52,8 @@ internal class GomokuLanWire(private val events: GomokuWireEvents,private val po
     private val main = Handler(Looper.getMainLooper())
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val outgoing = Channel<String>(16)
+    private val enqueueLock = Any()
+    private var queuedLines = 0
     private val lock = Any()
     @Volatile private var closed = false
     private var server: ServerSocket? = null
@@ -92,7 +96,10 @@ internal class GomokuLanWire(private val events: GomokuWireEvents,private val po
         val output = peer.getOutputStream()
         scope.launch {
             try {
-                for (line in outgoing) { output.write((line + "\n").toByteArray(Charsets.US_ASCII)); output.flush() }
+                for (line in outgoing) {
+                    synchronized(enqueueLock) { queuedLines-- }
+                    output.write((line + "\n").toByteArray(Charsets.US_ASCII)); output.flush()
+                }
             } catch (_: Exception) { if (!closed) post { events.failure("附近连接已断开") } }
         }
         post(events.connected)
@@ -104,8 +111,13 @@ internal class GomokuLanWire(private val events: GomokuWireEvents,private val po
 
     override fun send(line: String) {
         if (closed) return
-        if (line.length > XiangqiLanProtocol.MAX_LINE_BYTES || outgoing.trySend(line).isFailure)
+        if (line.length > XiangqiLanProtocol.MAX_LINE_BYTES || !enqueue(line, auxiliary = false))
             post { events.failure("附近连接繁忙，请重新进入") }
+    }
+    override fun sendAvatar(line: String): Boolean = !closed && line.length <= XiangqiLanProtocol.MAX_LINE_BYTES && enqueue(line, auxiliary = true)
+    private fun enqueue(line: String, auxiliary: Boolean): Boolean = synchronized(enqueueLock) {
+        if (auxiliary && queuedLines >= 8) false
+        else if (outgoing.trySend(line).isSuccess) { queuedLines++; true } else false
     }
     override fun close() {
         synchronized(lock) { closed = true; runCatching { socket?.close() }; runCatching { server?.close() } }
@@ -150,6 +162,7 @@ internal class GomokuOnlineWire(context: Context, code: String, hosting: Boolean
                     "connected" -> events.connected()
                     "recovering" -> events.recovering()
                     "recovered" -> events.recovered()
+                    "avatar-capable" -> events.avatarCapable()
                     "data" -> if (value.length <= XiangqiLanProtocol.MAX_LINE_BYTES) events.data(value)
                         else events.failure("收到无效五子棋数据")
                     "closed" -> events.failure("伙伴已离开房间")
@@ -183,6 +196,11 @@ internal class GomokuOnlineWire(context: Context, code: String, hosting: Boolean
     }
     private var started = false
     override fun send(line: String) { if (!closed) view.evaluateJavascript("guluSend(${JSONObject.quote(line)})", null) }
+    override fun sendAvatar(line: String): Boolean {
+        if (closed) return false
+        view.evaluateJavascript("guluSendAvatar(${JSONObject.quote(line)})", null)
+        return true
+    }
     override fun foreground(value: Boolean) { if (!closed) view.evaluateJavascript("guluForeground($value)", null) }
     override fun close() {
         if (closed) return
