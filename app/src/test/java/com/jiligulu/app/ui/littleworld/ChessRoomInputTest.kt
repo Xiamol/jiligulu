@@ -102,8 +102,10 @@ class ChessRoomInputTest {
         compose.waitForIdle()
         assertSame(original, editor())
         assertEquals("ABCDE9", text())
+        compose.runOnIdle { assertEquals(2, editor().selectionStart); assertEquals(4, editor().selectionEnd) }
         compose.runOnIdle { busy.value = false }
         compose.waitForIdle()
+        compose.runOnIdle { assertEquals(2, editor().selectionStart); assertEquals(4, editor().selectionEnd) }
         edit { it.commitText("12", 1) }
         assertEquals("AB12E9", text())
         compose.onNodeWithText("加入").performClick()

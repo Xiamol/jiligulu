@@ -9,6 +9,7 @@ import android.text.style.RelativeSizeSpan
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.View
 import android.view.inputmethod.BaseInputConnection
 import android.view.inputmethod.EditorInfo
@@ -61,6 +62,9 @@ internal class RoomCodeEditText(context: Context) : EditText(context) {
     private var ready = false
     private var imeBatchDepth = 0
     private var lastPublished: TextFieldValue? = null
+    private var systemChangeDepth = 0
+    private data class ResumeSelection(val text: String, val range: TextRange)
+    private var resumeSelection: ResumeSelection? = null
 
     init {
         background = null
@@ -113,8 +117,11 @@ internal class RoomCodeEditText(context: Context) : EditText(context) {
     }
 
     private fun publishValue() {
-        if (!ready || imeBatchDepth > 0) return
+        if (!ready || imeBatchDepth > 0 || systemChangeDepth > 0) return
         val value = snapshotValue()
+        resumeSelection?.let {
+            if (it.text != value.text || it.range != value.selection) resumeSelection = null
+        }
         if (lastPublished != value) {
             lastPublished = value
             onValueChange?.invoke(value)
@@ -126,8 +133,55 @@ internal class RoomCodeEditText(context: Context) : EditText(context) {
         publishValue()
     }
 
+    override fun setEnabled(enabled: Boolean) {
+        if (!ready || enabled == isEnabled) { super.setEnabled(enabled); return }
+        if (!enabled) {
+            val value = snapshotValue()
+            resumeSelection = ResumeSelection(value.text, value.selection)
+        }
+        // TextView stops selection controllers while disabled and restarts the IME on enable.
+        // Those framework changes must not replace the user's selected range with an end cursor.
+        systemChangeDepth++
+        try {
+            super.setEnabled(enabled)
+            restoreResumeSelection()
+            if (enabled && isFocused) resumeSelection = null
+        } finally { systemChangeDepth-- }
+        publishValue()
+    }
+
+    override fun onFocusChanged(focused: Boolean, direction: Int, previouslyFocusedRect: android.graphics.Rect?) {
+        systemChangeDepth++
+        try {
+            super.onFocusChanged(focused, direction, previouslyFocusedRect)
+            if (ready) {
+                restoreResumeSelection()
+                if (focused) resumeSelection = null
+            }
+        } finally { systemChangeDepth-- }
+        publishValue()
+    }
+
+    private fun restoreResumeSelection() {
+        val saved = resumeSelection ?: return
+        if (saved.text == text.toString()) {
+            setSelection(saved.range.start.coerceIn(0, text.length), saved.range.end.coerceIn(0, text.length))
+        } else resumeSelection = null
+    }
+
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        // A new user tap/drag intentionally chooses a cursor position; do not restore over it.
+        if (event.actionMasked == MotionEvent.ACTION_DOWN && isEnabled) resumeSelection = null
+        return super.onTouchEvent(event)
+    }
+
     override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection? {
+        if (ready && isEnabled) {
+            systemChangeDepth++
+            try { restoreResumeSelection() } finally { systemChangeDepth-- }
+        }
         val delegate = super.onCreateInputConnection(outAttrs) ?: return null
+        resumeSelection = null
         return object : InputConnectionWrapper(delegate, false) {
             override fun beginBatchEdit(): Boolean = super.beginBatchEdit().also { if (it) imeBatchDepth++ }
             override fun endBatchEdit(): Boolean = super.endBatchEdit().also {

@@ -3,6 +3,8 @@ package com.jiligulu.app.ui.littleworld
 import android.app.Activity
 import android.app.Application
 import android.text.Spanned
+import android.view.MotionEvent
+import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 import androidx.compose.ui.text.TextRange
@@ -70,5 +72,41 @@ class RoomCodeEditorImeTest {
         assertEquals("", view.text.toString())
         assertNull(roomCodeSubmission(view.text.toString(), joining = true).code)
         assertEquals("", roomCodeSubmission(view.text.toString(), joining = false).code)
+    }
+
+    @Test fun temporarilyDisablingAndRefocusingPreservesTheUsersReplacementRange() = editor { view, input ->
+        input.commitText("ABCDE9", 1)
+        input.setSelection(2, 4)
+        view.isEnabled = false
+        view.clearFocus()
+        view.isEnabled = true
+        view.requestFocus()
+        val resumed = requireNotNull(view.onCreateInputConnection(EditorInfo()))
+        assertEquals(2, view.selectionStart)
+        assertEquals(4, view.selectionEnd)
+        resumed.commitText("12", 1)
+        assertEquals("AB12E9", view.text.toString())
+        resumed.deleteSurroundingText(1, 0)
+        assertEquals("AB1E9", view.text.toString())
+    }
+
+    @Test fun aNewUserTapAfterReenablingMayChooseANewCursorInsteadOfRestoringTheOldRange() = editor { view, input ->
+        input.commitText("ABCDE9", 1)
+        input.setSelection(2, 4)
+        view.isEnabled = false
+        view.clearFocus()
+        view.isEnabled = true
+        view.measure(View.MeasureSpec.makeMeasureSpec(320, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(48, View.MeasureSpec.EXACTLY))
+        view.layout(0, 0, 320, 48)
+        val down = MotionEvent.obtain(0, 0, MotionEvent.ACTION_DOWN, 1f, 24f, 0)
+        val up = MotionEvent.obtain(0, 50, MotionEvent.ACTION_UP, 1f, 24f, 0)
+        try { view.onTouchEvent(down); view.onTouchEvent(up) } finally { down.recycle(); up.recycle() }
+        view.requestFocus()
+        val resumed = requireNotNull(view.onCreateInputConnection(EditorInfo()))
+        assertEquals(0, view.selectionStart)
+        assertEquals(0, view.selectionEnd)
+        resumed.commitText("X", 1)
+        assertEquals("XABCDE9", view.text.toString())
     }
 }
