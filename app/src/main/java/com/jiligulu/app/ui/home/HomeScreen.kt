@@ -425,16 +425,10 @@ private fun MonthlySummary(state: HomeUiState) {
             Spacer(Modifier.width(1.dp).height(72.dp).background(MaterialTheme.colorScheme.outline))
             SummaryAmount("收入", state.incomeText, state.incomeCount, false, Modifier.weight(1f))
         }
-        BoxWithConstraints(Modifier.fillMaxWidth().padding(top = 10.dp)) {
-            val shortLabels = maxWidth < 320.dp
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("本月结余 ¥${state.balanceText}", style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1,
-                    modifier = Modifier.weight(1f).horizontalScroll(rememberScrollState()))
-                com.jiligulu.app.ui.quicktools.WeChatQuickActions(compact = shortLabels)
-            }
-        }
+        Text("本月结余 ¥${state.balanceText}", style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1,
+            modifier = Modifier.padding(top = 10.dp).fillMaxWidth().horizontalScroll(rememberScrollState()))
+        com.jiligulu.app.ui.quicktools.PaymentQuickActions(Modifier.fillMaxWidth().padding(top = 7.dp))
     }
 }
 
