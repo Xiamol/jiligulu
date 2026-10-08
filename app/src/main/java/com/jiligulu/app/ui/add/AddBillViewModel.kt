@@ -350,7 +350,7 @@ class AddBillViewModel(
                     app.container.categoryRepository,
                     app.container.categoryAdminRepository,
                     remoteCategory = { text, type, catalog ->
-                        val client = app.container.aiRepository.createClient()
+                        val client = app.container.aiRepository.createClient(com.jiligulu.app.core.ai.AiUsagePurpose.CLASSIFICATION)
                         val result = client.parseBill(ManualCategoryClassifier.PROMPT,
                             ManualCategoryClassifier.input(text, type, catalog)).getOrThrow()
                         ManualCategoryClassifier.suggestion(result, catalog)
@@ -358,7 +358,7 @@ class AddBillViewModel(
                     importPhotoFile = { uri -> MemoryFiles.importPhoto(app, uri) },
                     deletePhotoFile = { path -> MemoryFiles.deleteImportedPhoto(app, path) },
                     remotePendingCategories = { bills, catalog ->
-                        val client = app.container.aiRepository.createClient()
+                        val client = app.container.aiRepository.createClient(com.jiligulu.app.core.ai.AiUsagePurpose.CLASSIFICATION)
                         val result = client.parseBill(PendingCategoryClassifier.PROMPT,
                             PendingCategoryClassifier.input(bills, catalog)).getOrThrow()
                         PendingCategoryClassifier.suggestions(result, bills, catalog)

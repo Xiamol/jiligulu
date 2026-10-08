@@ -151,13 +151,17 @@ class DeepSeekClient private constructor(
     private val client: OkHttpClient,
     val profile: AiProviderProfile,
     private val onUsage: suspend (AiTokenUsage?) -> Unit,
+    private val meter: AiUsageMeter? = null,
+    private val usagePurpose: AiUsagePurpose = AiUsagePurpose.UNSPECIFIED,
 ) {
     constructor(apiKey: String, client: OkHttpClient = sharedClient, onUsage: suspend (AiTokenUsage?) -> Unit = {}) :
         this(apiKey, client, AiProviderProfile(), onUsage)
     constructor(apiKey: String, profile: AiProviderProfile, client: OkHttpClient = sharedClient,
         onUsage: suspend (AiTokenUsage?) -> Unit = {}) : this(apiKey, client, profile, onUsage)
 
-    fun configuredFor(profile: AiProviderProfile): DeepSeekClient = DeepSeekClient(apiKey, client, profile, onUsage)
+    fun configuredFor(profile: AiProviderProfile): DeepSeekClient = DeepSeekClient(apiKey, client, profile, onUsage, meter, usagePurpose)
+    fun forPurpose(purpose: AiUsagePurpose): DeepSeekClient = DeepSeekClient(apiKey, client, profile, onUsage, meter, purpose)
+    fun meteredBy(meter: AiUsageMeter): DeepSeekClient = DeepSeekClient(apiKey, client, profile, onUsage, meter, usagePurpose)
 
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -173,12 +177,13 @@ class DeepSeekClient private constructor(
         systemPrompt: String,
         userInput: String,
         history: List<ChatTurn> = emptyList(),
-        stableContext: String = ""
+        stableContext: String = "",
+        purpose: AiUsagePurpose = usagePurpose,
     ): Result<AiParseResult> = withContext(Dispatchers.IO) {
         var lastFailure: Exception? = null
         for (attempt in 1..MAX_ATTEMPTS) {
             try {
-                return@withContext Result.success(executeOnce(systemPrompt, userInput, history, stableContext))
+                return@withContext Result.success(executeOnce(systemPrompt, userInput, history, stableContext, purpose))
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (failure: Exception) {
@@ -203,7 +208,8 @@ class DeepSeekClient private constructor(
         systemPrompt: String,
         userInput: String,
         history: List<ChatTurn>,
-        stableContext: String
+        stableContext: String,
+        purpose: AiUsagePurpose,
     ): AiParseResult {
         val requestJson = buildJsonObject {
             put("model", profile.model)
@@ -235,7 +241,7 @@ class DeepSeekClient private constructor(
             })
         }.toString()
 
-        val content = executeContent(requestJson)
+        val content = executeContent(requestJson, purpose)
         return try {
             json.decodeFromString(AiParseResult.serializer(), unwrapJsonFence(content))
         } catch (parseFailure: Exception) {
@@ -245,7 +251,8 @@ class DeepSeekClient private constructor(
     }
 
     /** The same selected profile, credentials, usage observer and cancellation apply to images. */
-    suspend fun recognizeImage(systemPrompt: String, requestContext: String, jpegBase64: String): Result<String> = withContext(Dispatchers.IO) {
+    suspend fun recognizeImage(systemPrompt: String, requestContext: String, jpegBase64: String,
+        purpose: AiUsagePurpose = AiUsagePurpose.IMAGE_RECOGNITION): Result<String> = withContext(Dispatchers.IO) {
         runCatching {
             require(profile.supportsImages) { "当前模型未启用图片输入，请在「AI 服务」编辑供应商的图像能力，或选择支持识图的模型" }
             val request = buildJsonObject {
@@ -262,24 +269,29 @@ class DeepSeekClient private constructor(
                     }) }
                 })
             }.toString()
-            unwrapJsonFence(executeContent(request))
+            unwrapJsonFence(executeContent(request, purpose))
         }.onFailure { if (it is CancellationException) throw it }
     }
 
-    private suspend fun executeContent(requestJson: String): String {
+    private suspend fun executeContent(requestJson: String, purpose: AiUsagePurpose): String {
         val builder = Request.Builder().url(profile.endpoint)
         if (apiKey.isNotBlank()) builder.header("Authorization", "Bearer $apiKey")
         val request = builder.post(requestJson.toRequestBody("application/json".toMediaType())).build()
+        val call = client.newCall(request)
+        // Each real attempt fixes its provider/model/price at start. Parsing never records again.
+        val ticket = try { meter?.begin(profile, purpose) } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { null }
 
         var reportedUsage: AiTokenUsage? = null
         try {
-            return client.newCall(request).awaitResponse().use { response ->
+            return call.awaitResponse().use { response ->
                 val body = response.body?.string().orEmpty()
+                val parsed = runCatching { json.parseToJsonElement(body) as? JsonObject }.getOrNull()
+                reportedUsage = parsed?.let { AiTokenUsage.fromResponse(it) }
                 if (!response.isSuccessful) {
                     throw DeepSeekHttpException(response.code, redact(body).take(400), profile.name)
                 }
-                val root = json.parseToJsonElement(body).jsonObject
-                reportedUsage = AiTokenUsage.fromResponse(root)
+                val root = parsed ?: throw DeepSeekMalformedResponseException()
                 logCacheUsage(root)
                 // 逐步取，不用 !!：DeepSeek 对触发内容审核的请求会返回 200 但内容为空
                 // （finish_reason = content_filter），也有过 choices 为空的形态。
@@ -304,6 +316,9 @@ class DeepSeekClient private constructor(
             withContext(kotlinx.coroutines.NonCancellable) {
                 try { onUsage(reportedUsage) } catch (_: Exception) {
                     Log.w(TAG, "Local usage observer failed")
+                }
+                if (ticket != null) try { meter?.finish(ticket, reportedUsage) } catch (_: Exception) {
+                    Log.w(TAG, "Local price meter could not be saved")
                 }
             }
         }

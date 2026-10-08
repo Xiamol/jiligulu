@@ -22,7 +22,7 @@ class FutureNoteNotificationTest {
             notificationEnabled = true, sourcePaperId = "paper")
         assertTrue(FutureNoteReminder.notify(app, note))
         val notification = shadowOf(app.getSystemService(NotificationManager::class.java)).getNotification(note.id, 1)
-        assertEquals("阿噜的回信到啦 💌", notification.extras.getCharSequence(Notification.EXTRA_TITLE).toString())
+        assertEquals("阿噜回信啦", notification.extras.getCharSequence(Notification.EXTRA_TITLE).toString())
         assertFalse(notification.extras.getCharSequence(Notification.EXTRA_TEXT).toString().contains(note.body))
         notification.contentIntent.send()
         val launch = shadowOf(app).nextStartedActivity

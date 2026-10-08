@@ -62,8 +62,8 @@ class AppContainer(private val app: Application) {
             app, categoryRepository, billRepository, userPrefs,
             chatHistoryRepository, categoryAdminRepository,
             providerPrefs = aiProviders,
-            providerClientFactory = { connection -> com.jiligulu.app.core.ai.DeepSeekClient(connection.apiKey, connection.profile,
-                onUsage = { usage -> aiUsage.record(usage, connection.profile.usageId) }) },
+            providerClientFactory = { connection -> com.jiligulu.app.core.ai.DeepSeekClient(connection.apiKey, connection.profile)
+                .meteredBy(aiUsage) },
             ledgerLookupRepository = com.jiligulu.app.data.repository.LedgerLookupRepository(database)
         )
     }

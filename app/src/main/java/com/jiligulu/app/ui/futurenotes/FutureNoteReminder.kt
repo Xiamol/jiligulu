@@ -55,8 +55,8 @@ object FutureNoteReminder {
                 .putExtra(EXTRA_ID,note.id).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         manager.notify(note.id, 1, NotificationCompat.Builder(context,CHANNEL)
-            .setSmallIcon(R.drawable.ic_water_notification).setContentTitle(if (note.sourcePaperId != null) "阿噜的回信到啦 💌" else "阿噜替你收着的便签到啦 💌")
-            .setContentText(note.title).setContentIntent(open).setAutoCancel(true)
+            .setSmallIcon(R.drawable.ic_water_notification).setContentTitle(if (note.sourcePaperId != null) "阿噜回信啦" else "阿噜替你收着的便签到啦 💌")
+            .setContentText(if (note.sourcePaperId != null) "去邮局的收件箱看看" else note.title).setContentIntent(open).setAutoCancel(true)
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE).build())
         return true
     }

@@ -412,7 +412,8 @@ private fun JiliguluRoot(waterRequest: Int, futureNoteId: String? = null, onNote
             com.jiligulu.app.ui.futurenotes.DueFutureNoteHost(
                 enabled = !showSplash && navigation?.destination?.route == Routes.MAIN && !showUpdate &&
                     !updateState.checking && !(showNotice && (notices.opened != null || notices.emptyMailboxOpen)),
-                requestedId = futureNoteId, onConsumed = onNoteConsumed)
+                requestedId = futureNoteId, onConsumed = onNoteConsumed,
+                onOpenMailbox = { navController.navigate(Routes.FUTURE_NOTES) { launchSingleTop = true } })
         }
         AnimatedVisibility(visible = showSplash, enter = fadeIn(tween(100)), exit = fadeOut(tween(160))) {
             StartupScreen(state.error, startup::prepare)

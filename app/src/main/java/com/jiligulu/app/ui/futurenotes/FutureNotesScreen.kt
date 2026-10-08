@@ -298,7 +298,7 @@ private fun PostTimeDialog(due: Long, onDismiss: () -> Unit, onSave: (Long) -> U
 private fun noteDate(value:Long)=Instant.ofEpochMilli(value).atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("yyyy/M/d HH:mm"))
 
 @Composable
-fun DueFutureNoteHost(enabled:Boolean,requestedId:String?,onConsumed:()->Unit) {
+fun DueFutureNoteHost(enabled:Boolean,requestedId:String?,onConsumed:()->Unit, onOpenMailbox: () -> Unit = {}) {
     val context=LocalContext.current
     val repo=(context.applicationContext as JiliguluApp).container.littleWorld
     val loadedState: LittleWorldState? by repo.state.collectAsStateWithLifecycle(initialValue=null)
@@ -363,7 +363,12 @@ fun DueFutureNoteHost(enabled:Boolean,requestedId:String?,onConsumed:()->Unit) {
             handled=handled+note.id;current=null;if(note.id==requestedId)onConsumed()
             scope.launch{ try { if(read){repo.markNoteRead(note.id);FutureNoteReminder.cancel(context,note.id)}else repo.markNotePresented(note.id) } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled } catch (_: Exception) { android.util.Log.w("FutureNote","Inbox acknowledgement will retry next visit") } }
         }
-        PostPaperDialog(note.title, onDismiss={close(false)}, height=300.dp,
+        if (note.sourcePaperId != null) GuluDialog("阿噜回信啦", onDismiss = { close(false) },
+            compact = true, dense = true, compactWidth = 280.dp, confirmLabel = "去邮局",
+            onConfirm = { close(false); onOpenMailbox() }) {
+            Text("回信已经收进未来信箱。到邮局点开收件箱，再慢慢拆信。",
+                modifier = Modifier.testTag("heart-letter-arrival"))
+        } else PostPaperDialog(note.title, onDismiss={close(false)}, height=300.dp,
             confirmLabel=if(note.readAt == null) "标记已读" else null, onConfirm={close(true)}){
             FutureNoteContents(note, state)
         }

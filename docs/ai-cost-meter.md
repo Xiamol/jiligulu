@@ -1,0 +1,13 @@
+# Local AI cost estimates
+
+This meter records each real HTTP attempt once, before parsing assistant content. Retry attempts have different local request IDs; finishing the same ID is idempotent. Image requests rejected locally by capability checks do not create attempts. Prices are captured immediately before each attempt, so a retry can use a subsequently edited price while an already started attempt retains its old snapshot.
+
+Records contain provider/model identity, purpose, start date, returned token fields, coverage flags, configured price snapshot and calculated known subtotal. They never contain API keys, endpoint URLs, request messages, photographs or assistant replies. Custom endpoint identity is hashed to distinguish differently priced services. Purpose tags describe the calling route: ledger/chat, image recognition, classification, heart letters, Liu Ren analysis, or unspecified. Model content cannot alter the recorded purpose.
+
+Prices are CNY per one million tokens. The DeepSeek Flash default is the user's stated reference 0.02 cache-hit / 1 cache-miss / 4 output; other models and custom endpoints remain unpriced until separately configured. This is not an official current tariff. Current [DeepSeek documentation](https://api-docs.deepseek.com/quick_start/pricing/) distinguishes models and peak/off-peak USD tariffs, which is why the UI always calls the result an estimate using configured prices. No balance or billing API is called.
+
+Amounts use integer pico-CNY (10^-12 yuan), derived from six-decimal configured prices; no binary floating-point money is accumulated. Missing usage, missing output/input, unknown cache split, unconfigured prices and overflow remain unknown. Only reported or explicitly inferred individual cache components are priced. A total input without cache metadata is not silently treated as a cache miss; reported output may still form a known partial subtotal. Unknown requests get a separate count and outline/question marker rather than an apparent free zero bar.
+
+The independent SQLite store retains metadata and frozen costs. Chart queries return only seven/thirty days grouped by purpose; lifetime totals are computed by SQL, not by loading a year of records into memory. Old DataStore counters migrate once as unpriced, unspecified-purpose aggregates. Their known last recorded day is retained; older undated totals remain lifetime-only. They are not reclassified or recalculated using new prices.
+
+Heart-letter arrivals show only “阿噜回信啦” and a link to the full post-office scene. The arrival popup does not expose a letter body or mark it read. The user opens the inbox and letter manually.
