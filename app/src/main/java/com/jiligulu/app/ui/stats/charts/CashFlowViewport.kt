@@ -14,7 +14,7 @@ import java.time.LocalDate
 import java.time.YearMonth
 
 data class CashFlowChartAnchor(val firstDay: LocalDate, val month: YearMonth,
-    val revision: Long = 0, val monthRevision: Long = revision, val followsToday: Boolean = false)
+    val revision: Long = 0, val monthRevision: Long = revision, val followsToday: Boolean = false, val dayCount: Int = 10)
 
 private val firstDay = LocalDate.of(1, 1, 1).toEpochDay()
 private val lastDay = LocalDate.of(9999, 12, 31).toEpochDay()
@@ -26,9 +26,9 @@ internal fun cashFlowMonthIndex(month: YearMonth) = ((month.year - 1) * 12 + mon
 internal fun cashFlowIndexMonth(index: Int): YearMonth = index.coerceIn(0, cashFlowMonthCount - 1).let { YearMonth.of(it / 12 + 1, it % 12 + 1) }
 
 /** Every ten consecutive slots fill the pixel viewport exactly, including fractional densities. */
-internal fun cashFlowDaySlotWidthPx(index: Int, plotWidthPx: Int): Int {
-    val slot = Math.floorMod(index, 10)
-    return cashFlowDateSlotWidthPx(slot, 10, plotWidthPx)
+internal fun cashFlowDaySlotWidthPx(index: Int, plotWidthPx: Int, days: Int = 10): Int {
+    val slot = Math.floorMod(index, days)
+    return cashFlowDateSlotWidthPx(slot, days, plotWidthPx)
 }
 internal fun cashFlowDateSlotWidthPx(index: Int, count: Int, plotWidthPx: Int): Int =
     ((index + 1) * plotWidthPx / count - index * plotWidthPx / count).coerceAtLeast(1)
@@ -36,6 +36,8 @@ internal fun cashFlowDateSlotWidthPx(index: Int, count: Int, plotWidthPx: Int): 
 /** Scroll identity is independent of incoming data and of taps on a day. */
 @OptIn(ExperimentalFoundationApi::class)
 class CashFlowViewport(val days: LazyListState, val months: PagerState) {
+    internal val monthBoundary = CashFlowMonthBoundary()
+    internal fun clearMonthBoundary() = monthBoundary.clear()
     private var navigationTicket = 0L
     internal var appliedDayRevision = Long.MIN_VALUE
     internal var appliedMonthRevision = Long.MIN_VALUE
@@ -45,6 +47,7 @@ class CashFlowViewport(val days: LazyListState, val months: PagerState) {
         private set
 
     internal suspend fun navigate(anchor: CashFlowChartAnchor, compressedMonth: Boolean, force: Boolean = true) {
+        clearMonthBoundary()
         val ticket = ++navigationTicket
         var completed = false
         navigating = true

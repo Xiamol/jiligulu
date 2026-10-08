@@ -373,6 +373,40 @@ class StatsDateNavigationTest {
         } finally { store.clear() }
     }
 
+    @Test fun fiveSevenAndTenDayPeriodsApplyImmediatelyAndMonthOnlyConfirmationStartsAtDayOne() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        val store = ViewModelStore()
+        try {
+            val today = LocalDate.of(2026, 12, 31)
+            val vm = model(emptyList()) { today.millis() + 1000 }
+            store.put("stats", vm)
+            backgroundScope.launch { vm.compactCashFlowBars.collect {} }
+            backgroundScope.launch { vm.selectedDay.collect {} }
+            runCurrent()
+            for (days in listOf(5, 7, 10)) {
+                vm.showToday(); vm.setCompactDays(days); runCurrent()
+                assertEquals(days, vm.compactCashFlowBars.value.size)
+                assertEquals(today.millis(), vm.compactCashFlowBars.value.last().dayStartMillis)
+                vm.shiftCompactWindow(days); runCurrent()
+                assertEquals(LocalDate.of(2027, 1, 1).millis(), vm.compactCashFlowBars.value.first().dayStartMillis)
+                assertEquals(LocalDate.of(2027, 1, days).millis(), vm.selectedDay.value)
+                vm.shiftCompactWindow(-days); runCurrent()
+                assertEquals(today.millis(), vm.selectedDay.value)
+                vm.selectCalendarDate(LocalDate.of(2027, 2, 1).millis(), startAtSelected = true); runCurrent()
+                assertEquals(LocalDate.of(2027, 2, 1).millis(), vm.compactCashFlowBars.value.first().dayStartMillis)
+                assertEquals(days, vm.compactCashFlowBars.value.size)
+                vm.selectCalendarDate(LocalDate.of(2027, 2, 28).millis()); runCurrent()
+                assertTrue(vm.compactCashFlowBars.value.any { it.dayStartMillis == LocalDate.of(2027, 2, 28).millis() })
+                vm.showToday(); runCurrent()
+                assertEquals(today.millis(), vm.selectedDay.value)
+                assertEquals(days, vm.compactCashFlowBars.value.size)
+            }
+            vm.shiftMonth(1); runCurrent(); assertEquals(LocalDate.of(2027, 1, 31).millis(), vm.selectedDay.value)
+            vm.shiftMonth(1); runCurrent(); assertEquals(LocalDate.of(2027, 2, 28).millis(), vm.selectedDay.value)
+            vm.shiftMonth(1); runCurrent(); assertEquals(LocalDate.of(2027, 3, 31).millis(), vm.selectedDay.value)
+        } finally { store.clear() }
+    }
+
     private fun LocalDate.millis(): Long = atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
 
     private fun queryDays(range: Pair<Long, Long>): Long = ChronoUnit.DAYS.between(

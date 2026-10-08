@@ -33,8 +33,10 @@ class StatsDisplayPrefsTest {
             try {
                 val prefs = StatsDisplayPrefs(firstStore)
                 assertEquals(StatsBarMode.COMPACT_TEN_DAYS, prefs.barMode.first())
-                prefs.setBarMode(StatsBarMode.MONTH_COMPRESSED)
-                assertEquals(StatsBarMode.MONTH_COMPRESSED, prefs.barMode.first())
+                for (mode in StatsBarMode.entries) {
+                    prefs.setBarMode(mode)
+                    assertEquals(mode, prefs.barMode.first())
+                }
             } finally { firstJob.cancelAndJoin() }
             val secondJob = SupervisorJob()
             val secondStore = PreferenceDataStoreFactory.create(scope = CoroutineScope(secondJob + Dispatchers.IO), produceFile = { file })
@@ -53,7 +55,7 @@ class StatsDisplayPrefsTest {
             val store = PreferenceDataStoreFactory.create(scope = CoroutineScope(job + Dispatchers.IO),
                 produceFile = { File(temporary.root, "stats-unknown.preferences_pb") })
             try {
-                store.edit { it[stringPreferencesKey("bar_mode")] = "five_days" }
+                store.edit { it[stringPreferencesKey("bar_mode")] = "future_unrecognized_mode" }
                 assertEquals(StatsBarMode.COMPACT_TEN_DAYS, StatsDisplayPrefs(store).barMode.first())
             } finally { job.cancelAndJoin() }
         }

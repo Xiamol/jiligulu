@@ -10,6 +10,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -41,19 +42,22 @@ internal fun StatsDisplaySettings(enabled: Boolean = true) {
     val scope = rememberCoroutineScope()
     var saving by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf(false) }
+    var pending by remember { mutableStateOf<StatsBarMode?>(null) }
+    LaunchedEffect(saved) { if (pending == saved) pending = null }
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text("统计柱图", style = MaterialTheme.typography.titleSmall)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             StatsBarMode.entries.forEach { mode ->
-                val checked = saved == mode
+                val checked = (pending ?: saved) == mode
                 Surface(onClick = {
                     if (checked) return@Surface
                     UiSound.select(context)
+                    pending = mode
                     scope.launch(start = CoroutineStart.UNDISPATCHED) {
                         saving = true; error = false
                         try { withContext(NonCancellable) { prefs.setBarMode(mode) } }
                         catch (cancelled: CancellationException) { throw cancelled }
-                        catch (_: Exception) { error = true }
+                        catch (_: Exception) { pending = null; error = true }
                         finally { saving = false }
                     }
                 }, enabled = enabled && saved != null && !saving,

@@ -84,26 +84,29 @@ fun CashFlowBarChart(bars: List<DayBar>, selectedDayMillis: Long?, onSelectDay: 
     compressedMonth: Boolean = false, onShiftWindow: (Int) -> Unit = {},
     anchor: CashFlowChartAnchor? = null, followToday: Boolean = false, todayMillis: Long? = null,
     viewport: CashFlowViewport? = null,
+    dayCount: Int = 10,
     onCompactViewport: (Long, Long, Boolean) -> Unit = { _, _, _ -> },
     onMonthViewport: (Long, Boolean) -> Unit = { _, _ -> }) {
     val zone = remember { ZoneId.systemDefault() }
     fun date(millis: Long) = Instant.ofEpochMilli(millis).atZone(zone).toLocalDate()
     fun millis(day: LocalDate) = day.atStartOfDay(zone).toInstant().toEpochMilli()
     val today = todayMillis?.let(::date) ?: bars.firstOrNull { it.isToday }?.dayStartMillis?.let(::date) ?: LocalDate.now(zone)
+    val days = anchor?.dayCount ?: dayCount
+    require(days == 5 || days == 7 || days == 10)
     val autoFollow = anchor?.followsToday ?: followToday
     val selectedIndex = bars.indexOfFirst { it.dayStartMillis == selectedDayMillis }
         .takeIf { it >= 0 } ?: bars.indexOfFirst { it.isToday }
-    val defaultFirst = if (selectedIndex >= 0) bars[(selectedIndex - 4).coerceIn(0, (bars.size - 10).coerceAtLeast(0))].dayStartMillis.let(::date)
-        else bars.firstOrNull()?.dayStartMillis?.let(::date) ?: selectedDayMillis?.let(::date)?.minusDays(4) ?: today.minusDays(9)
-    val requested = if (autoFollow) CashFlowChartAnchor(today.minusDays(9), YearMonth.from(today),
-        anchor?.revision ?: 0, anchor?.monthRevision ?: 0, followsToday = true)
-    else anchor ?: CashFlowChartAnchor(defaultFirst, YearMonth.from(selectedDayMillis?.let(::date) ?: today))
+    val defaultFirst = if (selectedIndex >= 0) bars[(selectedIndex - (days - 1) / 2).coerceIn(0, (bars.size - days).coerceAtLeast(0))].dayStartMillis.let(::date)
+        else bars.firstOrNull()?.dayStartMillis?.let(::date) ?: selectedDayMillis?.let(::date)?.minusDays((days - 1L) / 2) ?: today.minusDays(days - 1L)
+    val requested = if (autoFollow) CashFlowChartAnchor(today.minusDays(days - 1L), YearMonth.from(today),
+        anchor?.revision ?: 0, anchor?.monthRevision ?: 0, followsToday = true, dayCount = days)
+    else anchor ?: CashFlowChartAnchor(defaultFirst, YearMonth.from(selectedDayMillis?.let(::date) ?: today), dayCount = days)
     val chartViewport = viewport ?: rememberCashFlowViewport(requested)
     val visibleCallback by rememberUpdatedState(onVisibleRange)
     val compactCallback by rememberUpdatedState(onCompactViewport)
     val monthCallback by rememberUpdatedState(onMonthViewport)
     val byDate = remember(bars) { bars.associateBy { date(it.dayStartMillis).toEpochDay() } }
-    LaunchedEffect(if (compressedMonth) requested.monthRevision else requested.revision, compressedMonth) {
+    LaunchedEffect(if (compressedMonth) requested.monthRevision else requested.revision, compressedMonth, days) {
         val revision = if (compressedMonth) requested.monthRevision else requested.revision
         val previous = if (compressedMonth) chartViewport.appliedMonthRevision else chartViewport.appliedDayRevision
         chartViewport.navigate(requested, compressedMonth, force = previous != revision)
@@ -139,7 +142,7 @@ fun CashFlowBarChart(bars: List<DayBar>, selectedDayMillis: Long?, onSelectDay: 
         val layout = chartViewport.days.layoutInfo
         val visible = layout.visibleItemsInfo.filter { it.offset + it.size > layout.viewportStartOffset && it.offset < layout.viewportEndOffset }
         (visible.firstOrNull()?.index ?: cashFlowDayIndex(requested.firstDay)) to
-            (visible.lastOrNull()?.index ?: (cashFlowDayIndex(requested.firstDay) + 9).coerceAtMost(cashFlowDayCount - 1))
+            (visible.lastOrNull()?.index ?: (cashFlowDayIndex(requested.firstDay) + days - 1).coerceAtMost(cashFlowDayCount - 1))
     } }
     val currentMonth = cashFlowIndexMonth(chartViewport.months.currentPage)
     val moving = if (compressedMonth) chartViewport.months.isScrollInProgress else chartViewport.days.isScrollInProgress
@@ -177,14 +180,16 @@ fun CashFlowBarChart(bars: List<DayBar>, selectedDayMillis: Long?, onSelectDay: 
                         pathEffect = PathEffect.dashPathEffect(floatArrayOf(3.dp.toPx(), 5.dp.toPx())))
                 }
             }
-            if (!compressedMonth) LazyRow(state = chartViewport.days, modifier = Modifier.fillMaxSize().testTag("cash-flow-day-strip")) {
+            if (!compressedMonth) LazyRow(state = chartViewport.days, modifier = Modifier.fillMaxSize()
+                .cashFlowMonthBoundary(chartViewport, false, days).clipToBounds().testTag("cash-flow-day-strip")) {
                 items(count = cashFlowDayCount, key = { cashFlowIndexDate(it).toEpochDay() }) { index ->
                     val day = cashFlowIndexDate(index)
-                    val width = with(density) { cashFlowDaySlotWidthPx(index, plotPixelWidth).toDp() }
+                    val width = with(density) { cashFlowDaySlotWidthPx(index, plotPixelWidth, days).toDp() }
                     CashFlowDayCell(day, byDate[day.toEpochDay()], selectedDayMillis, today, top, color, trackColor,
-                        width, false, onSelectDay)
+                        width, false, { chartViewport.clearMonthBoundary(); onSelectDay(it) })
                 }
-            } else HorizontalPager(state = chartViewport.months, modifier = Modifier.fillMaxSize().testTag("cash-flow-month-pager"), beyondViewportPageCount = 1,
+            } else HorizontalPager(state = chartViewport.months, modifier = Modifier.fillMaxSize()
+                .cashFlowMonthBoundary(chartViewport, true, days).clipToBounds().testTag("cash-flow-month-pager"), beyondViewportPageCount = 1,
                 flingBehavior = PagerDefaults.flingBehavior(chartViewport.months, pagerSnapDistance = PagerSnapDistance.atMost(1)),
                 key = { it }) { page ->
                 val month = cashFlowIndexMonth(page)
@@ -198,7 +203,7 @@ fun CashFlowBarChart(bars: List<DayBar>, selectedDayMillis: Long?, onSelectDay: 
                         monthDates.forEachIndexed { index, day ->
                             val width = with(density) { cashFlowDateSlotWidthPx(index, monthDates.size, plotPixelWidth).toDp() }
                             CashFlowDayCell(day, byDate[day.toEpochDay()], selectedDayMillis,
-                                today, top, color, trackColor, width, true, onSelectDay)
+                                today, top, color, trackColor, width, true, { chartViewport.clearMonthBoundary(); onSelectDay(it) })
                         }
                     }
                     val labelWidth = 24.dp.coerceAtMost(plotWidth)
@@ -207,7 +212,7 @@ fun CashFlowBarChart(bars: List<DayBar>, selectedDayMillis: Long?, onSelectDay: 
                         monthDates.forEachIndexed { index, day ->
                             if (day.dayOfMonth in ticks) Surface(
                                 Modifier.offset { IntOffset(cashFlowDateLabelLeftPx(index, monthDates.size, plotPixelWidth, labelPixels), 0) }
-                                    .width(labelWidth).height(24.dp).clickable { onSelectDay(millis(day)) },
+                                    .width(labelWidth).height(24.dp).clickable { chartViewport.clearMonthBoundary(); onSelectDay(millis(day)) },
                                 shape = RoundedCornerShape(50), color = if (day == selectedDate) MaterialTheme.colorScheme.primaryContainer else Color.Transparent) {
                                 Text("${day.dayOfMonth}", Modifier.padding(vertical = 4.dp), maxLines = 1, fontSize = 9.sp,
                                     textAlign = androidx.compose.ui.text.style.TextAlign.Center,

@@ -10,11 +10,14 @@ import androidx.compose.material.icons.outlined.SportsEsports
 import androidx.compose.material.icons.outlined.Savings
 import androidx.compose.material.icons.outlined.SwapHoriz
 import androidx.compose.material.icons.outlined.Inbox
-import androidx.compose.material.icons.outlined.KeyboardArrowDown
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.outlined.CheckBox
 import androidx.compose.material.icons.outlined.CheckBoxOutlineBlank
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.ui.unit.sp
 import androidx.compose.material.icons.outlined.Restaurant
 import androidx.compose.material.icons.outlined.DirectionsBus
@@ -142,6 +145,7 @@ fun StatsScreen(
     val context = LocalContext.current
     val displayPrefs = remember(context.applicationContext) { StatsDisplayPrefs(context) }
     val barMode by displayPrefs.barMode.collectAsStateWithLifecycle(initialValue = StatsBarMode.COMPACT_TEN_DAYS)
+    LaunchedEffect(barMode) { barMode.compactDays?.let(vm::setCompactDays) }
     var showTrend by rememberSaveable { mutableStateOf(false) }
     var showActual by rememberSaveable { mutableStateOf(true) }
     var showAverage by rememberSaveable { mutableStateOf(true) }
@@ -162,7 +166,7 @@ fun StatsScreen(
     val compactVisibleWindow by vm.compactVisibleWindow.collectAsStateWithLifecycle()
     val chartMonth by vm.chartMonth.collectAsStateWithLifecycle()
 
-    val compactBars = if (!showTrend && barMode == StatsBarMode.COMPACT_TEN_DAYS)
+    val compactBars = if (!showTrend && barMode.compactDays != null)
         vm.prefetchedCashFlowBars.collectAsStateWithLifecycle().value else emptyList()
     val monthBars = if (!showTrend && barMode == StatsBarMode.MONTH_COMPRESSED)
         vm.pagedMonthCashFlowBars.collectAsStateWithLifecycle().value else emptyList()
@@ -217,23 +221,33 @@ fun StatsScreen(
         item(key = "filters") {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Surface(Modifier.weight(1f).height(44.dp).clickable { UiSound.navigate(context); showDateFilter = true },
+                Surface(Modifier.weight(1f).height(44.dp),
                     shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surface) {
                     val date = Instant.ofEpochMilli(selectedDay).atZone(ZoneId.systemDefault()).toLocalDate()
                     val range = compactVisibleWindow.first to compactVisibleWindow.last
-                    fun shortDate(value: java.time.LocalDate) = (if (range.first.year != range.second.year) "${value.year}年" else "") + "${value.monthValue}月${value.dayOfMonth}日"
-                    Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically,
+                    val acrossYears = range.first.year != range.second.year
+                    fun shortDate(value: java.time.LocalDate) = (if (acrossYears) "${value.year}." else "") + "${value.monthValue}.${value.dayOfMonth}"
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 2.dp), verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.Center) {
-                        Text(if (showTrend) "${date.year}年${date.monthValue}月"
-                            else if (barMode == StatsBarMode.MONTH_COMPRESSED) "${chartMonth.year}年${chartMonth.monthValue}月"
-                            else "${shortDate(range.first)} – ${shortDate(range.second)}",
-                            color = MaterialTheme.colorScheme.primary, fontSize = 14.sp, fontWeight = FontWeight.Medium,
-                            maxLines = 1, modifier = Modifier.weight(1f, fill = false))
-                        Spacer(Modifier.width(7.dp))
-                        Box(Modifier.size(24.dp).background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = .4f), RoundedCornerShape(50)),
-                            contentAlignment = Alignment.Center) {
-                            Icon(Icons.Outlined.KeyboardArrowDown, contentDescription = "选择统计日期", Modifier.size(20.dp),
-                                tint = MaterialTheme.colorScheme.primary)
+                        androidx.compose.material3.IconButton(onClick = uiTap(com.jiligulu.app.core.audio.UiCue.NAVIGATE) {
+                            chartViewport.clearMonthBoundary()
+                            if (showTrend || barMode.compactDays == null) vm.shiftMonth(-1) else vm.shiftCompactWindow(-requireNotNull(barMode.compactDays))
+                        }, modifier = Modifier.size(32.dp)) {
+                            Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "上一统计周期", Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
+                        }
+                        Box(Modifier.weight(1f).fillMaxHeight().clickable { chartViewport.clearMonthBoundary(); UiSound.navigate(context); showDateFilter = true }
+                            .semantics { contentDescription = "选择统计日期" }, contentAlignment = Alignment.Center) {
+                            Text(if (showTrend) "${date.year}.${date.monthValue}"
+                                else if (barMode == StatsBarMode.MONTH_COMPRESSED) "${chartMonth.year}.${chartMonth.monthValue}"
+                                else "${shortDate(range.first)}${if (acrossYears) "\n" else " – "}${shortDate(range.second)}",
+                                color = MaterialTheme.colorScheme.primary, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                                textAlign = TextAlign.Center, maxLines = if (acrossYears) 2 else 1)
+                        }
+                        androidx.compose.material3.IconButton(onClick = uiTap(com.jiligulu.app.core.audio.UiCue.NAVIGATE) {
+                            chartViewport.clearMonthBoundary()
+                            if (showTrend || barMode.compactDays == null) vm.shiftMonth(1) else vm.shiftCompactWindow(requireNotNull(barMode.compactDays))
+                        }, modifier = Modifier.size(32.dp)) {
+                            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "下一统计周期", Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
                         }
                     }
                 }
@@ -454,10 +468,9 @@ fun StatsScreen(
     }
     selectedBillId?.let { id -> BillDetailSheet(id, onDismiss = { selectedBillId = null }) }
     if (showDateFilter) {
-        com.jiligulu.app.ui.components.CompactCalendarDialog(selectedDay,
-            latestMonth = YearMonth.of(9999, 12),
+        StatsCalendarDialog(selectedDay, initialMonth = if (showTrend || barMode.compactDays == null) chartMonth else YearMonth.from(compactVisibleWindow.last),
             onDismiss = { showDateFilter = false },
-            onSelect = { vm.selectCalendarDate(it); showDateFilter = false })
+            onSelect = { date, monthOnly -> vm.selectCalendarDate(date, startAtSelected = monthOnly); showDateFilter = false })
     }
 
 }

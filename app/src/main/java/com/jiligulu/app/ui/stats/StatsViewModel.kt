@@ -125,6 +125,8 @@ class StatsViewModel(
     /** Null follows today's calendar; an explicit selection remains stable across range queries. */
     private val _selectedDay = MutableStateFlow<Long?>(null)
     private val _compactWindowStart = MutableStateFlow<LocalDate?>(null)
+    private val _compactDays = MutableStateFlow(10)
+    val compactDays: StateFlow<Int> = _compactDays
     private val _compactVisibleWindow = MutableStateFlow<StatsDateWindow?>(null)
     private val _chartMonth = MutableStateFlow<YearMonth?>(null)
     private var monthSelectionDay = currentLocalDate().dayOfMonth
@@ -168,9 +170,9 @@ class StatsViewModel(
         requestedDay ?: now.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), Formatters.dayStart(nowMillis()))
 
-    internal val compactWindow: StateFlow<StatsDateWindow> = combine(_compactWindowStart, _selectedDay, today) { first, requested, now ->
-        if (first != null) StatsDateWindow(first, first.plusDays(9))
-        else compactStatsWindow(requested?.let { Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDate() } ?: now, now)
+    internal val compactWindow: StateFlow<StatsDateWindow> = combine(_compactWindowStart, _selectedDay, today, _compactDays) { first, requested, now, days ->
+        if (first != null) StatsDateWindow(first, first.plusDays(days - 1L))
+        else compactStatsWindow(requested?.let { Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDate() } ?: now, now, days)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), currentLocalDate().let { compactStatsWindow(it, it) })
 
     internal val compactVisibleWindow: StateFlow<StatsDateWindow> = combine(_compactVisibleWindow, compactWindow) { visible, initial ->
@@ -362,13 +364,17 @@ class StatsViewModel(
     fun shiftMonth(delta: Int) {
         val zone = ZoneId.systemDefault()
         val current = Instant.ofEpochMilli(selectedDay.value).atZone(zone).toLocalDate()
-        selectCalendarDate(adjacentStatsMonth(current, delta.toLong()).atStartOfDay(zone).toInstant().toEpochMilli())
+        val preferred = monthSelectionDay
+        val month = YearMonth.from(current).plusMonths(delta.toLong()).coerceIn(YearMonth.of(1, 1), YearMonth.of(9999, 12))
+        selectCalendarDate(month.atDay(preferred.coerceAtMost(month.lengthOfMonth())).atStartOfDay(zone).toInstant().toEpochMilli())
+        monthSelectionDay = preferred
     }
 
     fun shiftCompactWindow(days: Int) {
         if (days == 0) return
         val zone = ZoneId.systemDefault()
-        val next = currentCompactWindow().shifted(days.toLong())
+        val first = currentCompactWindow().first.plusDays(days.toLong()).coerceIn(firstStatsDate, lastStatsDate.minusDays(_compactDays.value - 1L))
+        val next = StatsDateWindow(first, first.plusDays(_compactDays.value - 1L))
         val oldSelected = Instant.ofEpochMilli(selectedDay.value).atZone(zone).toLocalDate()
         val target = oldSelected.plusDays(days.toLong()).coerceIn(next.first, next.last)
         _compactWindowStart.value = next.first
@@ -383,7 +389,21 @@ class StatsViewModel(
         _selectedCategory.value = null
         _chartMonth.value = null
         monthSelectionDay = today.value.dayOfMonth
-        requestChartAnchor(compactStatsWindow(today.value, today.value).first, YearMonth.from(today.value), followsToday = true)
+        requestChartAnchor(compactStatsWindow(today.value, today.value, _compactDays.value).first, YearMonth.from(today.value), followsToday = true)
+    }
+
+    fun setCompactDays(days: Int) {
+        require(days == 5 || days == 7 || days == 10)
+        if (_compactDays.value == days) return
+        val selected = _selectedDay.value?.let { Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDate() } ?: today.value
+        val previous = currentCompactWindow()
+        val follows = _chartAnchor.value.followsToday
+        val keepFirst = !follows && (selected !in previous.first..previous.last || selected <= previous.first.plusDays(days - 1L))
+        val first = if (keepFirst) previous.first.coerceAtMost(lastStatsDate.minusDays(days - 1L))
+            else compactStatsWindow(selected, today.value, days).first
+        _compactDays.value = days
+        _compactWindowStart.value = if (follows) null else first
+        requestChartAnchor(first, YearMonth.from(selected), follows)
     }
 
     fun setFlowType(type: BillType) {
@@ -397,7 +417,7 @@ class StatsViewModel(
         val date = Instant.ofEpochMilli(next).atZone(ZoneId.systemDefault()).toLocalDate()
         val outside = date < currentCompactWindow().first || date > currentCompactWindow().last
         if (outside)
-            _compactWindowStart.value = compactStatsWindow(date, today.value).first
+            _compactWindowStart.value = compactStatsWindow(date, today.value, _compactDays.value).first
         selectDay(next)
         if (outside) requestChartAnchor(currentCompactWindow().first, YearMonth.from(date))
         else if (oldMonth != YearMonth.from(date)) _chartAnchor.value = _chartAnchor.value.copy(
@@ -419,15 +439,17 @@ class StatsViewModel(
     }
 
     private fun currentCompactWindow(): StatsDateWindow = _compactWindowStart.value?.let {
-        StatsDateWindow(it, it.plusDays(9))
-    } ?: compactStatsWindow(Instant.ofEpochMilli(selectedDay.value).atZone(ZoneId.systemDefault()).toLocalDate(), today.value)
+        StatsDateWindow(it, it.plusDays(_compactDays.value - 1L))
+    } ?: compactStatsWindow(Instant.ofEpochMilli(selectedDay.value).atZone(ZoneId.systemDefault()).toLocalDate(), today.value, _compactDays.value)
 
     private fun currentLocalDate(): LocalDate = Instant.ofEpochMilli(nowMillis()).atZone(ZoneId.systemDefault()).toLocalDate()
 
     /** Calendar navigation only changes the statistics filter, never a bill's timestamp. */
-    fun selectCalendarDate(dayStartMillis: Long) {
+    fun selectCalendarDate(dayStartMillis: Long, startAtSelected: Boolean = false) {
         val zone = ZoneId.systemDefault()
-        _compactWindowStart.value = compactStatsWindow(Instant.ofEpochMilli(dayStartMillis).atZone(zone).toLocalDate(), today.value).first
+        val date = Instant.ofEpochMilli(dayStartMillis).atZone(zone).toLocalDate()
+        _compactWindowStart.value = if (startAtSelected) date.coerceAtMost(lastStatsDate.minusDays(_compactDays.value - 1L))
+            else compactStatsWindow(date, today.value, _compactDays.value).first
         selectDay(Formatters.dayStart(dayStartMillis))
         requestChartAnchor(currentCompactWindow().first, YearMonth.from(Instant.ofEpochMilli(dayStartMillis).atZone(zone)))
     }
@@ -460,7 +482,7 @@ class StatsViewModel(
         if (_selectedDay.value == null) monthSelectionDay = today.value.dayOfMonth
         if (!userScrolling && YearMonth.from(selected) == month) {
             if (_selectedDay.value == null && _compactWindowStart.value == null) _chartAnchor.value = _chartAnchor.value.copy(
-                firstDay = compactStatsWindow(today.value, today.value).first, month = month)
+                firstDay = compactStatsWindow(today.value, today.value, _compactDays.value).first, month = month)
             return
         }
         val target = month.atDay(monthSelectionDay.coerceAtMost(month.lengthOfMonth()))
@@ -468,7 +490,7 @@ class StatsViewModel(
         _selectedDay.value = target.atStartOfDay(zone).toInstant().toEpochMilli()
         _monthOffset.value = ChronoUnit.MONTHS.between(YearMonth.from(currentLocalDate()), month).toInt()
         if (target != selected) _selectedCategory.value = null
-        _compactWindowStart.value = compactStatsWindow(target, today.value).first
+        _compactWindowStart.value = compactStatsWindow(target, today.value, _compactDays.value).first
         _compactVisibleWindow.value = null
         _chartAnchor.value = _chartAnchor.value.copy(firstDay = currentCompactWindow().first, month = month, followsToday = false)
     }
@@ -476,7 +498,7 @@ class StatsViewModel(
     private fun requestChartAnchor(first: LocalDate, month: YearMonth, followsToday: Boolean = false) {
         _compactVisibleWindow.value = null
         _chartAnchor.value = CashFlowChartAnchor(first, month, _chartAnchor.value.revision + 1,
-            _chartAnchor.value.monthRevision + 1, followsToday)
+            _chartAnchor.value.monthRevision + 1, followsToday, _compactDays.value)
     }
 
     fun toggleCategory(categoryId: Long?) {

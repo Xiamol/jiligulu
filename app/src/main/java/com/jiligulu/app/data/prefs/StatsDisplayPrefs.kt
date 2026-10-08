@@ -14,9 +14,11 @@ import kotlinx.coroutines.flow.map
 
 private val Context.statsDisplayStore by preferencesDataStore(name = "stats_display")
 
-enum class StatsBarMode(val key: String, val label: String) {
-    COMPACT_TEN_DAYS("ten_days", "10 天紧凑"),
-    MONTH_COMPRESSED("whole_month", "整月压缩");
+enum class StatsBarMode(val key: String, val label: String, val compactDays: Int?) {
+    COMPACT_FIVE_DAYS("five_days", "5 天紧凑", 5),
+    COMPACT_SEVEN_DAYS("seven_days", "7 天紧凑", 7),
+    COMPACT_TEN_DAYS("ten_days", "10 天紧凑", 10),
+    MONTH_COMPRESSED("whole_month", "整月压缩", null);
 
     companion object {
         fun fromKey(key: String?) = entries.firstOrNull { it.key == key } ?: COMPACT_TEN_DAYS

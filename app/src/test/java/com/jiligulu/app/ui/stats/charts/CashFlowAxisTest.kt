@@ -5,8 +5,8 @@ import java.time.LocalDate
 import java.time.YearMonth
 class CashFlowAxisTest {
     @Test fun nativeSlotsFillTenDaysExactlyAtFractionalDensities() {
-        for (width in listOf(219, 280, 670, 707, 853, 1007)) for (first in 0..29) {
-            val slots = (first until first + 10).map { cashFlowDaySlotWidthPx(it, width) }
+        for (days in listOf(5, 7, 10)) for (width in listOf(219, 280, 670, 707, 853, 1007)) for (first in 0..29) {
+            val slots = (first until first + days).map { cashFlowDaySlotWidthPx(it, width, days) }
             assertEquals(width, slots.sum())
             assertTrue(slots.maxOrNull()!! - slots.minOrNull()!! <= 1)
         }

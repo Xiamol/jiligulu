@@ -18,6 +18,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotDisplayed
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasContentDescription
@@ -211,6 +212,14 @@ class CashFlowDraggingTest {
             down(Offset(width * .9f, height * .5f))
             moveTo(Offset(width * .15f, height * .5f), delayMillis = 250)
         }
+        compose.runOnIdle { assertEquals(YearMonth.of(2026, 12), reportedMonth) }
+        compose.onNodeWithContentDescription("1月1日，1元").assertIsNotDisplayed()
+        pager.performTouchInput { up() }
+        compose.waitForIdle()
+        pager.performTouchInput {
+            down(Offset(width * .9f, height * .5f))
+            moveTo(Offset(width * .15f, height * .5f), delayMillis = 250)
+        }
         compose.runOnIdle { assertEquals(YearMonth.of(2027, 1), reportedMonth) }
         // Both are actual page contents while the finger is still down.
         compose.onNodeWithContentDescription("12月31日，1元").assertIsDisplayed()
@@ -221,6 +230,42 @@ class CashFlowDraggingTest {
             assertEquals(YearMonth.of(2027, 1), reportedMonth)
             assertEquals(LocalDate.of(2027, 1, 31).millis(), selected)
         }
+    }
+
+    @Test fun dailyMonthEndSpringsFirstThenTheSecondGestureCanRevealOnlyTheNeighbourMonth() {
+        val first = LocalDate.of(2027, 1, 27)
+        val today = LocalDate.of(2027, 1, 29)
+        var anchor by mutableStateOf(CashFlowChartAnchor(first, YearMonth.from(first), dayCount = 5))
+        var visible: Pair<Long, Long>? = null
+        compose.setContent {
+            MaterialTheme {
+                CashFlowBarChart(bars(), today.millis(), {}, Color.Red, Color.LightGray,
+                    Modifier.fillMaxWidth().height(202.dp), anchor = anchor, todayMillis = today.millis(),
+                    onCompactViewport = { start, end, _ -> visible = start to end; anchor = anchor.copy(firstDay = start.date()) })
+            }
+        }
+        compose.waitForIdle()
+        val strip = compose.onNodeWithTag("cash-flow-day-strip")
+        val beforeSpring = compose.onNodeWithContentDescription("1月29日，1元，已选中").getUnclippedBoundsInRoot()
+        strip.performTouchInput {
+            down(Offset(width * .9f, height * .5f))
+            moveTo(Offset(width * .1f, height * .5f), delayMillis = 250)
+        }
+        compose.runOnIdle { assertEquals(LocalDate.of(2027, 1, 31), requireNotNull(visible).second.date()) }
+        assertTrue(compose.onNodeWithContentDescription("1月29日，1元，已选中").getUnclippedBoundsInRoot().left < beforeSpring.left)
+        strip.performTouchInput { up() }
+        compose.waitForIdle()
+        strip.performTouchInput {
+            down(Offset(width * .9f, height * .5f))
+            moveTo(Offset(width * .1f, height * .5f), delayMillis = 30)
+        }
+        compose.runOnIdle {
+            assertEquals(YearMonth.of(2027, 2), YearMonth.from(requireNotNull(visible).second.date()))
+            assertTrue(requireNotNull(visible).second.date() <= LocalDate.of(2027, 2, 28))
+        }
+        strip.performTouchInput { up() }
+        compose.waitForIdle()
+        compose.runOnIdle { assertTrue(requireNotNull(visible).second.date() <= LocalDate.of(2027, 2, 28)) }
     }
 
     private fun bars(): List<DayBar> = (0 until 151).map { offset ->

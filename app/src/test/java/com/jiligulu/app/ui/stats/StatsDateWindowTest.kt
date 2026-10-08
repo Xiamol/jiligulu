@@ -9,6 +9,17 @@ import java.time.LocalDate
 import java.time.ZoneId
 
 class StatsDateWindowTest {
+    @Test fun compactPeriodsAllIncludeTheirAnchorAndKeepTheirExactDateCount() {
+        val today = LocalDate.of(2027, 1, 1)
+        for (days in listOf(5, 7, 10)) {
+            val initial = compactStatsWindow(today, today, days)
+            assertEquals(days, initial.dates.size)
+            assertEquals(today, initial.last)
+            val historical = compactStatsWindow(LocalDate.of(2026, 12, 31), today, days)
+            assertEquals(days, historical.dates.size)
+            assertTrue(LocalDate.of(2026, 12, 31) in historical.dates)
+        }
+    }
     @Test fun dailyPrefetchReusesItsLoadedWindowUntilTheViewportApproachesAnEdge() {
         val visible = StatsDateWindow(LocalDate.of(2026, 12, 27), LocalDate.of(2027, 1, 5))
         val loaded = retainedStatsDayWindow(null, visible)
