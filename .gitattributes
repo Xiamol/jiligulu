@@ -27,8 +27,8 @@ app/src/main/assets/prompts/*.txt text eol=lf
 *.apk binary
 *.aab binary
 # Rapfi checksums describe exact APK bytes, including the generated TOML and recipe.
-/app/src/main/assets/rapfi/** -text
-/app/src/main/assets/licenses/rapfi/** -text
-/third_party/rapfi/** -text
-/tools/build_rapfi_android.py -text
+/app/src/main/assets/rapfi/** -text whitespace=cr-at-eol
+/app/src/main/assets/licenses/rapfi/** -text whitespace=cr-at-eol
+/third_party/rapfi/** -text whitespace=cr-at-eol
+/tools/build_rapfi_android.py -text whitespace=cr-at-eol
 /app/src/main/jniLibs/*/librapfi.so -text
