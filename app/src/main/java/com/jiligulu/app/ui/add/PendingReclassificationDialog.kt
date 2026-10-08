@@ -2,12 +2,14 @@ package com.jiligulu.app.ui.add
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.jiligulu.app.core.util.Formatters
@@ -25,24 +27,21 @@ internal fun PendingReclassificationDialog(
     state: PendingReclassificationState, onDismiss: () -> Unit, onConfirm: (Set<Long>) -> Unit,
     onRetry: () -> Unit = {}
 ) {
-    var selected by remember { mutableStateOf(emptySet<Long>()) }
-    var seen by remember { mutableStateOf(emptySet<Long>()) }
+    // Default new arrivals to selected without an asynchronous effect that can undo a tap.
+    var deselected by remember { mutableStateOf(emptySet<Long>()) }
     var expandedId by remember { mutableStateOf<Long?>(null) }
     val bills = state.bills.ifEmpty { state.proposals.map { it.original } }
+    val billIds = remember(bills) { bills.map { it.id }.toSet() }
+    val selected = billIds - deselected
     val proposals = remember(state.proposals) { state.proposals.associateBy { it.original.id } }
     val ready = selected.intersect(proposals.keys)
     val newNames = state.proposals.filter { it.original.id in ready && it.targetCategoryId == null }
         .map { it.suggestion.category }.distinctBy(CategorySuggestions::key)
-    LaunchedEffect(bills) {
-        val current = bills.map { it.id }.toSet()
-        selected = (selected + (current - seen)).intersect(current)
-        seen = current
-    }
     GuluDialog("把待定收拾好", onDismiss = onDismiss, compact = true, dense = true, busy = state.saving,
         confirmLabel = if (state.result != null) "收好啦" else "确认 ${ready.size} 笔",
         dismissLabel = if (state.result == null) "先等等" else null,
         confirmEnabled = state.result != null || ready.isNotEmpty(),
-        onConfirm = { if (state.result != null) onDismiss() else onConfirm(ready) }) {
+        onConfirm = { if (state.result != null) onDismiss() else onConfirm((billIds - deselected).intersect(proposals.keys)) }) {
         state.result?.let { Text(it, style = MaterialTheme.typography.bodyMedium) } ?: run {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -60,9 +59,13 @@ internal fun PendingReclassificationDialog(
                 val item = proposals[bill.id]
                 Row(Modifier.fillMaxWidth().padding(vertical = 5.dp).testTag("pending-reclass-${bill.id}"),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                    Checkbox(bill.id in selected, onCheckedChange = { checked ->
-                        selected = if (checked) selected + bill.id else selected - bill.id
-                    }, enabled = !state.saving, modifier = Modifier.size(30.dp).testTag("pending-select-${bill.id}"))
+                    Box(Modifier.size(40.dp).testTag("pending-select-${bill.id}").toggleable(
+                        value = bill.id in selected, enabled = !state.saving, role = Role.Checkbox,
+                        onValueChange = { checked ->
+                            deselected = if (checked) deselected - bill.id else deselected + bill.id
+                        }), contentAlignment = Alignment.Center) {
+                        Checkbox(bill.id in selected, onCheckedChange = null, modifier = Modifier.size(24.dp))
+                    }
                     Column(Modifier.weight(1f).clickable { expandedId = if (expandedId == bill.id) null else bill.id }) {
                         Text(bill.detail.ifBlank { "这笔账" }, style = MaterialTheme.typography.bodyMedium,
                             maxLines = if (expandedId == bill.id) 4 else 1, overflow = TextOverflow.Ellipsis)
@@ -83,16 +86,18 @@ internal fun PendingReclassificationDialog(
                 }
             }
             }
-            if (newNames.isNotEmpty()) Text("将创建：${newNames.joinToString("、")}", maxLines = 2,
-                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.testTag("pending-new-categories"))
-            if (!state.loading) Text(when {
-                state.total == 0 -> "待定里没有账单，已经整整齐齐啦 ♡"
-                state.proposals.isEmpty() -> "还没匹配的账单继续留在待定"
-                state.total > state.proposals.size -> "${state.total - state.proposals.size} 笔未匹配，先留在待定"
-                else -> "选好后确认，金额和日期保留"
-            }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            state.error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+            // Keep the dialog and its touch targets still when new-category metadata arrives.
+            Box(Modifier.fillMaxWidth().height(40.dp), contentAlignment = Alignment.CenterStart) {
+                val summary = if (newNames.isNotEmpty()) "将创建：${newNames.joinToString("、")}" else when {
+                    state.total == 0 -> "待定里没有账单，已经整整齐齐啦 ♡"
+                    state.total > state.proposals.size -> "${state.total - state.proposals.size} 笔未匹配，先留在待定"
+                    else -> "选好后确认，金额和日期保留"
+                }
+                Text(summary + state.error?.let { "\n$it" }.orEmpty(), maxLines = 2,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (newNames.isNotEmpty()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = if (newNames.isNotEmpty()) Modifier.testTag("pending-new-categories") else Modifier)
+            }
         }
     }
 }

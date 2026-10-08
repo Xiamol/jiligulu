@@ -7,6 +7,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsOn
+import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -42,9 +44,16 @@ class PendingReclassificationDialogTest {
         compose.runOnIdle { state = state.copy(proposals = listOf(CategoryReclassification(known,
             AiBillDraft(category = "摄影", iconEmoji = "📷")))) }
         compose.onNodeWithText("将创建：摄影").assertIsDisplayed()
+        compose.onNodeWithTag("pending-select-1").assertIsOn()
         compose.onNodeWithTag("pending-select-1").performClick()
+        compose.onNodeWithTag("pending-select-1").assertIsOff()
+        compose.onNodeWithText("确认 0 笔").assertIsNotEnabled()
+        // A fresh proposal object for the same bill must not undo the manual cancellation.
+        compose.runOnIdle { state = state.copy(proposals = state.proposals.map { it.copy(suggestion = it.suggestion.copy(keywords = "镜头")) }) }
+        compose.onNodeWithTag("pending-select-1").assertIsOff()
         compose.onNodeWithText("确认 0 笔").assertIsNotEnabled()
         compose.onNodeWithTag("pending-select-1").performClick()
+        compose.onNodeWithTag("pending-select-1").assertIsOn()
         compose.onNodeWithText("确认 1 笔").performClick()
         compose.runOnIdle { assertEquals(setOf(1L), confirmed) }
     }
