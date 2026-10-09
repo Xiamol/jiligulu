@@ -20,6 +20,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.FirstBaseline
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -95,6 +96,26 @@ internal fun summarizeAiCost(rows: List<AiCostGroup>): AiCostSummary {
     )
 }
 
+internal data class AiCostCategory(val purpose: AiUsagePurpose, val label: String, val summary: AiCostSummary,
+    val priceIncomplete: Boolean)
+
+internal fun costPurposeLabel(rows: List<AiCostGroup>): String {
+    val purpose = rows.firstOrNull()?.purpose ?: AiUsagePurpose.UNSPECIFIED
+    if (purpose != AiUsagePurpose.UNSPECIFIED) return purpose.label
+    val legacy = rows.sumOf { it.legacyCalls }
+    return when {
+        legacy > 0 && rows.sumOf { it.calls } > legacy -> "历史及其它"
+        legacy > 0 -> "历史汇总"
+        else -> "其它调用"
+    }
+}
+
+/** Keep historical attribution intact and compute each rate from its own reported counters. */
+internal fun costCategories(rows: List<AiCostGroup>): List<AiCostCategory> = AiUsagePurpose.entries.mapNotNull { purpose ->
+    val group = rows.filter { it.purpose == purpose }
+    if (group.isEmpty()) null else AiCostCategory(purpose, costPurposeLabel(group), summarizeAiCost(group), missingPrices(group) > 0)
+}
+
 @Composable
 fun AiUsageSettings() {
     val app = LocalContext.current.applicationContext as? JiliguluApp ?: return
@@ -144,9 +165,10 @@ fun AiUsageSettings() {
     ) { day -> DayCostDetails(day, revision, group, filterKey) }
     if (priceEditor && active) AiPriceEditor(profile, onDismiss = { priceEditor = false })
     if (help && active) GuluDialog("费用怎样记录", { help = false }, compact = true, dense = true) {
+        Text("用途页和日明细只显示各类花费与缓存命中率；图片识别、记账聊天等按实际调用用途分别记录。旧版没有保存用途，所以旧费用单列为历史汇总；不会猜测分到图片或聊天。未标注用途的新请求归为其它调用，两者合并时显示历史及其它。")
         Text("每次真正发起的 HTTP 尝试各计一次，包括重试与多轮查询。回复 JSON 不合格也不会重复计量；响应没报告用量时保留未知。")
         Text("只按请求开始时保存的供应商、模型和单价快照计算已知部分。改价只影响之后的请求。缺少缓存拆分时，不擅自把全部输入当未命中；图上的问号表示该日存在未知费用。缓存率只用已报告的命中 /（命中 + 未命中），报告不全会单独标出。")
-        Text("DeepSeek Flash 默认采用你提供的 0.02 / 1 / 4 元参考单价；其它模型与自定义服务需单独配置。服务商可能按时段、折扣或其它规则实扣，此处不是账单，也不额外查余额。")
+        Text("单价单位是人民币元 / 每百万 tokens。每个供应商与模型独立，保存只影响之后的请求。DeepSeek Flash 默认采用你提供的 0.02 / 1 / 4 元参考单价；其它模型与自定义服务需单独配置。美元报价请填写人民币参考值。服务商可能按时段、折扣或其它规则实扣，此处不是账单，也不额外查余额。")
         Text("柱图展示所选整月；累计由数据库聚合。旧版本的参考估算按旧版固定算法保留，不套当前单价。最后记录日可展示每日费用，更早未分日的记录保留在累计与历史说明中，不补造日期。仅保存用量、用途、模型与价格元数据，不保存消息、照片、接口地址或密钥。")
     }
 }
@@ -279,14 +301,16 @@ private fun CostOverview(view: CostView, start: LocalDate, days: Int, selectedDa
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun CostPurposeLegend(rows: List<AiCostGroup>) {
-    val purposes = remember(rows) { rows.filter { it.calls > 0 }.map { it.purpose }.distinct() }
+    val categories = remember(rows) { costCategories(rows.filter { it.calls > 0 }) }
     FlowRow(Modifier.fillMaxWidth().testTag("ai-cost-purpose-legend"), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        purposes.forEach { purpose ->
+        categories.forEach { category ->
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                Box(Modifier.size(6.dp).background(purposeColor(purpose), RoundedCornerShape(2.dp)))
-                Text(when (purpose) {
+                Box(Modifier.size(6.dp).background(purposeColor(category.purpose), RoundedCornerShape(2.dp)))
+                Text(when (category.purpose) {
                     AiUsagePurpose.LEDGER_CHAT -> "聊天"; AiUsagePurpose.IMAGE_RECOGNITION -> "识图"; AiUsagePurpose.CLASSIFICATION -> "分类"
-                    AiUsagePurpose.HEART_LETTER -> "回信"; AiUsagePurpose.LIU_REN -> "小六壬"; AiUsagePurpose.UNSPECIFIED -> "未知"
+                    AiUsagePurpose.HEART_LETTER -> "回信"; AiUsagePurpose.LIU_REN -> "小六壬"; AiUsagePurpose.UNSPECIFIED -> when (category.label) {
+                        "历史汇总" -> "历史"; "历史及其它" -> "历史/其它"; else -> "其它"
+                    }
                 }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
@@ -302,25 +326,13 @@ private fun CostStatus(message: String, error: Boolean = false) {
 }
 
 @Composable
-private fun PurposeDetails(rows: List<AiCostGroup>, undatedCalls: Long) {
+internal fun PurposeDetails(rows: List<AiCostGroup>, undatedCalls: Long) {
     val summary = remember(rows) { summarizeAiCost(rows) }
-    Text("累计 ${money(summary.displayPico)} · ${summary.calls} 次尝试", style = MaterialTheme.typography.titleSmall)
-    if (undatedCalls > 0) Text("历史 $undatedCalls 次未分日，已计入累计。旧版没有逐日记录，无法还原每天的柱图。",
-        style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.testTag("ai-cost-undated-history"))
-    Text("输入 ${tokenText(summary.inputTokens)} · 输出 ${tokenText(summary.outputTokens)} tokens${if (summary.calls > 0 && !summary.tokensComplete) "（已报告）" else ""}",
-        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Text("累计 ${money(summary.displayPico)} · ${summary.calls} 次", style = MaterialTheme.typography.titleSmall)
     if (rows.isEmpty()) Text("还没有记录的请求。", style = MaterialTheme.typography.bodyMedium)
-    rows.forEach { row ->
-        Column(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            PurposeCostLine(row)
-            val input = BigDecimal.valueOf(row.cacheHit) + BigDecimal.valueOf(row.cacheMiss) + BigDecimal.valueOf(row.unclassifiedInput)
-            Text("输入 ${tokenText(input)} · 输出 ${tokenText(BigDecimal.valueOf(row.output))} tokens（已报告）",
-                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    }
-    if (summary.unknownCalls > 0) Text("${summary.unknownCalls} 次费用有未知部分；金额只含已知小计。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    if (summary.legacyCalls > 0) Text("${summary.legacyCalls} 次旧汇总使用旧版参考算法，已保留原估算；未套当前单价。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    else CostCategoryTable(rows)
+    if (undatedCalls > 0) Text("历史 $undatedCalls 次未分日，已计入累计", style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.testTag("ai-cost-undated-history"))
 }
 
 private data class DayView(val rows: List<AiCostGroup> = emptyList(), val failed: Boolean = false)
@@ -334,43 +346,54 @@ private fun DayCostDetails(day: LocalDate, revision: Long, group: String?, key: 
         catch (cancelled: CancellationException) { throw cancelled }
         catch (_: Exception) { DayView(failed = true) }
     }
-    Text("按用途、供应商与模型归类", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.testTag("ai-cost-day-details"))
     val ready = view
     if (ready == null) Text("正在读取明细…", style = MaterialTheme.typography.bodyMedium)
     else if (ready.failed) Text("明细暂时不可读，未把未知计为零。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
-    else {
-        if (ready.rows.isEmpty()) Text("这一天没有记录的请求。", style = MaterialTheme.typography.bodyMedium)
-        ready.rows.forEach { row ->
-            Column(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                PurposeCostLine(row)
-                Text("${row.providerName} · ${row.model}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                CostPart("缓存命中", row.cacheHit, row.cachePico, row.cacheHitReportedCalls > 0 || row.cacheHit > 0)
-                CostPart("未命中输入", row.cacheMiss, row.missPico, row.cacheMissReportedCalls > 0 || row.cacheMiss > 0)
-                CostPart("输出", row.output, row.outputPico, row.outputReportedCalls > 0 || row.output > 0)
-                if (row.unclassifiedInput > 0) CostPart("未分类输入", row.unclassifiedInput, row.flatPico)
-                if (row.unknownCalls > 0) Text("${row.unknownCalls} 次用量或计价不完整，以上为已知小计。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                if (row.legacyCalls > 0) Text("旧版参考估算 ${money(row.legacyEstimatePico)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .4f))
+    else CostDayDetails(ready.rows)
+}
+
+@Composable
+internal fun CostDayDetails(rows: List<AiCostGroup>) {
+    val summary = remember(rows) { summarizeAiCost(rows) }
+    Text("当日 ${money(summary.displayPico)} · ${summary.calls} 次", style = MaterialTheme.typography.titleSmall,
+        modifier = Modifier.testTag("ai-cost-day-details"))
+    if (rows.isEmpty()) Text("这一天没有记录的请求。", style = MaterialTheme.typography.bodyMedium)
+    else CostCategoryTable(rows)
+}
+
+@Composable
+private fun CostCategoryTable(rows: List<AiCostGroup>) {
+    val categories = remember(rows) { costCategories(rows) }
+    Column(Modifier.fillMaxWidth().testTag("ai-cost-category-table")) {
+        Row(Modifier.fillMaxWidth().padding(bottom = 6.dp)) {
+            Text("用途", Modifier.weight(1.05f), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("花费", Modifier.weight(1.15f), textAlign = TextAlign.End, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("缓存命中率", Modifier.weight(.95f), textAlign = TextAlign.End, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-    }
-}
-
-@Composable
-private fun CostPart(label: String, tokens: Long, amount: Long?, reported: Boolean = true) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text("$label · ${if (reported) "${tokenText(BigDecimal.valueOf(tokens))} tokens" else "未报告"}", style = MaterialTheme.typography.bodySmall)
-        Text(money(amount), style = MaterialTheme.typography.bodySmall)
-    }
-}
-
-@Composable
-private fun PurposeCostLine(row: AiCostGroup) {
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-        Box(Modifier.size(8.dp).background(purposeColor(row.purpose), RoundedCornerShape(2.dp)))
-        Text("${row.purpose.label} · ${row.calls}次", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-        val amount = estimated(listOf(row))
-        Text(money(amount) + if (missingPrices(listOf(row)) > 0 && amount != null) " + ?" else "", style = MaterialTheme.typography.bodyMedium)
+        categories.forEach { category ->
+            val summary = category.summary
+            Row(Modifier.fillMaxWidth().heightIn(min = 42.dp).padding(vertical = 3.dp).testTag("ai-cost-category-${category.purpose.name}"),
+                verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.weight(1.05f).alignBy(FirstBaseline), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Box(Modifier.size(7.dp).background(purposeColor(category.purpose), RoundedCornerShape(2.dp)))
+                    Text(category.label, style = MaterialTheme.typography.bodyLarge, maxLines = 2)
+                }
+                Column(Modifier.weight(1.15f).alignBy(FirstBaseline), horizontalAlignment = Alignment.End) {
+                    Text(money(summary.displayPico), Modifier.testTag("ai-cost-category-money-${category.purpose.name}"),
+                        style = MaterialTheme.typography.bodyLarge, maxLines = 1)
+                    if (category.priceIncomplete && summary.displayPico != null) Text("含未知", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Column(Modifier.weight(.95f).alignBy(FirstBaseline), horizontalAlignment = Alignment.End) {
+                    Text(summary.cacheText, Modifier.testTag("ai-cost-category-rate-${category.purpose.name}"), style = MaterialTheme.typography.bodyLarge, maxLines = 1)
+                    if (!summary.cacheComplete || summary.cacheRate == null) Text(when {
+                        summary.cacheRate != null -> "部分"
+                        summary.cacheComplete -> "无输入"
+                        summary.hasCacheReport -> "不完整"
+                        else -> "未报告"
+                    }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
     }
 }
 
@@ -446,11 +469,11 @@ private fun AiPriceEditor(profile: AiProviderProfile, onDismiss: () -> Unit) {
             catch (failure: Exception) { error = failure.message ?: "未能保存单价" }
             finally { saving = false }
         } }) {
-        Text("单位：人民币元 / 每百万 tokens。每个供应商与模型独立；保存只影响之后的请求。", style = MaterialTheme.typography.bodySmall)
+        Text("人民币元 / 每百万 tokens", style = MaterialTheme.typography.bodySmall)
         CompactFormField("缓存命中", cache, { cache = it.take(18) }, prefix = "¥", singleLine = true)
         CompactFormField("未命中输入", miss, { miss = it.take(18) }, prefix = "¥", singleLine = true)
         CompactFormField("输出", output, { output = it.take(18) }, prefix = "¥", singleLine = true)
-        Text("这是参考单价，不是服务商实扣。美元报价请自行填入人民币参考值；未配置的服务不会套用此价。", style = MaterialTheme.typography.labelSmall)
+        Text("保存只影响之后的请求", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
     }
 }
@@ -478,9 +501,4 @@ internal fun money(value: Long?): String {
     if (value == null) return "未知"
     if (value in 1..999_999) return "<¥0.000001"
     return "¥" + BigDecimal.valueOf(value, 12).setScale(6, RoundingMode.HALF_UP).stripTrailingZeros().toPlainString()
-}
-private fun tokenText(value: BigDecimal): String = when {
-    value >= BigDecimal.valueOf(1_000_000) -> value.divide(BigDecimal.valueOf(1_000_000), 1, RoundingMode.HALF_UP).stripTrailingZeros().toPlainString() + "M"
-    value >= BigDecimal.valueOf(10_000) -> value.divide(BigDecimal.valueOf(1_000), 1, RoundingMode.HALF_UP).stripTrailingZeros().toPlainString() + "k"
-    else -> value.stripTrailingZeros().toPlainString()
 }

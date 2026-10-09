@@ -155,6 +155,42 @@ class AiCostSummaryTest {
         assertEquals("40%", summary.cacheText)
         assertEquals("仅已报告部分", summary.cacheNote)
     }
+
+    @Test fun categoryCostsAndRatesStaySeparateWhileLegacyIsLabelledAsHistory() {
+        val chat = costGroup()
+        val image = costGroup(hit = 100, miss = 900, known = 2_000_000_000).copy(purpose = AiUsagePurpose.IMAGE_RECOGNITION)
+        val history = costGroup(hit = 40, miss = 60, known = null, unknown = 1).copy(purpose = AiUsagePurpose.UNSPECIFIED,
+            legacyCalls = 1, legacyEstimatePico = 3_000_000_000, cacheReportedCalls = 0, cacheHitReportedCalls = 0, cacheMissReportedCalls = 0)
+        val categories = costCategories(listOf(history, image, chat))
+        assertEquals(listOf("记账聊天", "图片识别", "历史汇总"), categories.map { it.label })
+        assertEquals(listOf("90%", "10%", "40%"), categories.map { it.summary.cacheText })
+        assertEquals(listOf(1_000_000_000L, 2_000_000_000L, 3_000_000_000L), categories.map { it.summary.displayPico })
+        assertFalse(categories.last().priceIncomplete)
+        assertFalse(categories.last().summary.cacheComplete)
+        assertEquals(6_000_000_000L, summarizeAiCost(listOf(history, image, chat)).displayPico)
+    }
+
+    @Test fun newUnspecifiedRequestsAreOtherCallsAndMixedAggregatesAreHistoryAndOther() {
+        val other = costGroup().copy(purpose = AiUsagePurpose.UNSPECIFIED)
+        val history = costGroup(known = null, unknown = 1).copy(purpose = AiUsagePurpose.UNSPECIFIED,
+            legacyCalls = 1, legacyEstimatePico = 2_000_000_000)
+        assertEquals("其它调用", costPurposeLabel(listOf(other)))
+        assertEquals("历史汇总", costPurposeLabel(listOf(history)))
+        assertEquals("历史及其它", costPurposeLabel(listOf(history, other)))
+        val mixed = other.copy(calls = 2, legacyCalls = 1, legacyEstimatePico = 2_000_000_000)
+        assertEquals("历史及其它", costCategories(listOf(mixed)).single().label)
+        assertEquals(3_000_000_000L, costCategories(listOf(mixed)).single().summary.displayPico)
+    }
+
+    @Test fun dailyModelGroupsMergeIntoOneCategoryWithTokenWeightedCacheRate() {
+        val first = costGroup(hit = 900, miss = 100)
+        val second = costGroup(hit = 0, miss = 100, known = 2_000_000_000).copy(providerKey = "second-model", model = "fixture-v2")
+        val category = costCategories(listOf(first, second)).single()
+        assertEquals("记账聊天", category.label)
+        assertEquals("81.8%", category.summary.cacheText)
+        assertTrue(category.summary.cacheComplete)
+        assertEquals(3_000_000_000L, category.summary.displayPico)
+    }
 }
 
 internal fun costGroup(hit: Long = 900, miss: Long = 100, known: Long? = 1_000_000_000, unknown: Long = 0) = AiCostGroup(

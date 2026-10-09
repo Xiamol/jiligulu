@@ -1,16 +1,13 @@
 package com.jiligulu.app.ui.settings
 
 import android.app.Application
-import androidx.compose.material3.Text
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.getOrNull
@@ -18,6 +15,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
@@ -51,7 +49,7 @@ class AiCostDialogLayoutTest {
         compose.onNodeWithText("90%").assertExists()
         compose.onNodeWithTag("ai-cost-day-details").assertDoesNotExist()
         compose.onNodeWithText("关闭").assertDoesNotExist()
-        compose.onNodeWithText("记账聊天 · 1次").assertDoesNotExist()
+        compose.onNodeWithTag("ai-cost-category-LEDGER_CHAT").assertDoesNotExist()
         val panel = compose.onNodeWithTag("ai-cost-panel").fetchSemanticsNode().boundsInRoot
         val footer = compose.onNodeWithTag("ai-cost-actions").fetchSemanticsNode().boundsInRoot
         val chart = compose.onNodeWithTag("ai-cost-chart").fetchSemanticsNode().boundsInRoot
@@ -74,12 +72,15 @@ class AiCostDialogLayoutTest {
         show()
         val initialFooter = compose.onNodeWithTag("ai-cost-actions").fetchSemanticsNode().boundsInRoot
         compose.onNodeWithTag("ai-cost-purpose-action").performSemanticsAction(SemanticsActions.OnClick) { it() }
-        compose.onNodeWithText("记账聊天 · 1次").assertExists()
+        compose.onNodeWithText("记账聊天").assertExists()
+        compose.onNodeWithTag("ai-cost-category-money-LEDGER_CHAT").assertTextEquals("¥0.001")
+        compose.onNodeWithTag("ai-cost-category-rate-LEDGER_CHAT").assertTextEquals("90%")
         compose.onNodeWithTag("ai-cost-chart").assertDoesNotExist()
         compose.onNodeWithTag("ai-cost-day-details").assertDoesNotExist()
         compose.onNodeWithTag("ai-cost-day-action").performSemanticsAction(SemanticsActions.OnClick) { it() }
         compose.onNodeWithTag("ai-cost-day-details").assertExists()
-        compose.onNodeWithText("记账聊天 · 1次").assertDoesNotExist()
+        compose.onNodeWithText("当日 ¥0.001 · 1 次").assertExists()
+        compose.onNodeWithTag("ai-cost-category-money-LEDGER_CHAT").assertTextEquals("¥0.001")
         compose.onNodeWithTag("ai-cost-back").performSemanticsAction(SemanticsActions.OnClick) { it() }
         compose.onNodeWithTag("ai-cost-chart").assertExists()
         assertEquals(initialFooter, compose.onNodeWithTag("ai-cost-actions").fetchSemanticsNode().boundsInRoot)
@@ -95,7 +96,7 @@ class AiCostDialogLayoutTest {
     }
 
     @Test fun undatedLegacyHistoryStaysVisibleWithoutInventingDailyCosts() {
-        val legacy = costGroup(hit = 0, miss = 0, known = null, unknown = 8).copy(day = null, calls = 8,
+        val legacy = costGroup(hit = 0, miss = 0, known = null, unknown = 8).copy(day = null, calls = 8, purpose = AiUsagePurpose.UNSPECIFIED,
             legacyCalls = 8, legacyEstimatePico = 2_000_000_000,
             cacheReportedCalls = 0, cacheHitReportedCalls = 0, cacheMissReportedCalls = 0)
         show(CostView(listOf(costGroup()), listOf(costGroup(), legacy), undatedCalls = 8))
@@ -106,7 +107,9 @@ class AiCostDialogLayoutTest {
         compose.onNodeWithText("10/9 已知 ¥0.001").assertDoesNotExist()
         compose.onNodeWithTag("ai-cost-purpose-action").performSemanticsAction(SemanticsActions.OnClick) { it() }
         compose.onNodeWithTag("ai-cost-undated-history").assertExists()
-        compose.onNodeWithText("累计 ¥0.003 · 9 次尝试").assertExists()
+        compose.onNodeWithText("累计 ¥0.003 · 9 次").assertExists()
+        compose.onNodeWithText("历史汇总").assertExists()
+        compose.onNodeWithTag("ai-cost-category-money-UNSPECIFIED").assertTextEquals("¥0.002")
         assertFixedActionsInsidePanel()
     }
 
@@ -126,7 +129,7 @@ class AiCostDialogLayoutTest {
         show(CostView(rows, rows))
         compose.onNodeWithTag("ai-cost-daily").assertTextEquals("¥0.006")
         compose.onNodeWithText("本月 ¥0.006").assertExists()
-        for (label in listOf("聊天", "识图", "分类", "回信", "小六壬", "未知")) compose.onNodeWithText(label).assertExists()
+        for (label in listOf("聊天", "识图", "分类", "回信", "小六壬", "其它")) compose.onNodeWithText(label).assertExists()
         val footer = compose.onNodeWithTag("ai-cost-actions").fetchSemanticsNode().boundsInRoot
         val selected = compose.onNodeWithTag("ai-cost-selected-day").fetchSemanticsNode().boundsInRoot
         assertTrue(selected.bottom < footer.top)
@@ -167,6 +170,82 @@ class AiCostDialogLayoutTest {
         assertFixedActionsInsidePanel()
     }
 
+    @Test fun purposeTableShowsEachCostAndRateWithHistorySeparateAndFitsInOneScreen() {
+        val current = AiUsagePurpose.entries.filter { it != AiUsagePurpose.UNSPECIFIED }.mapIndexed { index, purpose ->
+            costGroup(hit = if (purpose == AiUsagePurpose.IMAGE_RECOGNITION) 100 else 900,
+                miss = if (purpose == AiUsagePurpose.IMAGE_RECOGNITION) 900 else 100,
+                known = (index + 1) * 1_000_000_000L).copy(purpose = purpose)
+        }
+        val legacy = costGroup(hit = 40, miss = 60, known = null, unknown = 8).copy(purpose = AiUsagePurpose.UNSPECIFIED,
+            calls = 8, legacyCalls = 8, legacyEstimatePico = 7_000_000_000, cacheReportedCalls = 0,
+            cacheHitReportedCalls = 0, cacheMissReportedCalls = 0)
+        show(CostView(current, current + legacy, undatedCalls = 8))
+        compose.onNodeWithTag("ai-cost-purpose-action").performSemanticsAction(SemanticsActions.OnClick) { it() }
+        compose.onNodeWithText("历史汇总").assertExists()
+        compose.onNodeWithText("用途未知").assertDoesNotExist()
+        compose.onNodeWithTag("ai-cost-category-money-LEDGER_CHAT").assertTextEquals("¥0.001")
+        compose.onNodeWithTag("ai-cost-category-rate-LEDGER_CHAT").assertTextEquals("90%")
+        compose.onNodeWithTag("ai-cost-category-money-IMAGE_RECOGNITION").assertTextEquals("¥0.002")
+        compose.onNodeWithTag("ai-cost-category-rate-IMAGE_RECOGNITION").assertTextEquals("10%")
+        compose.onNodeWithTag("ai-cost-category-money-UNSPECIFIED").assertTextEquals("¥0.007")
+        compose.onNodeWithTag("ai-cost-category-rate-UNSPECIFIED").assertTextEquals("40%")
+        compose.onNodeWithText("部分").assertExists()
+        compose.onNodeWithText("完整报告").assertDoesNotExist()
+        assertTrue(compose.onAllNodesWithText("tokens", substring = true).fetchSemanticsNodes().isEmpty())
+        val footer = compose.onNodeWithTag("ai-cost-actions").fetchSemanticsNode().boundsInRoot
+        for (purpose in AiUsagePurpose.entries) {
+            val row = compose.onNodeWithTag("ai-cost-category-${purpose.name}").fetchSemanticsNode().boundsInRoot
+            val money = compose.onNodeWithTag("ai-cost-category-money-${purpose.name}").fetchSemanticsNode().boundsInRoot
+            val rate = compose.onNodeWithTag("ai-cost-category-rate-${purpose.name}").fetchSemanticsNode().boundsInRoot
+            assertTrue("$purpose must remain above fixed actions", row.bottom < footer.top)
+            assertEquals("primary values must align even when cache has a partial note", money.top, rate.top, 1f)
+        }
+        val range = compose.onAllNodes(hasScrollAction()).fetchSemanticsNodes().single().config.getOrNull(SemanticsProperties.VerticalScrollAxisRange)
+        assertEquals(0f, range!!.maxValue(), 1f)
+        assertFixedActionsInsidePanel()
+    }
+
+    @Test fun dayDetailsCombineModelsAndShowUnknownCacheAsADashWithoutTokenBreakdowns() {
+        val first = costGroup()
+        val second = costGroup(hit = 0, miss = 100, known = 2_000_000_000).copy(providerKey = "second", model = "second-model")
+        val image = costGroup(hit = 0, miss = 0, known = 4_000_000_000).copy(purpose = AiUsagePurpose.IMAGE_RECOGNITION,
+            cacheReportedCalls = 0, cacheHitReportedCalls = 0, cacheMissReportedCalls = 0)
+        show(CostView(listOf(first, second, image), listOf(first, second, image)))
+        compose.onNodeWithTag("ai-cost-day-action").performSemanticsAction(SemanticsActions.OnClick) { it() }
+        compose.onNodeWithText("当日 ¥0.007 · 3 次").assertExists()
+        compose.onNodeWithTag("ai-cost-category-money-LEDGER_CHAT").assertTextEquals("¥0.003")
+        compose.onNodeWithTag("ai-cost-category-rate-LEDGER_CHAT").assertTextEquals("81.8%")
+        compose.onNodeWithTag("ai-cost-category-money-IMAGE_RECOGNITION").assertTextEquals("¥0.004")
+        compose.onNodeWithTag("ai-cost-category-rate-IMAGE_RECOGNITION").assertTextEquals("—")
+        compose.onNodeWithText("未报告").assertExists()
+        for (text in listOf("tokens", "未命中输入", "输出", "未知计价", "Fixture")) {
+            assertTrue("$text must not clutter daily cost rows", compose.onAllNodesWithText(text, substring = true).fetchSemanticsNodes().isEmpty())
+        }
+        assertFixedActionsInsidePanel()
+    }
+
+    @Test fun missingModernPricesKeepNamedCategoriesAndRecoveredHistoryMoneyVisible() {
+        val unpriced = AiUsagePurpose.entries.filter { it != AiUsagePurpose.UNSPECIFIED }.map {
+            costGroup(hit = 0, miss = 0, known = null, unknown = 1).copy(purpose = it,
+                cacheReportedCalls = 0, cacheHitReportedCalls = 0, cacheMissReportedCalls = 0)
+        }
+        val history = costGroup(known = null, unknown = 1).copy(purpose = AiUsagePurpose.UNSPECIFIED,
+            legacyCalls = 1, legacyEstimatePico = 8_000_000_000)
+        show(CostView(unpriced, unpriced + history))
+        compose.onNodeWithTag("ai-cost-purpose-action").performSemanticsAction(SemanticsActions.OnClick) { it() }
+        for (purpose in AiUsagePurpose.entries.filter { it != AiUsagePurpose.UNSPECIFIED }) {
+            compose.onNodeWithText(purpose.label).assertExists()
+            compose.onNodeWithTag("ai-cost-category-money-${purpose.name}").assertTextEquals("未知")
+            compose.onNodeWithTag("ai-cost-category-rate-${purpose.name}").assertTextEquals("—")
+        }
+        compose.onNodeWithText("历史汇总").assertExists()
+        compose.onNodeWithTag("ai-cost-category-money-UNSPECIFIED").assertTextEquals("¥0.008")
+        compose.onNodeWithText("用途未知").assertDoesNotExist()
+        val range = compose.onAllNodes(hasScrollAction()).fetchSemanticsNodes().single().config.getOrNull(SemanticsProperties.VerticalScrollAxisRange)
+        assertEquals(0f, range!!.maxValue(), 1f)
+        assertFixedActionsInsidePanel()
+    }
+
     @Test
     @Config(qualifiers = "w320dp-h568dp-port-mdpi")
     fun narrowScreenWithLargerTextKeepsNavigationAndActionsInsideThePanel() {
@@ -188,7 +267,7 @@ class AiCostDialogLayoutTest {
                     var month by remember { mutableStateOf(YearMonth.from(day)) }
                     AiCostOverviewDialog(view, month, 0, true, day,
                         onMonth = { month = it; onMonth(it) }, onScope = {}, onSelectDay = onSelectDay, onPrices = {}, onHelp = {}, onDismiss = {}) {
-                        Text("当天请求独立查看", Modifier.testTag("ai-cost-day-details"))
+                        CostDayDetails(view.daily.filter { it.day == day.toString() })
                     }
                 }
             }

@@ -1,6 +1,5 @@
 package com.jiligulu.app.ui.littleworld
 
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -17,13 +16,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.jiligulu.app.R
 import com.jiligulu.app.core.audio.UiSound
 import java.time.Instant
 import java.time.ZoneId
@@ -71,7 +68,7 @@ internal fun XiaoLiuRenPane(store: XiaoLiuRenStore,
     val bodyStyle = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp, lineHeight = 22.sp)
     FortunePageLayout(modifier = modifier.fillMaxSize(), body = {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Image(painterResource(R.drawable.gulu_idle), null, Modifier.size(40.dp))
+            FortuneTellerPortrait(64.dp, Modifier.testTag("liuren-fortune-teller"))
             Text(when (session.step) {
                 LiuRenStep.QUESTION -> "你想问哪一件小事呀？"
                 LiuRenStep.METHOD -> "阿噜记住啦，我们怎么起课？"

@@ -4,7 +4,6 @@ import android.content.Context
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -15,7 +14,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.FontWeight
@@ -24,7 +22,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
-import com.jiligulu.app.R
 import com.jiligulu.app.core.audio.UiSound
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -118,7 +115,10 @@ internal fun ColumnScope.FortuneWheelGame(boardSize: Dp, foreground: Boolean,
             when (fortunePage) {
             "wheel" -> FortunePageLayout(scrollBody = false, body = {
                 BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                SecretPrizeWheel(angle.value, minOf(boardSize, maxWidth, maxHeight, 310.dp), enabled = foreground && !spinning) {
+                val portraitSize = minOf(104.dp, maxHeight * .24f)
+                val wheelSize = minOf(boardSize, maxWidth, (maxHeight - portraitSize - 8.dp).coerceAtLeast(1.dp), 310.dp)
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                SecretPrizeWheel(angle.value, wheelSize, enabled = foreground && !spinning) {
                     if (!spinning && foreground) {
                         UiSound.select(context); spinning = true
                         scope.launch {
@@ -133,6 +133,9 @@ internal fun ColumnScope.FortuneWheelGame(boardSize: Dp, foreground: Boolean,
                             } finally { spinning = false }
                         }
                     }
+                }
+                Spacer(Modifier.height(8.dp))
+                FortuneTellerPortrait(portraitSize, Modifier.testTag("wheel-fortune-teller"))
                 }
                 }
             }, footer = {
@@ -165,6 +168,7 @@ internal fun ColumnScope.FortuneWheelGame(boardSize: Dp, foreground: Boolean,
                     Text("${date.monthValue}月${date.dayOfMonth}日", fontSize = 14.sp, color = Color(0xFF9A929A))
                     TextButton(onClick = { UiSound.select(context); signPicker = true }) { Text(sign, fontSize = 13.sp) }
                 }
+                FortuneTellerPortrait(112.dp, Modifier.testTag("luck-fortune-teller"))
                 Text(luck.title, Modifier.padding(vertical = 10.dp), fontFamily = com.jiligulu.app.ui.theme.GuluBrandFont,
                     fontSize = 28.sp, color = Color(0xFF8B74A4))
                 Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
@@ -218,7 +222,7 @@ private fun BoxScope.FortuneStampOverlay(event: Int, onFinished: () -> Unit) {
         Column(Modifier.graphicsLayer {
             scaleX = scale.value; scaleY = scale.value; rotationZ = rotation.value
         }, horizontalAlignment = Alignment.CenterHorizontally) {
-            Image(painterResource(R.drawable.gulu_luck_stamp), null, Modifier.size(150.dp))
+            FortuneTellerPortrait(150.dp, Modifier.testTag("fortune-stamp-teller"))
             Text("大吉", Modifier.testTag("fortune-stamp-title"), fontFamily = com.jiligulu.app.ui.theme.GuluBrandFont,
                 fontSize = 44.sp, color = Color(0xFF8B74A4))
         }
