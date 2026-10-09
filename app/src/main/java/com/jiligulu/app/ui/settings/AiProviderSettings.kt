@@ -78,9 +78,9 @@ fun AiProviderSettings() {
             Text(selected.name, style = MaterialTheme.typography.bodyMedium)
             Text(selected.model.ifBlank { "填写模型与接口" }, style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
-            val hasKey = if (state.selected == AiProviderId.DEEPSEEK) state.hasDeepSeekKey || AiConfig.DEFAULT_API_KEY.isNotBlank() else state.hasCustomKey
-            val usingDefault = state.selected == AiProviderId.DEEPSEEK && !state.hasDeepSeekKey && AiConfig.DEFAULT_API_KEY.isNotBlank()
-            Text(if (usingDefault) "默认 API 已启用" else if (hasKey) "密钥已设置" else if (state.selected == AiProviderId.CUSTOM) "未填密钥 · 免鉴权服务可留空" else "未填密钥",
+            val hasKey = if (state.selected == AiProviderId.DEEPSEEK) state.hasDeepSeekKey else state.hasCustomKey
+            val usingDefault = state.selected == AiProviderId.DEEPSEEK && !state.hasDeepSeekKey
+            Text(if (usingDefault) "默认 DS API 已启用" else if (hasKey) "密钥已设置" else "未填密钥 · 免鉴权服务可留空",
                 style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         TextButton(onClick = uiTap { editor = state.selected }, modifier = Modifier.testTag("ai-provider-edit")) { Text("编辑") }
@@ -105,6 +105,7 @@ fun AiProviderSettings() {
         Text("自定义仅支持 OpenAI Chat Completions 兼容接口。基础地址会补 /chat/completions，空路径会补 /v1；完整接口按填写地址使用。HTTP 不加密，云端建议 HTTPS，HTTP 可用于你信任的本地服务。")
         Text("不同模型支持的参数与识图能力不同。自定义默认只按提示要求 JSON，不发送 DeepSeek thinking、temperature 或 token 上限；确认服务支持后，可启用 JSON 模式、temperature 和图像输入。")
         Text("密钥仅用于当前设备请求鉴权，不会共享给其它供应商；免鉴权服务可留空。")
+        Text("DeepSeek 留空使用默认 DS 服务，经安全转发请求官方接口，共享密钥不在安装包里。填写自己的密钥后直接连接官方；自定义供应商保持自己的地址和配置。")
     }
 }
 
@@ -154,7 +155,7 @@ private fun AiProviderEditor(id: AiProviderId, initial: AiProviderProfile, loadK
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
             trailingIcon = { TextButton(onClick = { reveal = !reveal }) { Text(if (reveal) "隐藏" else "显示") } },
             modifier = Modifier.fillMaxWidth().testTag("ai-provider-key"))
-        if (id == AiProviderId.DEEPSEEK) Text("留空使用可用的内置配置；密钥本身不带 Bearer。", style = MaterialTheme.typography.bodySmall)
+        if (id == AiProviderId.DEEPSEEK) Text("留空使用默认 DS 服务；个人密钥不带 Bearer。", style = MaterialTheme.typography.bodySmall)
         else {
             CapabilityRow("模型支持图像输入", profile.supportsImages) { profile = profile.copy(supportsImages = it) }
             CapabilityRow("支持 JSON object 响应格式", profile.jsonMode) { profile = profile.copy(jsonMode = it) }

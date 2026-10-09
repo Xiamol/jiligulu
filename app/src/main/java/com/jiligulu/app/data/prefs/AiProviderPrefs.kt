@@ -90,8 +90,11 @@ class AiProviderPrefs internal constructor(private val store: DataStore<Preferen
         val profile = current.selectedProfile
         AiProviderEndpoint.validate(profile)
         val key = prefs[if (current.selected == AiProviderId.DEEPSEEK) deepSeekKey else customKey].orEmpty()
-            .let { if (current.selected == AiProviderId.DEEPSEEK) it.ifBlank { AiConfig.DEFAULT_API_KEY } else it }
-        require(current.selected != AiProviderId.DEEPSEEK || key.isNotBlank()) { "还没有配置 DeepSeek 密钥，请到「设置 → AI 服务」填写" }
+        if (current.selected == AiProviderId.DEEPSEEK && key.isBlank()) {
+            val defaultProfile = profile.copy(address = AiConfig.DEFAULT_SERVICE_URL, endpointKind = AiEndpointKind.CHAT_ENDPOINT)
+            AiProviderEndpoint.validate(defaultProfile)
+            return AiProviderConnection(defaultProfile, "")
+        }
         return AiProviderConnection(profile, key)
     }
 

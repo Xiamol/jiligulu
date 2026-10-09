@@ -1,5 +1,3 @@
-import java.util.Properties
-
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -8,25 +6,7 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
-// 内置 API Key 从 local.properties 读取（该文件已被 .gitignore 排除，不会进仓库）。
-// 也可用环境变量 DEEPSEEK_API_KEY 覆盖，方便 CI。两者都缺省时注入空串。
-val deepSeekApiKey: String = run {
-    // Public artifacts must not contain the developer's private credential.
-    if (providers.gradleProperty("publicRelease").orNull == "true") return@run ""
-    val fromEnv = System.getenv("DEEPSEEK_API_KEY").orEmpty()
-    val raw = if (fromEnv.isNotBlank()) fromEnv else {
-        val propsFile = rootProject.file("local.properties")
-        if (propsFile.exists()) {
-            Properties().apply { propsFile.inputStream().use { load(it) } }
-                .getProperty("DEEPSEEK_API_KEY").orEmpty()
-        } else ""
-    }
-    raw.trim()
-        .replace("\\", "\\\\")
-        .replace("\"", "\\\"")
-        .replace("\n", "").replace("\r", "")
-}
-
+// 共享默认密钥只进入服务端秘密绑定；任何构建变体都不读取或打包本地 API Key。
 android {
     namespace = "com.jiligulu.app"
     compileSdk = 35
@@ -38,8 +18,6 @@ android {
         versionCode = 26
         versionName = "1.0.13"
 
-        // 注入到 BuildConfig.DEEPSEEK_API_KEY，由 AiConfig.DEFAULT_API_KEY 读取
-        buildConfigField("String", "DEEPSEEK_API_KEY", "\"$deepSeekApiKey\"")
     }
 
     /**

@@ -278,7 +278,9 @@ internal fun ColumnScope.SecretXiangqiGame(state: XiangqiState, mode: XiangqiPla
             }
             GameIconTool(Icons.Outlined.HelpOutline, "规则", { onModalOpened(); if (!networkMode && !paused) onToggle(); showRules = true }, Modifier.weight(1f))
         }
-    Column(Modifier.onGloballyPositioned { onControlsBottom(it.boundsInRoot().bottom) }, horizontalAlignment = Alignment.CenterHorizontally) {
+    // Keep a real measurement area even when there is no network error text.
+    // A zero-width column is clipped to empty boundsInRoot(), hiding the mascot.
+    Column(Modifier.width(boardWidth).onGloballyPositioned { onControlsBottom(it.boundsInRoot().bottom) }, horizontalAlignment = Alignment.CenterHorizontally) {
     Spacer(Modifier.height(8.dp))
     lan.error?.takeIf { networkMode }?.let {
         Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)

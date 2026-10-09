@@ -188,7 +188,7 @@ class AiRepository(
      */
     suspend fun effectiveApiKey(): String {
         if (providerPrefs != null) return providerPrefs.connection(userPrefs.apiKeyOverride.first()).apiKey
-        val key = userPrefs.apiKeyOverride.first().ifBlank { AiConfig.DEFAULT_API_KEY }
+        val key = userPrefs.apiKeyOverride.first()
         // R5：App 没有「我的」页，AI 服务在设置页——报错也要指路指对，跟功能地图口径一致。
         require(key.isNotBlank()) { "还没有配置 API Key，请到「设置 → AI 服务」里填写" }
         return key

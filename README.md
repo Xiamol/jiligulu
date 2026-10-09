@@ -2,7 +2,7 @@
 
 一只会陪你记账、收好回忆的糯云团。聊天记一笔，夹一张生活照片，再去阿噜的小窝坐坐。
 
-**已发布：1.0.0 · 本地测试构建：1.0.13** · Android 8.0 及以上 · Kotlin / Jetpack Compose / Room
+**版本：1.0.13** · Android 8.0 及以上 · Kotlin / Jetpack Compose / Room
 
 [下载 1.0.0](https://github.com/Xiamol/jiligulu/releases/tag/v1.0.0) · [本次更新](docs/RELEASE_1_0_0.md) · [公告信箱](docs/ANNOUNCEMENTS.md)
 
@@ -50,7 +50,7 @@
 .\gradlew.bat :app:assembleRelease :app:testDebugUnitTest --offline -PpublicRelease=true
 ```
 
-`-PpublicRelease=true` 强制留空构建时默认 API Key。个人本地构建可在未提交的 `local.properties` 配置 `DEEPSEEK_API_KEY`，也可安装后在设置中填写。
+未填写个人 Key 时，新安装和升级用户使用默认 DS 服务，服务端转发到 DeepSeek 官方 API。共享密钥只保存在服务端，所有构建均不打包该密钥；填写个人 DS Key 后直接请求官方接口，自定义供应商配置也保持独立。默认服务源码见 [server/default-ds](server/default-ds)。
 
 APK：`app/build/outputs/apk/release/app-release.apk`；测试报告：`app/build/reports/tests/testDebugUnitTest/index.html`。
 

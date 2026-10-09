@@ -41,6 +41,26 @@ class AiProviderPrefsTest {
             assertFalse(state.custom.supportsImages)
             assertFalse(state.custom.jsonMode)
             assertFalse(state.custom.sendsTemperature)
+            val connection = prefs.connection("")
+            assertEquals(AiConfig.DEFAULT_SERVICE_URL, connection.profile.endpoint)
+            assertEquals("", connection.apiKey)
+            assertEquals("", prefs.savedKey(AiProviderId.DEEPSEEK))
+        }
+    }
+
+    @Test fun existingBlankKeyProfilesRecoverDefaultOnReopenAndManualKeysStayDirect() = runBlocking {
+        val file = File(temporary.root, "provider-upgrade.preferences_pb")
+        withPrefs(file) { prefs, _ -> prefs.migrateLegacyDeepSeekKey(""); prefs.setDeepSeekModel(AiConfig.DEEPSEEK_PRO_MODEL) }
+        withPrefs(file) { prefs, _ ->
+            val fallback = prefs.connection("")
+            assertEquals(AiConfig.DEFAULT_SERVICE_URL, fallback.profile.endpoint)
+            assertEquals(AiConfig.DEEPSEEK_PRO_MODEL, fallback.profile.model)
+            assertEquals("", fallback.apiKey)
+            prefs.saveDeepSeekKey("synthetic-own-key")
+            assertEquals(AiConfig.BASE_URL, prefs.connection("").profile.endpoint)
+            assertEquals("synthetic-own-key", prefs.connection("").apiKey)
+            prefs.saveDeepSeekKey("")
+            assertEquals(AiConfig.DEFAULT_SERVICE_URL, prefs.connection("").profile.endpoint)
         }
     }
 

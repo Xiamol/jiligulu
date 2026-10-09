@@ -19,7 +19,6 @@ data class AiProviderProfile(
     val sendsTemperature: Boolean = true,
 ) {
     val endpoint: String get() = AiProviderEndpoint.resolve(address, endpointKind)
-    val usageId: String get() = if (id == AiProviderId.DEEPSEEK && model != AiConfig.MODEL) "deepseek:$model" else id.name.lowercase()
     val disablesDeepSeekThinking: Boolean get() = id == AiProviderId.DEEPSEEK
     val supportsLegacyTokenLimit: Boolean get() = id == AiProviderId.DEEPSEEK
 
