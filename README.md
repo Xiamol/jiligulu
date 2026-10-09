@@ -2,7 +2,7 @@
 
 一只会陪你记账、收好回忆的糯云团。聊天记一笔，夹一张生活照片，再去阿噜的小窝坐坐。
 
-**已发布：1.0.0 · 本地测试构建：1.0.10** · Android 8.0 及以上 · Kotlin / Jetpack Compose / Room
+**已发布：1.0.0 · 本地测试构建：1.0.11** · Android 8.0 及以上 · Kotlin / Jetpack Compose / Room
 
 [下载 1.0.0](https://github.com/Xiamol/jiligulu/releases/tag/v1.0.0) · [本次更新](docs/RELEASE_1_0_0.md) · [公告信箱](docs/ANNOUNCEMENTS.md)
 
@@ -22,7 +22,7 @@
 
 ## 看看阿噜的小窝
 
-以下介绍图记录 1.0.6 的 Android 模拟器界面，使用演示数据。最新改动见 [1.0.10 简答与改命实测](docs/LIUREN_ANSWER_FIRST_2026_10_09.md)，此前的房间输入修复见 [1.0.9 说明](docs/LIUREN_ROOM_2026_10_09.md)，其它改动见 [1.0.8](docs/COMPANION_FOLLOWUP_2026_10_08.md)、[1.0.7](docs/MEMORY_INTERACTION_2026_10_08.md)；显示会随主题、屏幕与内容变化。
+以下介绍图记录 1.0.6 的 Android 模拟器界面，使用演示数据。1.0.11 将 AI 花销整理为整月总览，突出累计、每日花费和缓存命中率，并延续旧版本的费用估算；好运转盘的三个页签共用固定内容区域与操作栏。此前改动见 [1.0.10 简答与改命实测](docs/LIUREN_ANSWER_FIRST_2026_10_09.md)、[1.0.9 房间输入修复](docs/LIUREN_ROOM_2026_10_09.md)、[1.0.8](docs/COMPANION_FOLLOWUP_2026_10_08.md)、[1.0.7](docs/MEMORY_INTERACTION_2026_10_08.md)；显示会随主题、屏幕与内容变化。
 
 <img src="docs/images/introduction-1.0.6.png" width="760" alt="1.0.6 实际 Android 运行画面介绍图，账本、小窝与统计" />
 

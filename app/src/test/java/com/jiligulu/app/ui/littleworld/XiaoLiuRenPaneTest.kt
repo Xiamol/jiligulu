@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -108,5 +109,69 @@ class XiaoLiuRenPaneTest {
         compose.onNodeWithTag("liuren-details-toggle").performSemanticsAction(SemanticsActions.OnClick) { it() }
         compose.onNodeWithTag("liuren-stage-0").assertExists()
         compose.runOnIdle { assertEquals(0, calls); assertEquals(cast, saved.session().cast) }
+    }
+
+    @Test fun footerStaysFixedForLongCachedAnswersExpandedDetailsAndRewrittenAnswers() {
+        val cast = LiuRenCast("我今年能谈到女朋友吗？桃花如何？", LiuRenMode.NUMBERS,
+            Instant.parse("2026-10-09T06:00:00Z").toEpochMilli(), "Asia/Shanghai", 8, 29, 8, digits = "840")
+        val shortStore = store()
+        val longStore = store()
+        val shortReading = LiuRenReadingPolicy.local(cast)
+        val longReading = shortReading.copy(
+            summary = shortReading.summary + "先给相识和了解留些时间，关系可以慢慢确认。".repeat(3),
+            advice = "遇到合适的人，先约一次轻松的见面，听清彼此对关系的期待，再决定下一步。".repeat(4))
+        listOf(shortStore to shortReading, longStore to longReading).forEach { (saved, reading) ->
+            saved.saveSession(LiuRenSession(cast.question, cast.mode, cast.digits, LiuRenStep.RESULT, cast))
+            val encoded = LiuRenReadingPolicy.encode(reading)
+            assertNotNull(LiuRenReadingPolicy.decode(encoded, cast))
+            saved.saveAnalysis(XiaoLiuRenAnalysisRepository.key(cast), encoded)
+        }
+        var calls = 0
+        val repositories = listOf(shortStore, longStore).associateWith { saved ->
+            XiaoLiuRenAnalysisRepository(saved, CoroutineScope(owner + Dispatchers.Unconfined)) {
+                calls++; error("saved reading and layout changes must not request analysis")
+            }
+        }
+        var activeStore by mutableStateOf(shortStore)
+        var rewrite by mutableStateOf(LiuRenRewriteState())
+        compose.setContent {
+            MaterialTheme {
+                Box(Modifier.fillMaxSize()) {
+                    key(activeStore) {
+                        XiaoLiuRenPane(activeStore, { rewrite }, { current ->
+                            rewrite = LiuRenRewriteState(LiuRenRewrite.receipt(current, "2026-10-09", cast.capturedAtMillis), available = false)
+                        }, repositories.getValue(activeStore))
+                    }
+                }
+            }
+        }
+        val tags = listOf("liuren-footer", "liuren-api", "liuren-change-question", "liuren-rewrite")
+        val initialBounds = tags.associateWith { compose.onNodeWithTag(it).fetchSemanticsNode().boundsInRoot }
+        fun assertFixedFooter() {
+            tags.forEach { tag ->
+                assertEquals("$tag moved as the reading changed", initialBounds.getValue(tag),
+                    compose.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot)
+            }
+        }
+        compose.runOnIdle { activeStore = longStore }
+        compose.onNodeWithText(longReading.summary).assertExists()
+        assertFixedFooter()
+        compose.onNodeWithTag("liuren-details-toggle").performSemanticsAction(SemanticsActions.OnClick) { it() }
+        compose.onNodeWithTag("liuren-stage-0").assertExists()
+        assertFixedFooter()
+        compose.onNodeWithTag("liuren-rewrite").performClick()
+        compose.onNodeWithTag("liuren-rewrite-answer").assertExists()
+        assertFixedFooter()
+        compose.onNodeWithTag("liuren-original-toggle").performSemanticsAction(SemanticsActions.OnClick) { it() }
+        compose.onNodeWithText(longReading.summary).assertExists()
+        assertFixedFooter()
+        compose.onNodeWithTag("liuren-details-toggle").performSemanticsAction(SemanticsActions.OnClick) { it() }
+        compose.onNodeWithTag("liuren-stage-0").assertDoesNotExist()
+        assertFixedFooter()
+        compose.runOnIdle {
+            assertEquals(0, calls)
+            assertEquals(cast, shortStore.session().cast)
+            assertEquals(cast, longStore.session().cast)
+        }
     }
 }

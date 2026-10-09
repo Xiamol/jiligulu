@@ -17,6 +17,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -24,7 +26,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import com.jiligulu.app.R
 import com.jiligulu.app.core.audio.UiSound
-import com.jiligulu.app.ui.components.SpringScrollColumn
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.coroutineScope
@@ -98,22 +99,26 @@ internal fun ColumnScope.FortuneWheelGame(boardSize: Dp, foreground: Boolean,
             }
         }
     }
-    BoxWithConstraints(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
-        val compact = maxHeight < 520.dp
-        val availableHeight = maxHeight
-        Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Row(Modifier.widthIn(max = 320.dp).fillMaxWidth()) {
+    Box(Modifier.fillMaxWidth().weight(1f).testTag("fortune-viewport")) {
+        Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
+            Row(Modifier.widthIn(max = 340.dp).fillMaxWidth().height(48.dp).testTag("fortune-tabs")) {
                 listOf("wheel" to "转一转", "luck" to "今日运势", "liuren" to "小六壬").forEach { (page, title) ->
-                    TextButton(onClick = { UiSound.select(context); fortunePage = page }, modifier = Modifier.weight(1f),
+                    TextButton(onClick = { UiSound.select(context); fortunePage = page }, modifier = Modifier.weight(1f).fillMaxHeight().testTag("fortune-tab-$page"),
                         contentPadding = PaddingValues(horizontal = 4.dp),
                         colors = ButtonDefaults.textButtonColors(contentColor = if (fortunePage == page) Color(0xFF8B74A4) else Color(0xFF9A929A))) {
-                        Text(title, maxLines = 1, style = if (fortunePage == page) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodyMedium)
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(title, maxLines = 1, fontSize = 16.sp, fontWeight = if (fortunePage == page) FontWeight.Medium else FontWeight.Normal)
+                            Box(Modifier.padding(top = 5.dp).width(18.dp).height(2.dp)
+                                .background(if (fortunePage == page) Color(0xFF8B74A4) else Color.Transparent, RoundedCornerShape(1.dp)))
+                        }
                     }
                 }
             }
-            Spacer(Modifier.height(if (compact) 12.dp else 24.dp))
-            if (fortunePage == "wheel") {
-                SecretPrizeWheel(angle.value, minOf(boardSize, if (compact) 270.dp else 310.dp), enabled = foreground && !spinning) {
+            Box(Modifier.weight(1f).fillMaxWidth().padding(top = 12.dp, bottom = 12.dp)) {
+            when (fortunePage) {
+            "wheel" -> FortunePageLayout(scrollBody = false, body = {
+                BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                SecretPrizeWheel(angle.value, minOf(boardSize, maxWidth, maxHeight, 310.dp), enabled = foreground && !spinning) {
                     if (!spinning && foreground) {
                         UiSound.select(context); spinning = true
                         scope.launch {
@@ -129,22 +134,22 @@ internal fun ColumnScope.FortuneWheelGame(boardSize: Dp, foreground: Boolean,
                         }
                     }
                 }
-                Spacer(Modifier.height(18.dp))
-                Box(Modifier.fillMaxWidth().height(42.dp), contentAlignment = Alignment.Center) {
-                    Text(if (spinning) "好运正在绕一圈…" else resultText.ifBlank { "点点转盘，收一件小快乐" },
-                        style = MaterialTheme.typography.bodyMedium, color = SecretWoodInk,
-                        textAlign = TextAlign.Center, maxLines = 2)
                 }
-                Box(Modifier.height(46.dp), contentAlignment = Alignment.Center) {
+            }, footer = {
+                Box(Modifier.fillMaxWidth().height(44.dp), contentAlignment = Alignment.Center) {
+                    Text(if (spinning) "好运正在绕一圈…" else resultText.ifBlank { "点点转盘，收一件小快乐" },
+                        fontSize = 15.sp, lineHeight = 21.sp, color = SecretWoodInk,
+                        textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
+                Box(Modifier.fillMaxWidth().height(44.dp), contentAlignment = Alignment.Center) {
                     when (task?.destination) {
                         "future" -> TextButton(onClick = { UiSound.envelope(context); onOpenFuture() }) { Text("去寄一封") }
                         "memories" -> TextButton(onClick = { UiSound.pageTurn(context); onOpenMemories() }) { Text("翻翻纪念册") }
                         "paper" -> TextButton(onClick = onOpenPaper) { Text("听句悄悄话") }
                     }
                 }
-            } else if (fortunePage == "liuren") {
-                SpringScrollColumn(Modifier.fillMaxWidth().heightIn(max = (availableHeight - 72.dp).coerceAtLeast(1.dp)),
-                    horizontalAlignment = Alignment.CenterHorizontally, handOffOnRepeat = true) {
+            })
+            "liuren" -> {
                     XiaoLiuRenPane(liuRenStore, rewriteStateFor = { cast ->
                         liuRenRewriteRevision // Observe changes from this screen or a reopened owner.
                         rewriteUsage.liuRenState(cast, date)
@@ -153,33 +158,38 @@ internal fun ColumnScope.FortuneWheelGame(boardSize: Dp, foreground: Boolean,
                             UiSound.pet(context); liuRenRewriteRevision++; stampEvent++
                         }
                     })
-                }
-            } else {
-                Row(Modifier.widthIn(max = 290.dp).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+            }
+            else -> FortunePageLayout(body = {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically) {
-                    Text("${date.monthValue}月${date.dayOfMonth}日 · 趣味小黄历", style = MaterialTheme.typography.bodySmall, color = Color(0xFF9A929A))
+                    Text("${date.monthValue}月${date.dayOfMonth}日", fontSize = 14.sp, color = Color(0xFF9A929A))
                     TextButton(onClick = { UiSound.select(context); signPicker = true }) { Text(sign, fontSize = 13.sp) }
                 }
-                Text(luck.title, Modifier.padding(vertical = 8.dp), fontFamily = com.jiligulu.app.ui.theme.GuluBrandFont,
+                Text(luck.title, Modifier.padding(vertical = 10.dp), fontFamily = com.jiligulu.app.ui.theme.GuluBrandFont,
                     fontSize = 28.sp, color = Color(0xFF8B74A4))
-                LuckStars("心情", luck.mood); LuckStars("灵感", luck.inspiration); LuckStars("相遇", luck.company)
-                Spacer(Modifier.height(14.dp))
-                Column(Modifier.widthIn(max = 282.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
+                    LuckStars("心情", luck.mood); LuckStars("灵感", luck.inspiration); LuckStars("相遇", luck.company)
+                }
+                HorizontalDivider(Modifier.padding(vertical = 6.dp), color = Color(0xFF8B74A4).copy(alpha = .12f))
+                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     LuckAdvice("宜", luck.goodFor, Color(0xFF819D89))
                     LuckAdvice("放下", luck.letGo, Color(0xFFAA9598))
                     LuckAdvice("幸运色", luck.luckyColor, Color(0xFF9183A7))
                 }
-                Box(Modifier.fillMaxWidth().height(72.dp), contentAlignment = Alignment.Center) {
-                    Text(luck.message, Modifier.widthIn(max = 272.dp), style = MaterialTheme.typography.bodySmall,
-                        color = Color(0xFF9A929A), textAlign = TextAlign.Center)
+            }, footer = {
+                Box(Modifier.fillMaxWidth().height(44.dp), contentAlignment = Alignment.Center) {
+                    Text(luck.message, fontSize = 13.sp, lineHeight = 19.sp,
+                        color = Color(0xFF9A929A), textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
                 TextButton(onClick = {
                     if (rewriteUsage.mark(FortuneRewriteKind.HOROSCOPE, date)) {
                         UiSound.pet(context); rewrittenDay = date.toString(); stampEvent++
                     }
-                }, enabled = rewrittenDay != date.toString()) {
+                }, enabled = rewrittenDay != date.toString(), modifier = Modifier.fillMaxWidth().height(44.dp).testTag("luck-rewrite")) {
                     Text(if (rewrittenDay == date.toString()) "阿噜盖过章啦 ♡" else "让阿噜逆天改命")
                 }
+            })
+            }
             }
         }
         if (stampEvent > 0) FortuneStampOverlay(stampEvent, { stampEvent = 0 })
@@ -219,16 +229,15 @@ private fun BoxScope.FortuneStampOverlay(event: Int, onFinished: () -> Unit) {
 }
 
 @Composable private fun LuckStars(label: String, count: Int) {
-    Row(Modifier.width(228.dp).height(31.dp), verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween) {
-        Text(label, style = MaterialTheme.typography.bodyMedium, color = SecretWoodInk)
-        Text("★".repeat(count) + "☆".repeat(5 - count), color = Color(0xFFB6A2CB), fontSize = 20.sp, letterSpacing = 4.sp)
+    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(label, fontSize = 14.sp, color = SecretWoodInk)
+        Text("★".repeat(count) + "☆".repeat(5 - count), color = Color(0xFFB6A2CB), fontSize = 13.sp, letterSpacing = 1.sp)
     }
 }
 
 @Composable private fun LuckAdvice(label: String, text: String, color: Color) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(label, Modifier.width(54.dp), style = MaterialTheme.typography.labelMedium, color = color)
-        Text(text, style = MaterialTheme.typography.bodyMedium, color = SecretWoodInk)
+        Text(label, Modifier.width(60.dp), fontSize = 14.sp, color = color)
+        Text(text, fontSize = 15.sp, lineHeight = 23.sp, color = SecretWoodInk)
     }
 }

@@ -131,7 +131,8 @@ class TrashTabsTest {
         vm.selectTab(TrashTab.DRAFTS)
         vm.toggle(draftId)
         vm.deleteSelectedDrafts()
-        vm.await { !it.isWorking && it.message != null }
+        // Batch completion and Room's list emission are separate asynchronous events.
+        vm.await { !it.isWorking && it.message != null && it.draftItems.isEmpty() }
 
         assertEquals("删草稿是打 DELETED 标记，不物理删", "DELETED", history.getById(draftId)!!.status)
         assertTrue("草稿列表里不该再有它（${vm.uiState.value.dump()}）", vm.uiState.value.draftItems.isEmpty())

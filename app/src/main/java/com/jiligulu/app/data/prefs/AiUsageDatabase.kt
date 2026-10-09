@@ -13,10 +13,11 @@ data class AiCostGroup(val day: String?, val purpose: AiUsagePurpose, val provid
     val cachePico: Long?, val missPico: Long?, val outputPico: Long?, val flatPico: Long?,
     val knownPico: Long?, val unknownCalls: Long, val legacyCalls: Long,
     val inputReportedCalls: Long = 0, val outputReportedCalls: Long = 0, val cacheReportedCalls: Long = 0,
-    val cacheHitReportedCalls: Long = 0, val cacheMissReportedCalls: Long = 0)
+    val cacheHitReportedCalls: Long = 0, val cacheMissReportedCalls: Long = 0,
+    val legacyEstimatePico: Long? = null)
 
 /** Persistent request metadata, bounded SQL chart queries; never stores messages, images, URLs or keys. */
-internal class AiUsageDatabase(context: Context, name: String = "ai_usage_v2.db") : SQLiteOpenHelper(context, name, null, 1) {
+internal class AiUsageDatabase(context: Context, name: String = "ai_usage_v2.db") : SQLiteOpenHelper(context, name, null, 2) {
     override fun onConfigure(db: SQLiteDatabase) { super.onConfigure(db); db.setForeignKeyConstraintsEnabled(true) }
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE prices (providerKey TEXT PRIMARY KEY, version TEXT NOT NULL, cacheRate INTEGER NOT NULL, missRate INTEGER NOT NULL, outputRate INTEGER NOT NULL)")
@@ -28,14 +29,25 @@ internal class AiUsageDatabase(context: Context, name: String = "ai_usage_v2.db"
             outputReportedCalls INTEGER NOT NULL, cacheReportedCalls INTEGER NOT NULL, cacheHitReportedCalls INTEGER NOT NULL,
             cacheMissReportedCalls INTEGER NOT NULL, cacheHit INTEGER NOT NULL, cacheMiss INTEGER NOT NULL,
             unclassifiedInput INTEGER NOT NULL, output INTEGER NOT NULL, cachePico INTEGER, missPico INTEGER,
-            outputPico INTEGER, flatPico INTEGER, knownPico INTEGER, unknownCalls INTEGER NOT NULL,
+            outputPico INTEGER, flatPico INTEGER, knownPico INTEGER, legacyEstimatePico INTEGER, unknownCalls INTEGER NOT NULL,
             unknownFlags INTEGER NOT NULL, legacyCalls INTEGER NOT NULL, priceVersion TEXT,
             cacheRate INTEGER, missRate INTEGER, outputRate INTEGER)""")
         db.execSQL("CREATE INDEX attempts_day ON attempts(day, purpose)")
         db.execSQL("CREATE INDEX attempts_provider_day ON attempts(providerKey, day)")
         db.execSQL("CREATE INDEX attempts_group ON attempts(providerGroup, purpose)")
     }
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = error("Unsupported usage schema upgrade")
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        check(oldVersion == 1 && newVersion == 2) { "Unsupported usage schema upgrade" }
+        db.execSQL("ALTER TABLE attempts ADD COLUMN legacyEstimatePico INTEGER")
+        // Version 1 migrated token counters but discarded the estimate the old UI
+        // displayed. Restore that fixed historical formula, independently of prices.
+        db.rawQuery("SELECT id,reportedCalls,cacheHit,cacheMiss,unclassifiedInput,output FROM attempts WHERE legacyCalls>0", null).use { cursor ->
+            while (cursor.moveToNext()) {
+                val estimate = legacyEstimate(cursor.getLong(1), cursor.getLong(2), cursor.getLong(3), cursor.getLong(4), cursor.getLong(5))
+                if (estimate != null) db.update("attempts", ContentValues().apply { put("legacyEstimatePico", estimate) }, "id=?", arrayOf(cursor.getString(0)))
+            }
+        }
+    }
 
     fun price(profile: AiProviderProfile): AiPriceSnapshot? {
         val key = AiUsageTicket.providerKey(profile)
@@ -96,6 +108,18 @@ internal class AiUsageDatabase(context: Context, name: String = "ai_usage_v2.db"
         aggregate("day>=? AND day<=?", listOf(start, end), providerGroup, providerKey, "day,purpose", detail = false)
     fun total(providerGroup: String? = null, providerKey: String? = null): List<AiCostGroup> =
         aggregate("1=1", emptyList(), providerGroup, providerKey, "purpose", detail = false)
+    /** Legacy totals without a saved date stay visible as history, never assigned to a fabricated day. */
+    fun undatedCalls(providerGroup: String? = null, providerKey: String? = null): Long {
+        val selection = buildString {
+            append("day IS NULL")
+            if (providerGroup != null) append(" AND providerGroup=?")
+            if (providerKey != null) append(" AND providerKey=?")
+        }
+        val parameters = listOfNotNull(providerGroup, providerKey).toTypedArray()
+        return readableDatabase.rawQuery("SELECT COALESCE(SUM(calls),0) FROM attempts WHERE $selection", parameters).use { cursor ->
+            if (cursor.moveToFirst()) cursor.getLong(0) else 0L
+        }
+    }
     fun details(day: String, providerGroup: String? = null, providerKey: String? = null): List<AiCostGroup> =
         aggregate("day=?", listOf(day), providerGroup, providerKey, "purpose,providerKey,providerName,model", detail = true)
 
@@ -111,6 +135,7 @@ internal class AiUsageDatabase(context: Context, name: String = "ai_usage_v2.db"
             SUM(calls) AS calls,SUM(reportedCalls) AS reportedCalls,SUM(cacheHit) AS cacheHit,SUM(cacheMiss) AS cacheMiss,
             SUM(unclassifiedInput) AS unclassifiedInput,SUM(output) AS output,SUM(cachePico) AS cachePico,
             SUM(missPico) AS missPico,SUM(outputPico) AS outputPico,SUM(flatPico) AS flatPico,SUM(knownPico) AS knownPico,
+            SUM(legacyEstimatePico) AS legacyEstimatePico,
             SUM(unknownCalls) AS unknownCalls,SUM(legacyCalls) AS legacyCalls,SUM(inputReportedCalls) AS inputReportedCalls,
             SUM(outputReportedCalls) AS outputReportedCalls,SUM(cacheReportedCalls) AS cacheReportedCalls,
             SUM(cacheHitReportedCalls) AS cacheHitReportedCalls,SUM(cacheMissReportedCalls) AS cacheMissReportedCalls"""
@@ -127,7 +152,7 @@ internal class AiUsageDatabase(context: Context, name: String = "ai_usage_v2.db"
             number("cacheHit"), number("cacheMiss"), number("unclassifiedInput"), number("output"),
             optional("cachePico"), optional("missPico"), optional("outputPico"), optional("flatPico"), optional("knownPico"),
             number("unknownCalls"), number("legacyCalls"), number("inputReportedCalls"), number("outputReportedCalls"), number("cacheReportedCalls"),
-            number("cacheHitReportedCalls"), number("cacheMissReportedCalls"))
+            number("cacheHitReportedCalls"), number("cacheMissReportedCalls"), optional("legacyEstimatePico"))
     }
     private fun row(id: String, day: String?, startedAt: Long, key: String, group: String, name: String, model: String,
         purpose: AiUsagePurpose, usage: AiUsageTotals, cost: AiCostEstimate, legacy: Long, price: AiPriceSnapshot?) = ContentValues().apply {
@@ -139,7 +164,20 @@ internal class AiUsageDatabase(context: Context, name: String = "ai_usage_v2.db"
         put("unclassifiedInput", usage.unclassifiedInput); put("output", usage.output)
         put("cachePico", cost.cachePico); put("missPico", cost.missPico); put("outputPico", cost.outputPico)
         put("flatPico", cost.flatInputPico); put("knownPico", cost.knownPico)
+        put("legacyEstimatePico", if (legacy > 0) legacyEstimate(usage.reportedCalls, usage.cacheHit, usage.cacheMiss, usage.unclassifiedInput, usage.output) else null)
         put("unknownCalls", if (cost.incomplete) usage.calls else 0L); put("unknownFlags", cost.unknownFlags); put("legacyCalls", legacy)
         put("priceVersion", price?.version); put("cacheRate", price?.cacheRateMicros); put("missRate", price?.missRateMicros); put("outputRate", price?.outputRateMicros)
     }
+}
+
+/** The 9db6f36 UI used 0.02 / 1 / 4 CNY per million; unclassified input used 1.
+ * Keep this separate from priced known costs, including its original incomplete-usage caveat. */
+private fun legacyEstimate(reportedCalls: Long, hit: Long, miss: Long, unclassified: Long, output: Long): Long? {
+    val tokens = listOf(hit, miss, unclassified, output)
+    if (tokens.any { it < 0 } || reportedCalls == 0L && tokens.all { it == 0L }) return null
+    return runCatching {
+        listOf(Math.multiplyExact(hit, 20_000L), Math.multiplyExact(miss, 1_000_000L),
+            Math.multiplyExact(unclassified, 1_000_000L), Math.multiplyExact(output, 4_000_000L))
+            .fold(0L, Math::addExact)
+    }.getOrNull()
 }

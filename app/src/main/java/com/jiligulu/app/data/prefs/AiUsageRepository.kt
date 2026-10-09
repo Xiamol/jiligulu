@@ -51,6 +51,8 @@ class AiUsageRepository internal constructor(private val store: DataStore<Prefer
         withContext(Dispatchers.IO) { migrateLegacy(); database.daily(start.toString(), end.toString(), group, providerKey) }
     suspend fun total(group: String? = null, providerKey: String? = null): List<AiCostGroup> =
         withContext(Dispatchers.IO) { migrateLegacy(); database.total(group, providerKey) }
+    suspend fun undatedCalls(providerGroup: String? = null, providerKey: String? = null): Long =
+        withContext(Dispatchers.IO) { migrateLegacy(); database.undatedCalls(providerGroup, providerKey) }
     suspend fun details(day: LocalDate, group: String? = null, providerKey: String? = null): List<AiCostGroup> =
         withContext(Dispatchers.IO) { migrateLegacy(); database.details(day.toString(), group, providerKey) }
     private suspend fun migrateLegacy() = migration.withLock {
