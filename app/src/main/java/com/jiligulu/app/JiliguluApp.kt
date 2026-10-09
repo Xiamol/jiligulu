@@ -45,9 +45,6 @@ class AppContainer(private val app: Application) {
     }
     val userPrefs: UserPrefs by lazy { UserPrefs(app) }
     val aiProviders: com.jiligulu.app.data.prefs.AiProviderPrefs by lazy { com.jiligulu.app.data.prefs.AiProviderPrefs(app) }
-    val aiUsage: com.jiligulu.app.data.prefs.AiUsageRepository by lazy {
-        com.jiligulu.app.data.prefs.AiUsageRepository(app)
-    }
     val updates: ReleaseUpdateRepository by lazy { ReleaseUpdateRepository(userPrefs) }
     val announcements: AnnouncementRepository by lazy { AnnouncementRepository(userPrefs) }
 
@@ -62,8 +59,7 @@ class AppContainer(private val app: Application) {
             app, categoryRepository, billRepository, userPrefs,
             chatHistoryRepository, categoryAdminRepository,
             providerPrefs = aiProviders,
-            providerClientFactory = { connection -> com.jiligulu.app.core.ai.DeepSeekClient(connection.apiKey, connection.profile)
-                .meteredBy(aiUsage) },
+            providerClientFactory = { connection -> com.jiligulu.app.core.ai.DeepSeekClient(connection.apiKey, connection.profile) },
             ledgerLookupRepository = com.jiligulu.app.data.repository.LedgerLookupRepository(database)
         )
     }
@@ -139,7 +135,8 @@ class JiliguluApp : Application() {
                     retired.deleteRecursively()
                 }
             }
-        }, "RetiredVoiceCleanup").start()
+            runCatching { com.jiligulu.app.data.prefs.RetiredAiCostData.remove(this) }
+        }, "RetiredFeatureCleanup").start()
         WaterReminderNotifications.createChannel(this)
         registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
             override fun onActivityStarted(activity: android.app.Activity) {

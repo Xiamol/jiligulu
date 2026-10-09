@@ -38,7 +38,6 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
-import org.robolectric.shadows.ShadowLog
 import java.time.LocalDateTime
 import java.time.ZoneId
 import java.util.concurrent.atomic.AtomicReference
@@ -556,31 +555,17 @@ class R9WireFormatTest {
         assertEquals("user", messages[1].jsonObject["role"]!!.jsonPrimitive.content)
     }
 
-    @Test
-    fun `cache hit and miss tokens are logged when the usage block is present`() {
-        ShadowLog.clear()
-        invoke(emptyList(), okBody)
-        val logged = ShadowLog.getLogs().filter { it.tag == "DeepSeekClient" }.map { it.msg }
-        assertTrue("应打印命中/未命中 token，实际日志：$logged",
-            logged.any { it.contains("prompt cache: hit=1234 miss=5678") })
-    }
-
-    @Test fun `usage observer counts retries without turning recording failure into another request`() = runBlocking {
-        val usages = mutableListOf<com.jiligulu.app.core.ai.AiTokenUsage?>()
+    @Test fun `empty content retries once and succeeds without accounting hooks`() = runBlocking {
         var calls = 0
         val http = OkHttpClient.Builder().addInterceptor { chain ->
             calls++
-            val body = if (calls == 1) """{"choices":[{"message":{"content":""}}],"usage":{"prompt_cache_hit_tokens":10,"prompt_cache_miss_tokens":20,"completion_tokens":30}}""" else okBody
+            val body = if (calls == 1) """{"choices":[{"message":{"content":""}}],"usage":{"completion_tokens":30}}""" else okBody
             Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200).message("OK")
                 .body(body.toResponseBody("application/json".toMediaType())).build()
         }.build()
-        val result = DeepSeekClient("test", http, onUsage = { usages += it; if (usages.size == 2) error("disk failure") })
-            .parseBill("SYS", "JSON please")
+        val result = DeepSeekClient("test", http).parseBill("SYS", "JSON please")
         assertTrue(result.isSuccess)
         assertEquals(2, calls)
-        assertEquals(2, usages.size)
-        assertEquals(30L, usages[0]?.output)
-        assertEquals(1234L, usages[1]?.cacheHit)
     }
 
     @Test

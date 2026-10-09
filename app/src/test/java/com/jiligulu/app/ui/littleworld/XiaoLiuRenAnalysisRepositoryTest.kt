@@ -6,7 +6,6 @@ import com.jiligulu.app.core.ai.*
 import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
-import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
 import kotlinx.serialization.json.*
@@ -89,8 +88,6 @@ class XiaoLiuRenAnalysisRepositoryTest {
         assertEquals(listOf("SAME", "GENERATES"), data["link_rules"]!!.jsonArray.map { it.jsonObject["relation"]!!.jsonPrimitive.content })
         assertFalse(request.toString().contains("ledger_context"))
         assertFalse(request.toString().contains("history"))
-        assertEquals(listOf(AiUsagePurpose.LIU_REN), wire.purposes.toList())
-        assertEquals(1, wire.finishes.get())
         assertNotNull(saved.analysis(XiaoLiuRenAnalysisRepository.key(cast)))
     }
 
@@ -114,8 +111,6 @@ class XiaoLiuRenAnalysisRepositoryTest {
         assertEquals(listOf("赤口", "赤口", "小吉"), reading.stages.map { it.palace })
         assertEquals(listOf(LiuRenRelation.SAME, LiuRenRelation.GENERATES), reading.links.map { it.relation })
         assertEquals(1, wire.requests.size)
-        assertEquals(listOf(AiUsagePurpose.LIU_REN), wire.purposes.toList())
-        assertEquals(1, wire.finishes.get())
         assertNotNull(saved.analysis(XiaoLiuRenAnalysisRepository.key(cast)))
     }
 
@@ -146,8 +141,6 @@ class XiaoLiuRenAnalysisRepositoryTest {
         assertEquals("840", input["reported_digits"]!!.jsonPrimitive.content)
         assertEquals(listOf(8, 4, 10), input["counts"]!!.jsonArray.map { it.jsonPrimitive.int })
         assertEquals(listOf("留连", "小吉", "留连"), input["palaces"]!!.jsonArray.map { it.jsonPrimitive.content })
-        assertEquals(listOf(AiUsagePurpose.LIU_REN), wire.purposes.toList())
-        assertEquals(1, wire.finishes.get())
     }
 
     @Test fun duplicateRequestsAreCoalescedAndSavedAnalysisIsFreeOnReopen() = runBlocking {
@@ -273,8 +266,6 @@ class XiaoLiuRenAnalysisRepositoryTest {
             assertEquals(cast, saved.session().cast)
             assertNull(label, saved.analysis(XiaoLiuRenAnalysisRepository.key(cast)))
             assertEquals(label, 1, wire.requests.size)
-            assertEquals(listOf(AiUsagePurpose.LIU_REN), wire.purposes.toList())
-            assertEquals(1, wire.finishes.get())
             repeat(3) { repo.state(cast) }
             val reopened = engine(saved) { wire.client() }
             assertFalse(reopened.state(cast).value.remote)
@@ -289,8 +280,6 @@ class XiaoLiuRenAnalysisRepositoryTest {
             assertEquals(2, retried.reading!!.links.size)
             assertNotNull(saved.analysis(XiaoLiuRenAnalysisRepository.key(cast)))
             assertEquals(2, wire.requests.size)
-            assertEquals(listOf(AiUsagePurpose.LIU_REN, AiUsagePurpose.LIU_REN), wire.purposes.toList())
-            assertEquals(2, wire.finishes.get())
         }
     }
 
@@ -306,13 +295,10 @@ class XiaoLiuRenAnalysisRepositoryTest {
         repo.request(cast)
         assertTrue(settled(repo).remote)
         assertEquals(1, wire.requests.size)
-        assertEquals(1, wire.finishes.get())
     }
 
     private class FakeHttp(@Volatile var status: Int = 200, @Volatile var content: String? = null) {
         val requests = CopyOnWriteArrayList<JsonObject>()
-        val purposes = CopyOnWriteArrayList<AiUsagePurpose>()
-        val finishes = AtomicInteger()
         fun client(): DeepSeekClient {
             val http = OkHttpClient.Builder().addInterceptor { chain ->
                 val request = chain.request()
@@ -329,13 +315,7 @@ class XiaoLiuRenAnalysisRepositoryTest {
                     .body(body.toString().toResponseBody("application/json".toMediaType())).build()
             }.build()
             val profile = AiProviderProfile.custom().copy(address = "https://liuren-fixture.invalid/v1", model = "fixture-liuren")
-            return DeepSeekClient("synthetic-only", profile, http).forPurpose(AiUsagePurpose.LIU_REN).meteredBy(object : AiUsageMeter {
-                override suspend fun begin(profile: AiProviderProfile, purpose: AiUsagePurpose): AiUsageTicket {
-                    purposes += purpose
-                    return AiUsageTicket.start(profile, purpose, null, 1_700_000_000_000)
-                }
-                override suspend fun finish(ticket: AiUsageTicket, usage: AiTokenUsage?) { finishes.incrementAndGet() }
-            })
+            return DeepSeekClient("synthetic-only", profile, http)
         }
     }
 

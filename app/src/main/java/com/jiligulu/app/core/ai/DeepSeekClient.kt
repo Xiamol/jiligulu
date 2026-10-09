@@ -150,18 +150,12 @@ class DeepSeekClient private constructor(
     private val apiKey: String,
     private val client: OkHttpClient,
     val profile: AiProviderProfile,
-    private val onUsage: suspend (AiTokenUsage?) -> Unit,
-    private val meter: AiUsageMeter? = null,
-    private val usagePurpose: AiUsagePurpose = AiUsagePurpose.UNSPECIFIED,
 ) {
-    constructor(apiKey: String, client: OkHttpClient = sharedClient, onUsage: suspend (AiTokenUsage?) -> Unit = {}) :
-        this(apiKey, client, AiProviderProfile(), onUsage)
-    constructor(apiKey: String, profile: AiProviderProfile, client: OkHttpClient = sharedClient,
-        onUsage: suspend (AiTokenUsage?) -> Unit = {}) : this(apiKey, client, profile, onUsage)
+    constructor(apiKey: String, client: OkHttpClient = sharedClient) :
+        this(apiKey, client, AiProviderProfile())
+    constructor(apiKey: String, profile: AiProviderProfile, client: OkHttpClient = sharedClient) : this(apiKey, client, profile)
 
-    fun configuredFor(profile: AiProviderProfile): DeepSeekClient = DeepSeekClient(apiKey, client, profile, onUsage, meter, usagePurpose)
-    fun forPurpose(purpose: AiUsagePurpose): DeepSeekClient = DeepSeekClient(apiKey, client, profile, onUsage, meter, purpose)
-    fun meteredBy(meter: AiUsageMeter): DeepSeekClient = DeepSeekClient(apiKey, client, profile, onUsage, meter, usagePurpose)
+    fun configuredFor(profile: AiProviderProfile): DeepSeekClient = DeepSeekClient(apiKey, client, profile)
 
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -178,12 +172,11 @@ class DeepSeekClient private constructor(
         userInput: String,
         history: List<ChatTurn> = emptyList(),
         stableContext: String = "",
-        purpose: AiUsagePurpose = usagePurpose,
     ): Result<AiParseResult> = withContext(Dispatchers.IO) {
         var lastFailure: Exception? = null
         for (attempt in 1..MAX_ATTEMPTS) {
             try {
-                return@withContext Result.success(executeOnce(systemPrompt, userInput, history, stableContext, purpose))
+                return@withContext Result.success(executeOnce(systemPrompt, userInput, history, stableContext))
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (failure: Exception) {
@@ -209,9 +202,8 @@ class DeepSeekClient private constructor(
         userInput: String,
         history: List<ChatTurn>,
         stableContext: String,
-        purpose: AiUsagePurpose,
     ): AiParseResult {
-        val content = executeContent(textRequest(systemPrompt, userInput, history, stableContext, OUTPUT_CONTRACT), purpose)
+        val content = executeContent(textRequest(systemPrompt, userInput, history, stableContext, OUTPUT_CONTRACT))
         return try {
             json.decodeFromString(AiParseResult.serializer(), unwrapJsonFence(content))
         } catch (parseFailure: Exception) {
@@ -221,11 +213,10 @@ class DeepSeekClient private constructor(
     }
 
     /** Structured side features choose one attempt; bad content never silently buys a repair. */
-    suspend fun requestJson(systemPrompt: String, userInput: String,
-        purpose: AiUsagePurpose = usagePurpose): Result<JsonObject> = withContext(Dispatchers.IO) {
+    suspend fun requestJson(systemPrompt: String, userInput: String): Result<JsonObject> = withContext(Dispatchers.IO) {
         runCatching {
             val content = executeContent(textRequest(systemPrompt, userInput, emptyList(), "",
-                "\n请只返回 system 中指定的 JSON 对象。"), purpose)
+                "\n请只返回 system 中指定的 JSON 对象。"))
             json.parseToJsonElement(unwrapJsonFence(content)) as? JsonObject ?: throw DeepSeekMalformedResponseException()
         }.onFailure { if (it is CancellationException) throw it }
     }
@@ -261,9 +252,8 @@ class DeepSeekClient private constructor(
             })
         }.toString()
 
-    /** The same selected profile, credentials, usage observer and cancellation apply to images. */
-    suspend fun recognizeImage(systemPrompt: String, requestContext: String, jpegBase64: String,
-        purpose: AiUsagePurpose = AiUsagePurpose.IMAGE_RECOGNITION): Result<String> = withContext(Dispatchers.IO) {
+    /** The same selected profile, credentials and cancellation apply to images. */
+    suspend fun recognizeImage(systemPrompt: String, requestContext: String, jpegBase64: String): Result<String> = withContext(Dispatchers.IO) {
         runCatching {
             require(profile.supportsImages) { "当前模型未启用图片输入，请在「AI 服务」编辑供应商的图像能力，或选择支持识图的模型" }
             val request = buildJsonObject {
@@ -280,58 +270,34 @@ class DeepSeekClient private constructor(
                     }) }
                 })
             }.toString()
-            unwrapJsonFence(executeContent(request, purpose))
+            unwrapJsonFence(executeContent(request))
         }.onFailure { if (it is CancellationException) throw it }
     }
 
-    private suspend fun executeContent(requestJson: String, purpose: AiUsagePurpose): String {
+    private suspend fun executeContent(requestJson: String): String {
         val builder = Request.Builder().url(profile.endpoint)
         if (apiKey.isNotBlank()) builder.header("Authorization", "Bearer $apiKey")
         val request = builder.post(requestJson.toRequestBody("application/json".toMediaType())).build()
-        val call = client.newCall(request)
-        // Each real attempt fixes its provider/model/price at start. Parsing never records again.
-        val ticket = try { meter?.begin(profile, purpose) } catch (cancelled: CancellationException) { throw cancelled }
-            catch (_: Exception) { null }
-
-        var reportedUsage: AiTokenUsage? = null
-        try {
-            return call.awaitResponse().use { response ->
-                val body = response.body?.string().orEmpty()
-                val parsed = runCatching { json.parseToJsonElement(body) as? JsonObject }.getOrNull()
-                reportedUsage = parsed?.let { AiTokenUsage.fromResponse(it) }
-                if (!response.isSuccessful) {
-                    throw DeepSeekHttpException(response.code, redact(body).take(400), profile.name)
-                }
-                val root = parsed ?: throw DeepSeekMalformedResponseException()
-                logCacheUsage(root)
-                // 逐步取，不用 !!：DeepSeek 对触发内容审核的请求会返回 200 但内容为空
-                // （finish_reason = content_filter），也有过 choices 为空的形态。
-                // 用 !! 会炸成 NPE / 下标越界，最后被 UI 当成「没连上」——那是误导。
-                val choice = root["choices"]?.jsonArray?.firstOrNull()?.jsonObject
-                val finishReason = choice?.get("finish_reason")?.jsonPrimitive?.contentOrNull?.let { redact(it).take(80) }
-                val rawContent = choice?.get("message")?.jsonObject?.get("content")
-                val content = when (rawContent) {
-                    is kotlinx.serialization.json.JsonPrimitive -> rawContent.contentOrNull
-                    is JsonArray -> rawContent.mapNotNull { (it as? JsonObject)?.get("text")?.jsonPrimitive?.contentOrNull }.joinToString("")
-                    else -> null
-                }
-                if (content.isNullOrBlank()) {
-                    Log.w(TAG, "响应没有内容：finish_reason=$finishReason")
-                    throw DeepSeekEmptyResponseException(finishReason)
-                }
-                content
+        return client.newCall(request).awaitResponse().use { response ->
+            val body = response.body?.string().orEmpty()
+            val root = runCatching { json.parseToJsonElement(body) as? JsonObject }.getOrNull()
+            if (!response.isSuccessful) {
+                throw DeepSeekHttpException(response.code, redact(body).take(400), profile.name)
             }
-        } finally {
-            // Count reported usage even when content is empty/malformed and this attempt retries.
-            // The optional observer is metadata-only and must never trigger another API call.
-            withContext(kotlinx.coroutines.NonCancellable) {
-                try { onUsage(reportedUsage) } catch (_: Exception) {
-                    Log.w(TAG, "Local usage observer failed")
-                }
-                if (ticket != null) try { meter?.finish(ticket, reportedUsage) } catch (_: Exception) {
-                    Log.w(TAG, "Local price meter could not be saved")
-                }
+            if (root == null) throw DeepSeekMalformedResponseException()
+            val choice = root["choices"]?.jsonArray?.firstOrNull()?.jsonObject
+            val finishReason = choice?.get("finish_reason")?.jsonPrimitive?.contentOrNull?.let { redact(it).take(80) }
+            val rawContent = choice?.get("message")?.jsonObject?.get("content")
+            val content = when (rawContent) {
+                is kotlinx.serialization.json.JsonPrimitive -> rawContent.contentOrNull
+                is JsonArray -> rawContent.mapNotNull { (it as? JsonObject)?.get("text")?.jsonPrimitive?.contentOrNull }.joinToString("")
+                else -> null
             }
+            if (content.isNullOrBlank()) {
+                Log.w(TAG, "响应没有内容：finish_reason=$finishReason")
+                throw DeepSeekEmptyResponseException(finishReason)
+            }
+            content
         }
     }
 
@@ -383,21 +349,7 @@ class DeepSeekClient private constructor(
             .build()
     }
 
-    /**
-     * R9 的唯一可验收指标：本轮 prompt 的缓存命中 / 未命中 token 数。
-     *
-     * 只打日志、绝不改行为——命中率长期为 0 就说明 system 段被动态内容污染了，
-     * 或者历史又被每轮重排，看这行日志能第一时间发现。
-     */
-    private fun logCacheUsage(root: JsonObject) {
-        val usage = root["usage"] as? JsonObject ?: return
-        val hit = (usage["prompt_cache_hit_tokens"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull
-        val miss = (usage["prompt_cache_miss_tokens"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull
-        val hits = hit?.toLongOrNull() ?: 0L
-        val misses = miss?.toLongOrNull() ?: 0L
-        val ratio = if (hits + misses > 0) "%.1f%%".format(java.util.Locale.ROOT, hits * 100.0 / (hits + misses)) else "unknown"
-        Log.d(TAG, "prompt cache: hit=${hit?.toLongOrNull()} miss=${miss?.toLongOrNull()} rate=$ratio")
-    }
+
 }
 
 private suspend fun Call.awaitResponse(): Response = suspendCancellableCoroutine { continuation ->

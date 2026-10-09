@@ -195,10 +195,10 @@ class AiRepository(
     }
 
     /** One immutable provider/key snapshot owns all requests of this operation. */
-    suspend fun createClient(purpose: com.jiligulu.app.core.ai.AiUsagePurpose = com.jiligulu.app.core.ai.AiUsagePurpose.UNSPECIFIED): DeepSeekClient {
-        val prefs = providerPrefs ?: return clientFactory(effectiveApiKey()).forPurpose(purpose)
+    suspend fun createClient(): DeepSeekClient {
+        val prefs = providerPrefs ?: return clientFactory(effectiveApiKey())
         val connection = prefs.connection(userPrefs.apiKeyOverride.first())
-        return (providerClientFactory?.invoke(connection) ?: clientFactory(connection.apiKey).configuredFor(connection.profile)).forPurpose(purpose)
+        return (providerClientFactory?.invoke(connection) ?: clientFactory(connection.apiKey).configuredFor(connection.profile))
     }
 
     suspend fun nicknameWithSuffix(): String {
@@ -221,7 +221,7 @@ class AiRepository(
             val fallback = com.jiligulu.app.core.ai.ImageReceiptCodec.classify(parsed, categories)
             if (parsed.bills.all { it.category in listOf("转账", "红包") }) fallback else {
                 val suggestions = try {
-                    createClient(com.jiligulu.app.core.ai.AiUsagePurpose.CLASSIFICATION).parseBill(
+                    createClient().parseBill(
                         com.jiligulu.app.core.ai.ImageCategoryClassifier.PROMPT,
                         com.jiligulu.app.core.ai.ImageCategoryClassifier.input(parsed, categories)
                     ).getOrElse { if (it is CancellationException) throw it else null }
@@ -301,7 +301,7 @@ class AiRepository(
         val system = renderer.renderSystem()
         val contextBlock = renderer.renderContext(input, includeStableContext = false) + "\n\n" + memory.renderForAi() +
             if (disclosure.personalOnly) "\n本轮用户在回答自己的资料，没有记账请求；年龄和生日数字不作金额，不生成 bills、pending 或账本操作。" else ""
-        val client = createClient(com.jiligulu.app.core.ai.AiUsagePurpose.LEDGER_CHAT)
+        val client = createClient()
         val history = recentTurns(requestMillis)
         val stableContext = renderer.renderStableContext()
         val first = client.parseBill(system, contextBlock, history = history, stableContext = stableContext)

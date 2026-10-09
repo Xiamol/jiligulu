@@ -2,7 +2,6 @@ package com.jiligulu.app.ui.littleworld
 
 import android.content.Context
 import com.jiligulu.app.JiliguluApp
-import com.jiligulu.app.core.ai.AiUsagePurpose
 import com.jiligulu.app.core.ai.DeepSeekClient
 import java.security.MessageDigest
 import java.time.Instant
@@ -97,7 +96,7 @@ answer直接回应目标与期限，用‘有机会但偏慢/现在还不稳/更
             val application = context.applicationContext
             instances.getOrPut(application) {
                 XiaoLiuRenAnalysisRepository(store, CoroutineScope(SupervisorJob() + Dispatchers.IO)) {
-                    (application as JiliguluApp).container.aiRepository.createClient(AiUsagePurpose.LIU_REN)
+                    (application as JiliguluApp).container.aiRepository.createClient()
                 }
             }
         }

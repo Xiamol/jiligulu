@@ -43,8 +43,7 @@ class HeartLetterRepository(
                 val reply = withTimeout(timeoutMillis) {
                     // No chat history, memories, ledger context, command execution or personal profile.
                     val client = createClient()
-                    val result = client.parseBill(PROMPT, input(letter.paper),
-                        purpose = com.jiligulu.app.core.ai.AiUsagePurpose.HEART_LETTER).getOrThrow()
+                    val result = client.parseBill(PROMPT, input(letter.paper)).getOrThrow()
                     result.reply.trim().also { require(it.length in 1..6000) { "回信正文暂时没有写好" } }
                 }
                 // Once the response exists, persist its receipt before optional notification work.

@@ -80,7 +80,7 @@ class AiProviderClientTest {
         assertFalse("thinking" in request.body)
     }
 
-    @Test fun fencedJsonAndArrayTextAreAcceptedWithOneObserverEventPerRequest() = runBlocking {
+    @Test fun fencedJsonAndArrayTextAreAcceptedWithOneRequest() = runBlocking {
         val payloads = listOf(
             JsonPrimitive("```json\n{\"bills\":[],\"reply\":\"fixture\"}\n```"),
             buildJsonArray {
@@ -89,23 +89,17 @@ class AiProviderClientTest {
             })
         for (content in payloads) {
             val wire = FakeHttp(body = response(content, buildJsonObject { put("prompt_tokens", 100); put("completion_tokens", 20) }))
-            val reports = mutableListOf<AiTokenUsage?>()
-            val client = DeepSeekClient("custom", custom(), wire.client) { reports += it }
+            val client = DeepSeekClient("custom", custom(), wire.client)
             assertEquals("fixture", client.parseBill("system", "input").getOrThrow().reply)
             assertEquals(1, wire.requests.size)
-            assertEquals(1, reports.size)
-            assertEquals(100L, reports.single()!!.unclassifiedInput)
-            assertFalse(reports.single()!!.cacheReported)
         }
     }
 
     @Test fun absentOrNullUsageDoesNotRejectValidContentOrInventTokens() = runBlocking {
         for (usage in listOf<JsonElement?>(null, JsonNull, JsonPrimitive("not-reported"))) {
             val wire = FakeHttp(body = response(JsonPrimitive("{\"bills\":[],\"reply\":\"ok\"}"), usage))
-            val reports = mutableListOf<AiTokenUsage?>()
-            val client = DeepSeekClient("custom", custom(), wire.client) { reports += it }
+            val client = DeepSeekClient("custom", custom(), wire.client)
             assertEquals("ok", client.parseBill("system", "input").getOrThrow().reply)
-            assertEquals(listOf<AiTokenUsage?>(null), reports)
             assertEquals(1, wire.requests.size)
         }
     }
@@ -113,36 +107,22 @@ class AiProviderClientTest {
     @Test fun unauthorizedReplyIsNotRetriedAndCannotEchoTheKeyIntoItsError() = runBlocking {
         val key = "synthetic-secret-key-401"
         val wire = FakeHttp(status = 401, body = "{\"error\":\"invalid $key\"}")
-        val reports = mutableListOf<AiTokenUsage?>()
-        val client = DeepSeekClient(key, custom(), wire.client) { reports += it }
+        val client = DeepSeekClient(key, custom(), wire.client)
         val error = client.parseBill("system", "input").exceptionOrNull() as DeepSeekHttpException
         assertEquals(401, error.status)
         assertFalse(error.detail.contains(key))
         assertFalse(error.message.orEmpty().contains(key))
         assertEquals(1, wire.requests.size)
-        assertEquals(listOf<AiTokenUsage?>(null), reports)
-    }
-
-    @Test fun localUsageObserverFailureDoesNotCauseAnotherPaidRequest() = runBlocking {
-        val wire = FakeHttp()
-        var observations = 0
-        val client = DeepSeekClient("custom", custom(), wire.client) { observations++; error("local persistence") }
-        assertTrue(client.parseBill("system", "input").isSuccess)
-        assertEquals(1, observations)
-        assertEquals(1, wire.requests.size)
     }
 
     @Test fun imageCapabilityBlocksHttpAndSupportedImagesShareTheSelectedConnection() = runBlocking {
         val blocked = FakeHttp()
-        var observations = 0
-        assertTrue(DeepSeekClient("custom", custom(), blocked.client) { observations++ }
+        assertTrue(DeepSeekClient("custom", custom(), blocked.client)
             .recognizeImage("system", "image context", "ZmFrZQ==").isFailure)
         assertTrue(blocked.requests.isEmpty())
-        assertEquals(0, observations)
         val wire = FakeHttp()
-        val reports = mutableListOf<AiTokenUsage?>()
         val profile = custom().copy(supportsImages = true)
-        val client = DeepSeekClient("synthetic-image-key", profile, wire.client) { reports += it }
+        val client = DeepSeekClient("synthetic-image-key", profile, wire.client)
         assertTrue(client.recognizeImage("system", "image context", "ZmFrZQ==").isSuccess)
         val request = wire.requests.single()
         assertEquals(profile.endpoint, request.request.url.toString())
@@ -152,7 +132,6 @@ class AiProviderClientTest {
         val parts = request.body["messages"]!!.jsonArray.last().jsonObject["content"]!!.jsonArray
         assertEquals("image_url", parts.last().jsonObject["type"]!!.jsonPrimitive.content)
         assertEquals("data:image/jpeg;base64,ZmFrZQ==", parts.last().jsonObject["image_url"]!!.jsonObject["url"]!!.jsonPrimitive.content)
-        assertEquals(1, reports.size)
     }
 
     private fun custom() = AiProviderProfile.custom().copy(name = "Fixture", address = "https://fixture.invalid/proxy/v1", model = "fixture-model")

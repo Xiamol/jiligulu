@@ -344,7 +344,6 @@ fun SettingsScreen(
                         help = "AI 对话会把消息、最近对话及部分账本上下文发送给当前选择的供应商；开启记性时，也会带上已保存的小记忆。密钥独立保存，切换供应商不会共用密钥。编辑窗口点保存后生效，其它选择即时保存。") {
                         AiProviderSettings()
                         BillContextSettings(enabled = editable)
-                        AiUsageSettings()
                     }
 
                     if (settingsTab == "数据") SettingsSection("数据管理", "🗂️") {
