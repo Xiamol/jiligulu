@@ -4,7 +4,7 @@
 
 **版本：1.0.13** · Android 8.0 及以上 · Kotlin / Jetpack Compose / Room
 
-[下载 1.0.0](https://github.com/Xiamol/jiligulu/releases/tag/v1.0.0) · [本次更新](docs/RELEASE_1_0_0.md) · [公告信箱](docs/ANNOUNCEMENTS.md)
+[下载 1.0.13](https://github.com/Xiamol/jiligulu/releases/tag/v1.0.13) · [本次更新](docs/RELEASE_1_0_13.md) · [公告信箱](docs/ANNOUNCEMENTS.md)
 
 ## 从小账本，长成小生活家
 
