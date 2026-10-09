@@ -61,10 +61,8 @@ android {
             // debug 包带着 Compose 的调试开销与无优化字节码，卡顿主要来自这里。
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            // 自用测试阶段刻意用 **debug 签名**：Android 不允许不同签名的包互相覆盖，
-            // 用正式签名会导致必须卸载旧包、账单数据全丢。改用 debug 签名后可以**直接覆盖安装**，
-            // 该有的性能收益（非 debuggable + 优化字节码）一点不少。
-            // 将来要对外正式发布时，把下面这行换成 signingConfigs.getByName("release")。
+            // 保持既有发行包的签名，以便覆盖安装并保留本机数据。
+            // 修改签名需要独立迁移安排，不能在本次版本更新中直接切换。
             signingConfig = signingConfigs.getByName("debug")
         }
     }

@@ -51,12 +51,12 @@
 需要 Android SDK 35、JDK 17 或 21。配置本机 `local.properties` 的 `sdk.dir`，使用随项目提供的 Gradle Wrapper。
 
 ```powershell
-.\gradlew.bat :app:assembleRelease :app:testDebugUnitTest --offline -PpublicRelease=true
+.\gradlew.bat :app:assembleRelease :app:testDebugUnitTest --offline
 ```
 
-AI 配置与应用版本分别管理；构建完成不等于默认服务在目标网络可用。个人 DeepSeek Key 与自定义兼容服务都可在应用设置中配置，已有配置应在升级后保留。默认转发服务的部署说明见 [server/default-ds](server/default-ds)。源码和文档不应包含真实密钥。
+AI 配置与应用版本分别管理。1.1.0 发布包内置默认 DS 官方配置，未填写个人 Key 时自动使用；个人 DeepSeek Key 优先，自定义兼容服务保持独立，已有配置在升级后保留。源码和文档不包含真实密钥。
 
-如需本地默认 Key 包，将 Key 留在被忽略的 `local.properties` 的 `DEEPSEEK_API_KEY` 或同名环境变量，通过 `-PbundleDefaultApiKey=true` 注入。默认构建不注入。个人 Key 优先，清空后恢复包内默认；自定义供应商不使用该 Key。此方式避免源码包含密钥，但 APK 仍可提取它，不能据此承诺公开安装包中的密钥保密。
+带默认配置的发布包将 Key 留在被忽略的 `local.properties` 的 `DEEPSEEK_API_KEY` 或同名环境变量，通过 `-PbundleDefaultApiKey=true` 注入。普通源码构建不注入，可在安装后填写自己的 Key。此方式避免源码包含密钥，但 APK 仍可提取它，不能据此承诺安装包中的密钥保密。
 
 APK：`app/build/outputs/apk/release/app-release.apk`；测试报告：`app/build/reports/tests/testDebugUnitTest/index.html`。
 
