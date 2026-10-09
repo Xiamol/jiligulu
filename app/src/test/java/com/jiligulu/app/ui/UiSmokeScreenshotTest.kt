@@ -397,7 +397,7 @@ class UiSmokeScreenshotTest {
             scrollSettingsTo("阿噜使用手册")
             compose.onNodeWithText("阿噜使用手册").performClick()
             awaitText("阿噜使用手册 ♡")
-            awaitText("见面啦，我是阿噜")
+            awaitText("阿噜使用手册 · 1.1.0")
             capture("handbook-light", dialog = true)
             dismissTopDialogOutside("handbook")
             compose.onNodeWithText("阿噜使用手册 ♡").assertDoesNotExist()

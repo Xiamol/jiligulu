@@ -4,7 +4,7 @@
 
 GitHub 并非技术上必需：自己的 HTTPS 服务也能提供版本信息与 APK。此版本先提供 GitHub Releases 适配器，方便个人使用，无需把登录凭据放进应用。
 
-应用默认更新源为 `Xiamol/jiligulu`。正式发布使用 `v1.0.0`，附件仅提供 release APK；远端最新版本以实际检查结果为准。
+应用默认更新源为 `Xiamol/jiligulu`。本次版本使用 `v1.1.0`，附件提供 release APK，更新说明见 [1.1.0](RELEASE_1_1_0.md)；远端最新版本以实际检查结果为准。
 
 ## 接通方式
 
@@ -18,14 +18,14 @@ GitHub 并非技术上必需：自己的 HTTPS 服务也能提供版本信息与
 
 ## 发布约定
 
-- 正式发布时保持 `applicationId` 与签名一致，增加 `versionCode`，并将 `versionName` 更新为与 Release 标签相同的三段版本号。当前正式包为 versionCode 13 / versionName 1.0.0，旧版本可以检测到新版。
-- 公开包使用 `-PpublicRelease=true` 构建，不嵌入开发者私人 API Key；用户可在设置中填写自己的 Key。
+- 正式发布时保持 `applicationId` 与签名一致，增加 `versionCode`，并将 `versionName` 更新为与 Release 标签相同的三段版本号。本次为 versionCode 27 / versionName 1.1.0，标签 `v1.1.0`，高于 1.0.0、1.0.1 和 1.0.13。
+- 应用代码、README、内置使用手册、Release 标签、APK 文件名与公告中的本次版本应统一为 1.1.0。历史发布与本地验收文档保留原版本，不能通过改历史版本号代替新的发布说明。
 - 当前 release 构建沿用既有 debug 签名，以兼容已安装版本；不能单独切换签名后要求用户覆盖安装。是否改签名应作为独立迁移安排。
 - 保留签名私钥，不能随便换签名；不要把私钥、密码或令牌提交到公开仓库。
 - 如果改变数据库结构，追加并测试 Migration，不要用清库迁移兜底。
-- **内置 API Key 已移出源码**：`AiConfig.DEFAULT_API_KEY` 改由 `app/build.gradle.kts` 在构建期读取 `local.properties` 的 `DEEPSEEK_API_KEY` 注入 `BuildConfig`，该文件已被 `.gitignore` 排除。源码仓库不含 Key。
-  - 个人构建若注入 Key，反编译仍有可能提取；公开发布必须使用 `-PpublicRelease=true`，由用户安装后自填。
-- 发布用的 `local.properties` 只在本机存在；他人 clone 源码后未配置该字段也能构建，只是 AI 功能需在设置页手动填 Key。
+- AI 服务配置、源码构建与安装包验收分别检查；不能因 APK 能构建或发布就宣称默认 AI 在用户网络可用。用户可在「设置 → 数据 → AI 服务」配置个人 DeepSeek Key 或兼容供应商，已有选择与配置应保留。
+- 真实 API Key、签名私钥、账号密码与部署令牌不进入公开源码或文档。本机 SDK 配置使用被忽略的 `local.properties`，克隆源码后可按 README 构建。
+- 对 1.1.0 安装包核对包名、versionName、versionCode 和签名，再分别验证首装、旧包覆盖安装和 AI 配置；发布 APK、更新说明、公告均使用同一版本。AI 连通结论需要真实目标网络结果支持。
 
 ## 已完成的验证
 

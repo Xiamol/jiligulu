@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -6,7 +8,17 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
-// 共享默认密钥只进入服务端秘密绑定；任何构建变体都不读取或打包本地 API Key。
+// 默认关闭；本地包按需注入，真实值只来自未提交的文件或环境变量。
+val bundleDefaultApiKey = providers.gradleProperty("bundleDefaultApiKey").orNull == "true"
+val privateApiProperties = Properties().apply {
+    if (bundleDefaultApiKey) rootProject.file("local.properties").takeIf { it.isFile }?.inputStream()?.use { load(it) }
+}
+val bundledApiKey = if (bundleDefaultApiKey)
+    providers.environmentVariable("DEEPSEEK_API_KEY").orNull?.trim()?.takeIf { it.isNotEmpty() }
+        ?: privateApiProperties.getProperty("DEEPSEEK_API_KEY", "").trim()
+    else ""
+require(!bundleDefaultApiKey || bundledApiKey.isNotEmpty()) { "本地默认 API Key 未配置" }
+val bundledApiKeyLiteral = "\"" + bundledApiKey.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 android {
     namespace = "com.jiligulu.app"
     compileSdk = 35
@@ -15,8 +27,9 @@ android {
         applicationId = "com.jiligulu.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 26
-        versionName = "1.0.13"
+        versionCode = 27
+        versionName = "1.1.0"
+        buildConfigField("String", "DEFAULT_DEEPSEEK_API_KEY", bundledApiKeyLiteral)
 
     }
 

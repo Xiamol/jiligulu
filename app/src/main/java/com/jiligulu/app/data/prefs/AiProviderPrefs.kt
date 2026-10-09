@@ -1,6 +1,7 @@
 package com.jiligulu.app.data.prefs
 
 import android.content.Context
+import com.jiligulu.app.BuildConfig
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -31,8 +32,8 @@ data class AiProviderState(
 }
 
 /** Separate provider settings; migration never modifies UserPrefs or the build configuration. */
-class AiProviderPrefs internal constructor(private val store: DataStore<Preferences>) {
-    constructor(context: Context) : this(context.applicationContext.aiProviderStore)
+class AiProviderPrefs internal constructor(private val store: DataStore<Preferences>, private val bundledDefaultKey: String = "") {
+    constructor(context: Context) : this(context.applicationContext.aiProviderStore, BuildConfig.DEFAULT_DEEPSEEK_API_KEY)
     private val selectedKey = stringPreferencesKey("selected")
     private val modelKey = stringPreferencesKey("deepseek_model")
     private val deepSeekKey = stringPreferencesKey("deepseek_key")
@@ -91,6 +92,7 @@ class AiProviderPrefs internal constructor(private val store: DataStore<Preferen
         AiProviderEndpoint.validate(profile)
         val key = prefs[if (current.selected == AiProviderId.DEEPSEEK) deepSeekKey else customKey].orEmpty()
         if (current.selected == AiProviderId.DEEPSEEK && key.isBlank()) {
+            if (bundledDefaultKey.isNotBlank()) return AiProviderConnection(profile, bundledDefaultKey)
             val defaultProfile = profile.copy(address = AiConfig.DEFAULT_SERVICE_URL, endpointKind = AiEndpointKind.CHAT_ENDPOINT)
             AiProviderEndpoint.validate(defaultProfile)
             return AiProviderConnection(defaultProfile, "")

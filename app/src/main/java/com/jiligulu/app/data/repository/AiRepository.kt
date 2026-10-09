@@ -182,9 +182,8 @@ class AiRepository(
     }
 
     /**
-     * 设置页自定义的 Key 优先；没填则回落到构建期注入的内置 Key。
-     * 两者都为空说明这个包没有内置 Key（比如源码自行构建时未在 local.properties 配置），
-     * 此时抛出明确提示而不是拿空 Bearer 去撞 401。
+     * 正式调用由 providerPrefs 统一选择供应商及个人/默认配置。
+     * 无 providerPrefs 的旧注入入口只读取个人 Key，不改变其它供应商配置。
      */
     suspend fun effectiveApiKey(): String {
         if (providerPrefs != null) return providerPrefs.connection(userPrefs.apiKeyOverride.first()).apiKey

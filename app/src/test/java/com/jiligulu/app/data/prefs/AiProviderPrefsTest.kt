@@ -64,6 +64,36 @@ class AiProviderPrefsTest {
         }
     }
 
+    @Test fun bundledDefaultUsesOfficialEndpointAfterUpgradeAndClearingPersonalKey() = runBlocking {
+        val file = File(temporary.root, "provider-bundled-upgrade.preferences_pb")
+        withPrefs(file) { prefs, _ -> prefs.saveDeepSeekKey("synthetic-personal-key") }
+        withPrefs(file, bundledDefaultKey = "synthetic-bundled-key") { prefs, _ ->
+            assertEquals("synthetic-personal-key", prefs.connection("").apiKey)
+            prefs.saveDeepSeekKey("")
+            val fallback = prefs.connection("synthetic-old-key-must-not-return")
+            assertEquals(AiConfig.BASE_URL, fallback.profile.endpoint)
+            assertEquals("synthetic-bundled-key", fallback.apiKey)
+            assertEquals("", prefs.savedKey(AiProviderId.DEEPSEEK))
+            prefs.saveCustom(custom(), "")
+            prefs.select(AiProviderId.CUSTOM)
+            assertEquals("", prefs.connection("").apiKey)
+            assertEquals(custom().endpoint, prefs.connection("").profile.endpoint)
+        }
+        withPrefs(file, bundledDefaultKey = "synthetic-bundled-key") { prefs, _ ->
+            prefs.select(AiProviderId.DEEPSEEK)
+            assertEquals("synthetic-bundled-key", prefs.connection("").apiKey)
+        }
+    }
+
+    @Test fun freshInstallBundledDefaultDoesNotPersistAsPersonalKey() = runBlocking {
+        withPrefs(bundledDefaultKey = "synthetic-bundled-key") { prefs, _ ->
+            assertEquals(AiConfig.BASE_URL, prefs.connection("").profile.endpoint)
+            assertEquals("synthetic-bundled-key", prefs.connection("").apiKey)
+            assertFalse(prefs.state.first().hasDeepSeekKey)
+            assertEquals("", prefs.savedKey(AiProviderId.DEEPSEEK))
+        }
+    }
+
     @Test fun legacyMigrationIsIdempotentAndOnlyStoresTheLegacyKeyInTheDeepSeekSlot() = runBlocking {
         withPrefs { prefs, _ ->
             prefs.saveCustom(custom(), "synthetic-custom-original")
@@ -167,10 +197,10 @@ class AiProviderPrefsTest {
     }
 
     private fun custom() = AiProviderProfile.custom().copy(name = "Fixture", address = "https://fixture.invalid/v1", model = "fixture-model")
-    private suspend fun withPrefs(file: File = File(temporary.root, "provider-${fileIndex++}.preferences_pb"),
+    private suspend fun withPrefs(file: File = File(temporary.root, "provider-${fileIndex++}.preferences_pb"), bundledDefaultKey: String = "",
         action: suspend (AiProviderPrefs, DataStore<Preferences>) -> Unit) = withTimeout(10_000) {
         val job = SupervisorJob()
         val store = PreferenceDataStoreFactory.create(scope = CoroutineScope(job + Dispatchers.IO), produceFile = { file })
-        try { action(AiProviderPrefs(store), store) } finally { job.cancelAndJoin() }
+        try { action(AiProviderPrefs(store, bundledDefaultKey), store) } finally { job.cancelAndJoin() }
     }
 }

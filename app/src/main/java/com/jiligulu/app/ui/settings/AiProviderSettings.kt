@@ -80,7 +80,7 @@ fun AiProviderSettings() {
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
             val hasKey = if (state.selected == AiProviderId.DEEPSEEK) state.hasDeepSeekKey else state.hasCustomKey
             val usingDefault = state.selected == AiProviderId.DEEPSEEK && !state.hasDeepSeekKey
-            Text(if (usingDefault) "默认 DS API 已启用" else if (hasKey) "密钥已设置" else "未填密钥 · 免鉴权服务可留空",
+            Text(if (usingDefault) "使用默认 DS 配置" else if (hasKey) "密钥已设置" else "未填密钥 · 免鉴权服务可留空",
                 style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         TextButton(onClick = uiTap { editor = state.selected }, modifier = Modifier.testTag("ai-provider-edit")) { Text("编辑") }
@@ -105,7 +105,7 @@ fun AiProviderSettings() {
         Text("自定义仅支持 OpenAI Chat Completions 兼容接口。基础地址会补 /chat/completions，空路径会补 /v1；完整接口按填写地址使用。HTTP 不加密，云端建议 HTTPS，HTTP 可用于你信任的本地服务。")
         Text("不同模型支持的参数与识图能力不同。自定义默认只按提示要求 JSON，不发送 DeepSeek thinking、temperature 或 token 上限；确认服务支持后，可启用 JSON 模式、temperature 和图像输入。")
         Text("密钥仅用于当前设备请求鉴权，不会共享给其它供应商；免鉴权服务可留空。")
-        Text("DeepSeek 留空使用默认 DS 服务，经安全转发请求官方接口，共享密钥不在安装包里。填写自己的密钥后直接连接官方；自定义供应商保持自己的地址和配置。")
+        Text("DeepSeek 留空使用当前安装包的默认配置。填写自己的密钥后优先使用个人密钥并直接连接官方；自定义供应商保持自己的地址和配置。")
     }
 }
 
