@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Rebuild pinned Rapfi Android PIEs with official tools; never invokes Gradle or adb."""
+# Provided under GNU GPL version 3 as Rapfi corresponding build material.
 from pathlib import Path
 import argparse, hashlib, json, shutil, subprocess, urllib.request, zipfile
 
@@ -27,7 +28,7 @@ def extract(archive, destination):
 
 def main():
  parser = argparse.ArgumentParser(description=__doc__)
- parser.add_argument('--cache', type=Path, default=Path('D:/DevCaches/RapfiToolchain'))
+ parser.add_argument('--cache', type=Path, default=Path.home() / '.cache' / 'RapfiToolchain')
  parser.add_argument('--prepare-tools', action='store_true', help='Download and verify official Windows tool archives')
  parser.add_argument('--abi', action='append', choices=['x86_64', 'arm64-v8a'])
  parser.add_argument('--jobs', type=int, default=2)

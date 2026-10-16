@@ -1,0 +1,5 @@
+Original yellow-face emoji (ee_1.png through ee_20.png)
+Source: HyphenateInc/Hyphenate-EaseUI-Android
+Commit: 1af33063ebd0793f1cf1c7640b68e2a74ae04af4
+License: Apache License 2.0; full original LICENSE.txt is included.
+The PNG bytes copied from the user-provided base.apk are identical to the upstream PNG bytes at this commit. Resource names were changed only; images were not modified.
