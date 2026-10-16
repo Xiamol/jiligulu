@@ -8,9 +8,18 @@
 
 已有版本直接覆盖安装，保留本机数据。
 
-界面示意取自发布前预览，收款图为不可支付的测试图片。
-
-![使用手册、来信草稿与自愿支持界面示意](images/preview-1.3.14.jpg)
+<!-- 正式宣传图：应用商店展示图 v2 -->
+<p align="center">
+  <img src="images/promo-1.3.14/01.png" width="32%" alt="对话记账">
+  <img src="images/promo-1.3.14/02.png" width="32%" alt="统计预算">
+  <img src="images/promo-1.3.14/03.png" width="32%" alt="阿噜小窝">
+  <img src="images/promo-1.3.14/04.png" width="32%" alt="愿望储蓄">
+  <img src="images/promo-1.3.14/05.png" width="32%" alt="未来信箱">
+  <img src="images/promo-1.3.14/06.png" width="32%" alt="好友聊天">
+  <img src="images/promo-1.3.14/07.png" width="32%" alt="个性装扮">
+  <img src="images/promo-1.3.14/08.png" width="32%" alt="秘密基地">
+  <img src="images/promo-1.3.14/09.png" width="32%" alt="小六壬">
+</p>
 
 ## 1.3.14 正式版更新
 
