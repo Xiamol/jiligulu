@@ -27,7 +27,7 @@ def extract(archive, destination):
 
 def main():
  parser = argparse.ArgumentParser(description=__doc__)
- parser.add_argument('--cache', type=Path, default=Path('D:/DevCaches/RapfiToolchain'))
+ parser.add_argument('--cache', type=Path, default=Path(__file__).resolve().parents[1] / 'build/rapfi-toolchain')
  parser.add_argument('--prepare-tools', action='store_true', help='Download and verify official Windows tool archives')
  parser.add_argument('--abi', action='append', choices=['x86_64', 'arm64-v8a'])
  parser.add_argument('--jobs', type=int, default=2)

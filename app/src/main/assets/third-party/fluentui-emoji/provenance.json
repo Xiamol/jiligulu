@@ -1,0 +1,478 @@
+{
+  "project": "Microsoft Fluent Emoji",
+  "repository": "https://github.com/microsoft/fluentui-emoji",
+  "revision": "1ffb34c752ecf5d402f04cfb4b392c77f57c54bc",
+  "license": "MIT",
+  "license_url": "https://raw.githubusercontent.com/microsoft/fluentui-emoji/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/LICENSE",
+  "license_sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383",
+  "copyright": "Copyright (c) Microsoft Corporation.",
+  "acquired_on": "2026-10-12",
+  "preparation": "Original transparent 3D PNGs resized to at most 96x96 pixels with Lanczos, then encoded as lossless WebP. No artwork was redrawn or composited.",
+  "archive": "emoji-source-masters-20261012",
+  "source_bytes_total": 897667,
+  "resource_bytes_total": 190676,
+  "assets": [
+    {
+      "id": "classic_smile",
+      "text": "😊",
+      "label": "甜甜笑",
+      "upstream_name": "Smiling face with smiling eyes",
+      "upstream_path": "assets/Smiling face with smiling eyes/3D/smiling_face_with_smiling_eyes_3d.png",
+      "source_url": "https://raw.githubusercontent.com/microsoft/fluentui-emoji/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Smiling%20face%20with%20smiling%20eyes/3D/smiling_face_with_smiling_eyes_3d.png",
+      "source_page_url": "https://github.com/microsoft/fluentui-emoji/blob/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Smiling%20face%20with%20smiling%20eyes/3D/smiling_face_with_smiling_eyes_3d.png",
+      "source_sha256": "73dce77bd423b2531809763025d20faca40d2391fd12dc1fc88a986872d8214a",
+      "source_bytes": 39826,
+      "source_dimensions": [
+        256,
+        256
+      ],
+      "resource": "app/src/main/res/drawable-nodpi/chat_classic_smile.webp",
+      "resource_sha256": "c272a6a3d17fe10deceec32ed59efe92612256cd9b6da72f705bb7a4aad2f19c",
+      "resource_bytes": 8204,
+      "resource_dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "classic_grin",
+      "text": "😀",
+      "label": "开心",
+      "upstream_name": "Grinning face",
+      "upstream_path": "assets/Grinning face/3D/grinning_face_3d.png",
+      "source_url": "https://raw.githubusercontent.com/microsoft/fluentui-emoji/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Grinning%20face/3D/grinning_face_3d.png",
+      "source_page_url": "https://github.com/microsoft/fluentui-emoji/blob/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Grinning%20face/3D/grinning_face_3d.png",
+      "source_sha256": "175d214df45fe18f6f106a9a094b695689d98abe6f343295fcbd690a7ee4f0ab",
+      "source_bytes": 38711,
+      "source_dimensions": [
+        256,
+        256
+      ],
+      "resource": "app/src/main/res/drawable-nodpi/chat_classic_grin.webp",
+      "resource_sha256": "041c3b89a5bbb1ea3a26efc40a36fd376ad47fbba3107ea45b3765e577f9b29e",
+      "resource_bytes": 8772,
+      "resource_dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "classic_laugh",
+      "text": "😆",
+      "label": "大笑",
+      "upstream_name": "Grinning squinting face",
+      "upstream_path": "assets/Grinning squinting face/3D/grinning_squinting_face_3d.png",
+      "source_url": "https://raw.githubusercontent.com/microsoft/fluentui-emoji/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Grinning%20squinting%20face/3D/grinning_squinting_face_3d.png",
+      "source_page_url": "https://github.com/microsoft/fluentui-emoji/blob/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Grinning%20squinting%20face/3D/grinning_squinting_face_3d.png",
+      "source_sha256": "b9a3e632bd3cceb6e3d9233989c7629dc651ea3b970f53a94665cd67b0ea556d",
+      "source_bytes": 41020,
+      "source_dimensions": [
+        256,
+        256
+      ],
+      "resource": "app/src/main/res/drawable-nodpi/chat_classic_laugh.webp",
+      "resource_sha256": "1f47e9722b583a4d979ca63908fb8cc5864b5da0df23ddc9d94f7703a98c3440",
+      "resource_bytes": 8540,
+      "resource_dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "classic_joy",
+      "text": "😂",
+      "label": "笑哭",
+      "upstream_name": "Face with tears of joy",
+      "upstream_path": "assets/Face with tears of joy/3D/face_with_tears_of_joy_3d.png",
+      "source_url": "https://raw.githubusercontent.com/microsoft/fluentui-emoji/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Face%20with%20tears%20of%20joy/3D/face_with_tears_of_joy_3d.png",
+      "source_page_url": "https://github.com/microsoft/fluentui-emoji/blob/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Face%20with%20tears%20of%20joy/3D/face_with_tears_of_joy_3d.png",
+      "source_sha256": "8af20fb0c64c44a8d8c8d047c1410c5e529a37c3158d496832b380198ed2e9c3",
+      "source_bytes": 44153,
+      "source_dimensions": [
+        256,
+        256
+      ],
+      "resource": "app/src/main/res/drawable-nodpi/chat_classic_joy.webp",
+      "resource_sha256": "39f9f6fd85598d09554e8269ec8ab4ac5b8f2ad050787f4c548e6b9a3eedb07c",
+      "resource_bytes": 9148,
+      "resource_dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "classic_wink",
+      "text": "😉",
+      "label": "眨眼",
+      "upstream_name": "Winking face",
+      "upstream_path": "assets/Winking face/3D/winking_face_3d.png",
+      "source_url": "https://raw.githubusercontent.com/microsoft/fluentui-emoji/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Winking%20face/3D/winking_face_3d.png",
+      "source_page_url": "https://github.com/microsoft/fluentui-emoji/blob/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Winking%20face/3D/winking_face_3d.png",
+      "source_sha256": "f14edbaa23f127ee6ee7c4a17b35969405a3c441b3f79c3356cc6406c1bf9ae4",
+      "source_bytes": 43638,
+      "source_dimensions": [
+        256,
+        256
+      ],
+      "resource": "app/src/main/res/drawable-nodpi/chat_classic_wink.webp",
+      "resource_sha256": "b082d0e37dd234780efb80cd07f81078595d07a726879fdb5b5e5b53517150cb",
+      "resource_bytes": 9008,
+      "resource_dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "classic_kiss",
+      "text": "😘",
+      "label": "飞吻",
+      "upstream_name": "Face blowing a kiss",
+      "upstream_path": "assets/Face blowing a kiss/3D/face_blowing_a_kiss_3d.png",
+      "source_url": "https://raw.githubusercontent.com/microsoft/fluentui-emoji/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Face%20blowing%20a%20kiss/3D/face_blowing_a_kiss_3d.png",
+      "source_page_url": "https://github.com/microsoft/fluentui-emoji/blob/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Face%20blowing%20a%20kiss/3D/face_blowing_a_kiss_3d.png",
+      "source_sha256": "5a993350588f243ae13c011b5cb8cc4a5f497d2cc213adfefc5ded40196afe10",
+      "source_bytes": 46353,
+      "source_dimensions": [
+        256,
+        256
+      ],
+      "resource": "app/src/main/res/drawable-nodpi/chat_classic_kiss.webp",
+      "resource_sha256": "0247fa85f9cb6ed2aadd3cddf7b3dedf30b0b74c386dbbeba1584a65ac185fa0",
+      "resource_bytes": 9692,
+      "resource_dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "classic_cool",
+      "text": "😎",
+      "label": "酷酷",
+      "upstream_name": "Smiling face with sunglasses",
+      "upstream_path": "assets/Smiling face with sunglasses/3D/smiling_face_with_sunglasses_3d.png",
+      "source_url": "https://raw.githubusercontent.com/microsoft/fluentui-emoji/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Smiling%20face%20with%20sunglasses/3D/smiling_face_with_sunglasses_3d.png",
+      "source_page_url": "https://github.com/microsoft/fluentui-emoji/blob/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Smiling%20face%20with%20sunglasses/3D/smiling_face_with_sunglasses_3d.png",
+      "source_sha256": "e98cb43a7a531289c82eb57441eb20cd88cb53b895c212d8e3abf05dd2647da1",
+      "source_bytes": 47859,
+      "source_dimensions": [
+        256,
+        256
+      ],
+      "resource": "app/src/main/res/drawable-nodpi/chat_classic_cool.webp",
+      "resource_sha256": "70ee1ff63dbad3257ae5bcd2ee9acce4cf7f175af2054e7cadbf89ba1f746f2b",
+      "resource_bytes": 9964,
+      "resource_dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "classic_tongue",
+      "text": "😝",
+      "label": "调皮",
+      "upstream_name": "Squinting face with tongue",
+      "upstream_path": "assets/Squinting face with tongue/3D/squinting_face_with_tongue_3d.png",
+      "source_url": "https://raw.githubusercontent.com/microsoft/fluentui-emoji/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Squinting%20face%20with%20tongue/3D/squinting_face_with_tongue_3d.png",
+      "source_page_url": "https://github.com/microsoft/fluentui-emoji/blob/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Squinting%20face%20with%20tongue/3D/squinting_face_with_tongue_3d.png",
+      "source_sha256": "e3185f2b4cbcc8f553618c037417c42bdc4c397a7c2372d3379623ca4ad113ff",
+      "source_bytes": 42372,
+      "source_dimensions": [
+        256,
+        256
+      ],
+      "resource": "app/src/main/res/drawable-nodpi/chat_classic_tongue.webp",
+      "resource_sha256": "4825f63eca5e52448dc508ea593f121906aee830abbb8deded32692972792be5",
+      "resource_bytes": 8388,
+      "resource_dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "classic_hug",
+      "text": "🤗",
+      "label": "抱抱",
+      "upstream_name": "Hugging face",
+      "upstream_path": "assets/Hugging face/3D/hugging_face_3d.png",
+      "source_url": "https://raw.githubusercontent.com/microsoft/fluentui-emoji/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Hugging%20face/3D/hugging_face_3d.png",
+      "source_page_url": "https://github.com/microsoft/fluentui-emoji/blob/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Hugging%20face/3D/hugging_face_3d.png",
+      "source_sha256": "2f70a465496f45c146253fc933202a38f4f8e1af8b2a0e2555832456c03f1b2e",
+      "source_bytes": 51316,
+      "source_dimensions": [
+        256,
+        256
+      ],
+      "resource": "app/src/main/res/drawable-nodpi/chat_classic_hug.webp",
+      "resource_sha256": "fed2ef4f0307690513c8ff512e418fd1b03f9a1da20d31a985bec34b3527628c",
+      "resource_bytes": 10308,
+      "resource_dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "classic_think",
+      "text": "🤔",
+      "label": "想一想",
+      "upstream_name": "Thinking face",
+      "upstream_path": "assets/Thinking face/3D/thinking_face_3d.png",
+      "source_url": "https://raw.githubusercontent.com/microsoft/fluentui-emoji/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Thinking%20face/3D/thinking_face_3d.png",
+      "source_page_url": "https://github.com/microsoft/fluentui-emoji/blob/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Thinking%20face/3D/thinking_face_3d.png",
+      "source_sha256": "cd29da5c3886e1e25726d3cf6ff79faa2f0d631b1c0873b115be287d358fc4be",
+      "source_bytes": 45573,
+      "source_dimensions": [
+        256,
+        256
+      ],
+      "resource": "app/src/main/res/drawable-nodpi/chat_classic_think.webp",
+      "resource_sha256": "c8049708a2afc4a5f8e53c75a07cae083fbf9bb1dd07bb4bee02db9501d73ee6",
+      "resource_bytes": 9832,
+      "resource_dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "classic_flushed",
+      "text": "😳",
+      "label": "害羞",
+      "upstream_name": "Flushed face",
+      "upstream_path": "assets/Flushed face/3D/flushed_face_3d.png",
+      "source_url": "https://raw.githubusercontent.com/microsoft/fluentui-emoji/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Flushed%20face/3D/flushed_face_3d.png",
+      "source_page_url": "https://github.com/microsoft/fluentui-emoji/blob/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Flushed%20face/3D/flushed_face_3d.png",
+      "source_sha256": "6058b2f5d07f7e3bfb569cbfc0d156b059bd672b53d467ca66ba3d64f81c5a9e",
+      "source_bytes": 38711,
+      "source_dimensions": [
+        256,
+        256
+      ],
+      "resource": "app/src/main/res/drawable-nodpi/chat_classic_flushed.webp",
+      "resource_sha256": "d20f9689095e56d4bace32c440eb893abbbe4885b0f0776975738aea081c4732",
+      "resource_bytes": 8566,
+      "resource_dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "classic_relief",
+      "text": "😌",
+      "label": "松口气",
+      "upstream_name": "Relieved face",
+      "upstream_path": "assets/Relieved face/3D/relieved_face_3d.png",
+      "source_url": "https://raw.githubusercontent.com/microsoft/fluentui-emoji/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Relieved%20face/3D/relieved_face_3d.png",
+      "source_page_url": "https://github.com/microsoft/fluentui-emoji/blob/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Relieved%20face/3D/relieved_face_3d.png",
+      "source_sha256": "847ffd80565cb5762d524f86c93a75ddd91cb32de5e0992b7f8507855fcf1ab5",
+      "source_bytes": 41774,
+      "source_dimensions": [
+        256,
+        256
+      ],
+      "resource": "app/src/main/res/drawable-nodpi/chat_classic_relief.webp",
+      "resource_sha256": "a97cbd0656ba53f81d4e3d0df2b849c5db348069656cc58b59318c8e3b2c996a",
+      "resource_bytes": 8776,
+      "resource_dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "classic_neutral",
+      "text": "😐",
+      "label": "发呆",
+      "upstream_name": "Neutral face",
+      "upstream_path": "assets/Neutral face/3D/neutral_face_3d.png",
+      "source_url": "https://raw.githubusercontent.com/microsoft/fluentui-emoji/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Neutral%20face/3D/neutral_face_3d.png",
+      "source_page_url": "https://github.com/microsoft/fluentui-emoji/blob/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Neutral%20face/3D/neutral_face_3d.png",
+      "source_sha256": "94e84241cbbf2a5fcceda4c32b0e5a02ea537453791b2bfdadfb99e6891baf9b",
+      "source_bytes": 36807,
+      "source_dimensions": [
+        256,
+        256
+      ],
+      "resource": "app/src/main/res/drawable-nodpi/chat_classic_neutral.webp",
+      "resource_sha256": "685dcab67342db7b0860b80a202ea9bfefde9fa3f60fc7da86434ec69c8c83b2",
+      "resource_bytes": 8122,
+      "resource_dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "classic_zip",
+      "text": "🤐",
+      "label": "保密",
+      "upstream_name": "Zipper-mouth face",
+      "upstream_path": "assets/Zipper-mouth face/3D/zipper-mouth_face_3d.png",
+      "source_url": "https://raw.githubusercontent.com/microsoft/fluentui-emoji/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Zipper-mouth%20face/3D/zipper-mouth_face_3d.png",
+      "source_page_url": "https://github.com/microsoft/fluentui-emoji/blob/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Zipper-mouth%20face/3D/zipper-mouth_face_3d.png",
+      "source_sha256": "6323ff0a73399f14f4f21271d8254ec53abe53e237a771350d574978747ceca9",
+      "source_bytes": 41673,
+      "source_dimensions": [
+        256,
+        256
+      ],
+      "resource": "app/src/main/res/drawable-nodpi/chat_classic_zip.webp",
+      "resource_sha256": "8221e9f9b1c0c9bb200ab891e14394ca5fee8ad16202867b6faf957f553f7e15",
+      "resource_bytes": 9556,
+      "resource_dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "classic_sad",
+      "text": "🙁",
+      "label": "不开心",
+      "upstream_name": "Slightly frowning face",
+      "upstream_path": "assets/Slightly frowning face/3D/slightly_frowning_face_3d.png",
+      "source_url": "https://raw.githubusercontent.com/microsoft/fluentui-emoji/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Slightly%20frowning%20face/3D/slightly_frowning_face_3d.png",
+      "source_page_url": "https://github.com/microsoft/fluentui-emoji/blob/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Slightly%20frowning%20face/3D/slightly_frowning_face_3d.png",
+      "source_sha256": "f24e58a88570814c5dfa7c710b94d4caecba1e9c8022a71bfe6ced35bffae02c",
+      "source_bytes": 37484,
+      "source_dimensions": [
+        256,
+        256
+      ],
+      "resource": "app/src/main/res/drawable-nodpi/chat_classic_sad.webp",
+      "resource_sha256": "0d1b119856c802b55559045e4b62e6302b3b3a623922d28f5513cf08927a2339",
+      "resource_bytes": 8440,
+      "resource_dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "classic_cry",
+      "text": "😭",
+      "label": "大哭",
+      "upstream_name": "Loudly crying face",
+      "upstream_path": "assets/Loudly crying face/3D/loudly_crying_face_3d.png",
+      "source_url": "https://raw.githubusercontent.com/microsoft/fluentui-emoji/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Loudly%20crying%20face/3D/loudly_crying_face_3d.png",
+      "source_page_url": "https://github.com/microsoft/fluentui-emoji/blob/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Loudly%20crying%20face/3D/loudly_crying_face_3d.png",
+      "source_sha256": "9e7b740110d12731e7416c8958b88bfadd75e0e7121ab0245e581e8f70491e02",
+      "source_bytes": 38405,
+      "source_dimensions": [
+        256,
+        256
+      ],
+      "resource": "app/src/main/res/drawable-nodpi/chat_classic_cry.webp",
+      "resource_sha256": "1ca52347f6044e8e48585f30e404f67fc689efa0de365a28907af1e87585600c",
+      "resource_bytes": 7916,
+      "resource_dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "classic_sleep",
+      "text": "😴",
+      "label": "困了",
+      "upstream_name": "Sleeping face",
+      "upstream_path": "assets/Sleeping face/3D/sleeping_face_3d.png",
+      "source_url": "https://raw.githubusercontent.com/microsoft/fluentui-emoji/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Sleeping%20face/3D/sleeping_face_3d.png",
+      "source_page_url": "https://github.com/microsoft/fluentui-emoji/blob/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Sleeping%20face/3D/sleeping_face_3d.png",
+      "source_sha256": "c7d1cd5d04ae7214b6ae92b9802b6c860729c755da0020ccec22c7c8171f18fa",
+      "source_bytes": 44597,
+      "source_dimensions": [
+        256,
+        256
+      ],
+      "resource": "app/src/main/res/drawable-nodpi/chat_classic_sleep.webp",
+      "resource_sha256": "0fd461f7f816d95f0f58e2615106656e5160c3a5294470b00028c716281ed8c0",
+      "resource_bytes": 9320,
+      "resource_dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "classic_angry",
+      "text": "😠",
+      "label": "生气",
+      "upstream_name": "Angry face",
+      "upstream_path": "assets/Angry face/3D/angry_face_3d.png",
+      "source_url": "https://raw.githubusercontent.com/microsoft/fluentui-emoji/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Angry%20face/3D/angry_face_3d.png",
+      "source_page_url": "https://github.com/microsoft/fluentui-emoji/blob/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Angry%20face/3D/angry_face_3d.png",
+      "source_sha256": "7e1ae11f16a882e61391c42d860632525290d11d7e9bb5e8ecab02f63d305414",
+      "source_bytes": 39074,
+      "source_dimensions": [
+        256,
+        256
+      ],
+      "resource": "app/src/main/res/drawable-nodpi/chat_classic_angry.webp",
+      "resource_sha256": "d980e1addfc058078c9d2881833efef632b7f8c4f49ddd69d4a1f3073b163b44",
+      "resource_bytes": 8936,
+      "resource_dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "classic_party",
+      "text": "🥳",
+      "label": "庆祝",
+      "upstream_name": "Partying face",
+      "upstream_path": "assets/Partying face/3D/partying_face_3d.png",
+      "source_url": "https://raw.githubusercontent.com/microsoft/fluentui-emoji/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Partying%20face/3D/partying_face_3d.png",
+      "source_page_url": "https://github.com/microsoft/fluentui-emoji/blob/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Partying%20face/3D/partying_face_3d.png",
+      "source_sha256": "e01bd94de6b85468f6e59da55d380985c363f6bc300b412d18290f143f7e44a9",
+      "source_bytes": 50583,
+      "source_dimensions": [
+        256,
+        256
+      ],
+      "resource": "app/src/main/res/drawable-nodpi/chat_classic_party.webp",
+      "resource_sha256": "35ccbf1336e6052494124e02e8e12e242cd73e90dd307b481ae39c5b3b7e98b8",
+      "resource_bytes": 10356,
+      "resource_dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "classic_heart",
+      "text": "😍",
+      "label": "喜欢",
+      "upstream_name": "Smiling face with heart-eyes",
+      "upstream_path": "assets/Smiling face with heart-eyes/3D/smiling_face_with_heart-eyes_3d.png",
+      "source_url": "https://raw.githubusercontent.com/microsoft/fluentui-emoji/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Smiling%20face%20with%20heart-eyes/3D/smiling_face_with_heart-eyes_3d.png",
+      "source_page_url": "https://github.com/microsoft/fluentui-emoji/blob/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Smiling%20face%20with%20heart-eyes/3D/smiling_face_with_heart-eyes_3d.png",
+      "source_sha256": "2b5ab00dd73673faa86463eac8787b7fc366935c4d82a54451df33443190b9cc",
+      "source_bytes": 43664,
+      "source_dimensions": [
+        256,
+        256
+      ],
+      "resource": "app/src/main/res/drawable-nodpi/chat_classic_heart.webp",
+      "resource_sha256": "ae2181100a2ef337bdce4b0b2f1cd7d7b54514e6cff8b7b8a1127cb03621b645",
+      "resource_bytes": 9054,
+      "resource_dimensions": [
+        96,
+        96
+      ]
+    },
+    {
+      "id": "classic_plead",
+      "text": "🥺",
+      "label": "拜托",
+      "upstream_name": "Pleading face",
+      "upstream_path": "assets/Pleading face/3D/pleading_face_3d.png",
+      "source_url": "https://raw.githubusercontent.com/microsoft/fluentui-emoji/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Pleading%20face/3D/pleading_face_3d.png",
+      "source_page_url": "https://github.com/microsoft/fluentui-emoji/blob/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets/Pleading%20face/3D/pleading_face_3d.png",
+      "source_sha256": "7dfc89c51118f0adecf886063b5eafce140a613075394ebe22ed9dd2bd9e9c4f",
+      "source_bytes": 44074,
+      "source_dimensions": [
+        256,
+        256
+      ],
+      "resource": "app/src/main/res/drawable-nodpi/chat_classic_plead.webp",
+      "resource_sha256": "f72412d6d63c443cddedca19878bbd9e101640afdfce60841ae26b22d2463f7e",
+      "resource_bytes": 9778,
+      "resource_dimensions": [
+        96,
+        96
+      ]
+    }
+  ]
+}

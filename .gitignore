@@ -21,3 +21,20 @@ tools/sounds_raw/
 tools/sounds_preview/
 
 # Downloaded offline model; reproduced by tools/prepare_voice_model.py.
+
+# Locally downloaded tunnel executable and reproducible optional game packages.
+/.local-tools/*.exe
+/dist/game-components/
+
+# Local temporary work, private diagnostics and delivered binaries/materials.
+/work/
+/deliverables/
+
+# Local agent state, private relay implementation and host metadata.
+/memory/
+/AGENTS.md
+/.local-tools/
+/server/friends-relay/
+/docs/CURRENT.md
+/docs/AGENT_WORKFLOW.md
+/docs/design/

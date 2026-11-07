@@ -21,7 +21,7 @@ Rebuilding on Windows:
 3. In the source checkout use tools/build_rapfi_android.py; it extracts the
    pinned archive, applies the exact Bionic link patch and builds both ABIs.
    python tools/build_rapfi_android.py --prepare-tools
-   A separate cache defaults to D:/DevCaches/RapfiToolchain; SDK paths and
+   A separate cache defaults to <project-root>/build/rapfi-toolchain; SDK paths and
    local.properties are neither read nor modified.
 4. The included build-recipe.py is the same script. For a minimal rebuild
    create tools/build_rapfi_android.py, third_party/rapfi/the source archive,

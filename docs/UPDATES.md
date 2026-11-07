@@ -1,35 +1,21 @@
-# 配置远程更新
+# 应用更新
 
-当前实现是 GitHub Releases 的检查、提示与用户确认下载。应用只读取公开的发行元数据，不涉及账号密码、令牌，也不做静默安装。
+当前正式版本为 **1.3.15 / versionCode 71**，GitHub标签为 `v1.3.15`。
 
-GitHub 并非技术上必需：自己的 HTTPS 服务也能提供版本信息与 APK。此版本先提供 GitHub Releases 适配器，方便个人使用，无需把登录凭据放进应用。
+[下载正式安装包](https://github.com/Xiamol/jiligulu/releases/download/v1.3.15/jiligulu-1.3.15-release.apk) · [更新说明](RELEASE_1_3_15.md)
 
-应用默认更新源为 `Xiamol/jiligulu`。本次版本使用 `v1.1.0`，附件提供 release APK，更新说明见 [1.1.0](RELEASE_1_1_0.md)；远端最新版本以实际检查结果为准。
+在「设置 → 关于 → 检查更新」查看新版。开启自动检查后，冷启动或从后台返回时会检查；内部页面切换不反复请求。失败保留上次成功检查时间，不会把失败当成已检查成功。
 
-## 接通方式
+应用读取 `Xiamol/jiligulu` 的GitHub Releases公开元数据。正式版本、合法的本仓库APK附件才会作为更新；草稿和预发布不会提示为正式新版。下载由浏览器处理，安装须经过Android系统确认，没有静默安装。
 
-1. 在公开仓库的 Releases 发布一个正式版本，标签使用 `v0.5.2` 这样的三段数字格式，附上 APK 和更新说明。草稿、预发布、没有 APK 的版本不会被当作可安装更新。
-2. 默认源由 `UserPrefs.DEFAULT_UPDATE_REPOSITORY` 配置；当前设置页提供检查和自动检查开关。仓库解析器保留 `owner/repository` 与 HTTPS GitHub 地址格式校验。
-3. 点击“检查更新”验证。启用“进入应用时自动检查”后，首次启动及从后台返回前台都会实际检查；不再使用 6 小时旧结论跳过请求。内部页面切换不重复检查，正在进行的请求也不会重复发起。
-4. 自动或手动检查成功后，不论是否发现新版，都会更新“上次成功检查”为本次完成时间。失败或取消保留上次成功时间并显示真实状态，不把失败写成“刚刚检查成功”。
-5. 新版本弹窗或设置卡片的下载按钮打开浏览器。下载后由 Android 系统确认安装，没有静默安装或覆盖用户数据的操作。
+已有版本请直接覆盖安装，**不要先卸载或清数据**。应用包名与原签名保持一致，数据库迁移保留本机数据；账号找回不能替代本机账本、照片和聊天备份。
 
-> 仅当远端标签版本 **高于** 应用当前 `versionName` 时才会提示更新。用与当前同版本的 Release 测试时，界面会正确显示“已是最新”。
+## 维护约定
 
-## 发布约定
+- `versionName`、Release标签、APK文件名、手册和公告统一使用正式版本号；内部预览轮次不作为正式版本发布。
+- `versionCode`高于所有已交付预览，保持原包名和签名。当前附件仅 `jiligulu-1.3.15-release.apk`，另附 `SHA256SUMS.txt`。
+- 发布前核验版本、签名、包内容及已确认预览的覆盖升级；验证与用户验收分别记录，不用测试数量替代实际体验。
+- 公开仓库保留历史源码；当前应用主体和电脑服务不整体公开。更新只提交经过检查的公开文档与必要资源，不上传运行数据、API Key、账号、付款资料、私钥、后台配置或本机验收材料。
+- AI、账号、好友及生活圈在线能力还取决于所选服务和网络；发布安装包不代表这些服务永久在线。个人AI配置继续保留。
 
-- 正式发布时保持 `applicationId` 与签名一致，增加 `versionCode`，并将 `versionName` 更新为与 Release 标签相同的三段版本号。本次为 versionCode 27 / versionName 1.1.0，标签 `v1.1.0`，高于 1.0.0、1.0.1 和 1.0.13。
-- 应用代码、README、内置使用手册、Release 标签、APK 文件名与公告中的本次版本应统一为 1.1.0。历史发布与本地验收文档保留原版本，不能通过改历史版本号代替新的发布说明。
-- 正式版本名按用户明确指定的版本发布；内部测试轮次写入预览文件名或验收记录，不自动转换成连续正式小版本。发布前同步检查手册、公告、README、版本说明与下载链接。
-- 当前 release 构建沿用既有 debug 签名，以兼容已安装版本；不能单独切换签名后要求用户覆盖安装。是否改签名应作为独立迁移安排。
-- 保留签名私钥，不能随便换签名；不要把私钥、密码或令牌提交到公开仓库。
-- 如果改变数据库结构，追加并测试 Migration，不要用清库迁移兜底。
-- AI 服务配置、源码构建与安装包验收分别检查；不能因 APK 能构建或发布就宣称默认 AI 在用户网络可用。用户可在「设置 → 数据 → AI 服务」配置个人 DeepSeek Key 或兼容供应商，已有选择与配置应保留。
-- 真实 API Key、签名私钥、账号密码与部署令牌不进入公开源码或文档。本机 SDK 配置使用被忽略的 `local.properties`，克隆源码后可按 README 构建。
-- 对 1.1.0 安装包核对包名、versionName、versionCode 和签名，再分别验证首装、旧包覆盖安装和 AI 配置；发布 APK、更新说明、公告均使用同一版本。AI 连通结论需要真实目标网络结果支持。
-
-## 已完成的验证
-
-2026-09-21：以匿名方式（不带任何凭据）请求 `releases/latest`，返回 200；解析结果 `tag_name=v0.5.1`、`draft=false`、`prerelease=false`、附件 `jiligulu-0.5.1-debug.apk`（34,696,098 字节），`browser_download_url` 满足应用侧的 host 与路径校验；该下载链接匿名请求返回 200，MIME 为 `application/vnd.android.package-archive`。
-
-实现参考：[GitHub Releases API](https://docs.github.com/en/rest/releases/releases#get-the-latest-release)。Google Play 的应用内更新是另一套适用于 Play 分发的方案，见 [Android 官方说明](https://developer.android.com/guide/playcore/in-app-updates)。
+GitHub更新失败时，可稍后重试，或从[Releases页面](https://github.com/Xiamol/jiligulu/releases)下载。应用不会要求输入GitHub密码或令牌。
