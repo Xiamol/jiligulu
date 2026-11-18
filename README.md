@@ -2,9 +2,11 @@
 
 一只会陪你记账、收好回忆的糯云团。聊天记一笔，夹一张生活照片，再去阿噜的小窝坐坐。
 
-**1.3.15 · Android 8.0及以上**
+**1.3.16 · Android 8.0及以上**
 
-[下载安装](https://github.com/Xiamol/jiligulu/releases/tag/v1.3.15) · [本次更新](docs/RELEASE_1_3_15.md) · [反馈与建议](https://github.com/Xiamol/jiligulu/issues)
+[下载安装](https://github.com/Xiamol/jiligulu/releases/tag/v1.3.16) · [本次更新](docs/RELEASE_1_3_16.md) · [反馈与建议](https://github.com/Xiamol/jiligulu/issues)
+
+新版衣橱里的「比奇堡晴日」可以免费答题领取。答对一次，就能永久拥有主题、动态气泡、聊天背景和头像挂件。
 
 - **把账记清楚**：文字、账单图片、手动填写与悬浮截图，先整理草稿，确认后入账；分类、预算和年度账单帮你慢慢看懂收支。
 - **把日子收起来**：愿望瓶、未来信箱、生活纪念册、小签和收藏，给喜欢的瞬间留个位置。
